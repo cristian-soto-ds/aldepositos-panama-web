@@ -2,7 +2,7 @@
 
 import React, { ReactNode, useState } from "react";
 import { LogOut, Menu, Ship, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch } from "lucide-react";
-import { supabase } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 type ControlPanelLayoutProps = {

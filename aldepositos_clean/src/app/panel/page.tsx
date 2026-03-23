@@ -2,8 +2,16 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
-import { FileText, Hammer, Plane, Truck, PackageSearch } from "lucide-react";
+import {
+  supabase,
+  insertTask,
+  insertTasks,
+  updateTask,
+  deleteTaskById,
+} from "@/lib/supabase";
+import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
+import type { Task } from "@/lib/types/task";
+import { Hammer, Plane } from "lucide-react";
 import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { QuickInventoryEntry } from "@/components/control-panel/QuickInventoryEntry";
@@ -16,14 +24,14 @@ import { ContainerReportsModule } from "@/components/control-panel/ContainerRepo
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 
-type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
-
 export default function PanelPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState("dashboard");
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const { tasks, setTasks, reloadTasks, tasksLoading } = useSupabaseTasks({
+    enabled: !!userEmail,
+  });
   const [containerToEdit, setContainerToEdit] = useState<{
     loadedIds: string[];
     containerInfo: {
@@ -60,8 +68,9 @@ export default function PanelPage() {
     checkSession();
   }, [router]);
 
-  const handleImport = (newTasks: Task[]) => {
+  const handleImport = async (newTasks: Task[]) => {
     const today = new Date().toISOString().split("T")[0]!;
+    let normalized: Task[] = [];
     setTasks((prev) => {
       const existingRAs = new Set(
         prev.map((t) => String(t.ra || "").trim().toUpperCase()),
@@ -75,46 +84,72 @@ export default function PanelPage() {
 
       if (dedupedNew.length === 0) return prev;
 
-      return [
-        ...prev,
-        ...dedupedNew.map((t) => ({
-          ...t,
-          date: t.date || today,
-          dispatched: t.dispatched ?? false,
-          containerDraft: t.containerDraft ?? false,
-        })),
-      ];
+      normalized = dedupedNew.map((t) => ({
+        ...t,
+        date: t.date || today,
+        dispatched: t.dispatched ?? false,
+        containerDraft: t.containerDraft ?? false,
+      }));
+      return [...prev, ...normalized];
     });
-  };
 
-  const handleUpdateTask = (updatedTask: Task) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
-    );
-  };
-
-  const handleDeleteTask = (idToRemove: string) => {
-    // eslint-disable-next-line no-alert
-    if (window.confirm("¿Estás seguro de que deseas eliminar este RA?")) {
-      setTasks((prev) => prev.filter((t) => t.id !== idToRemove));
+    if (normalized.length === 0) return;
+    try {
+      await insertTasks(normalized);
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert(
+        "No se pudieron guardar las órdenes importadas en Supabase. Revisa tu conexión y la tabla `tasks`.",
+      );
     }
   };
 
-  const handleTransferTask = (
+  const handleUpdateTask = async (updatedTask: Task) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
+    );
+    try {
+      await updateTask(updatedTask);
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo guardar el cambio en Supabase.");
+      void reloadTasks();
+    }
+  };
+
+  const handleDeleteTask = async (idToRemove: string) => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este RA?")) {
+      return;
+    }
+    try {
+      await deleteTaskById(idToRemove);
+      setTasks((prev) => prev.filter((t) => t.id !== idToRemove));
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo eliminar en Supabase.");
+    }
+  };
+
+  const handleTransferTask = async (
     task: Task,
     newType: "quick" | "detailed" | "airway",
   ) => {
     const fromType = (task.type as string) || "quick";
     const adaptedMeasureData = adaptMeasureDataForModule(
-      task.measureData || [],
+      (task.measureData || []) as Record<string, unknown>[],
       fromType,
       newType,
     );
-    handleUpdateTask({
+    const updated: Task = {
       ...task,
       type: newType,
-      measureData: adaptedMeasureData,
-    });
+      measureData: adaptedMeasureData as unknown[],
+    };
+    await handleUpdateTask(updated);
   };
 
   const openManualModal = (
@@ -143,38 +178,49 @@ export default function PanelPage() {
     });
   };
 
-  const handleSaveManualTask = (taskData: Task) => {
+  const handleSaveManualTask = async (taskData: Task) => {
     const today = new Date().toISOString().split("T")[0]!;
-    setTasks((prev) => {
-      const exists = prev.some((t) => t.id === taskData.id);
-      const duplicatedRA = prev.some(
-        (t) =>
-          t.id !== taskData.id &&
-          String(t.ra || "").trim().toUpperCase() ===
-            String(taskData.ra || "").trim().toUpperCase(),
+    const exists = tasks.some((t) => t.id === taskData.id);
+    const duplicatedRA = tasks.some(
+      (t) =>
+        t.id !== taskData.id &&
+        String(t.ra || "").trim().toUpperCase() ===
+          String(taskData.ra || "").trim().toUpperCase(),
+    );
+    if (duplicatedRA) {
+      // eslint-disable-next-line no-alert
+      alert(
+        `⚠️ El RA ${taskData.ra} ya existe en el sistema (ingresado, en proceso o en contenedor).`,
       );
-      if (duplicatedRA) {
-        // eslint-disable-next-line no-alert
-        alert(
-          `⚠️ El RA ${taskData.ra} ya existe en el sistema (ingresado, en proceso o en contenedor).`,
-        );
-        return prev;
-      }
-      const normalized: Task = {
-        ...taskData,
-        date: taskData.date || today,
-        dispatched: taskData.dispatched ?? false,
-        containerDraft: taskData.containerDraft ?? false,
-      };
+      return;
+    }
+    const normalized: Task = {
+      ...taskData,
+      date: taskData.date || today,
+      dispatched: taskData.dispatched ?? false,
+      containerDraft: taskData.containerDraft ?? false,
+    };
+    try {
       if (exists) {
-        return prev.map((t) => (t.id === taskData.id ? normalized : t));
+        await updateTask(normalized);
+      } else {
+        await insertTask(normalized);
       }
-      return [...prev, normalized];
-    });
-    closeManualModal();
+      setTasks((prev) => {
+        if (exists) {
+          return prev.map((t) => (t.id === taskData.id ? normalized : t));
+        }
+        return [...prev, normalized];
+      });
+      closeManualModal();
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo guardar el RA en Supabase.");
+    }
   };
 
-  const handleEditContainer = (container: {
+  const handleEditContainer = async (container: {
     info: {
       type: string;
       consignment: string;
@@ -188,23 +234,40 @@ export default function PanelPage() {
     tasks: Task[];
   }) => {
     const taskIds = container.tasks.map((t) => t.id);
-    setTasks((prev) =>
-      prev.map((t) =>
-        taskIds.includes(t.id)
-          ? {
-              ...t,
-              dispatched: false,
-              containerDraft: true,
-              dispatchInfo: undefined,
-            }
-          : t,
-      ),
-    );
-    setContainerToEdit({
-      loadedIds: taskIds,
-      containerInfo: container.info,
-    });
-    setCurrentView("dispatch");
+    const updated: Task[] = tasks
+      .filter((t) => taskIds.includes(t.id))
+      .map((t) => ({
+        ...t,
+        dispatched: false,
+        containerDraft: true,
+        dispatchInfo: undefined,
+      }));
+    try {
+      if (updated.length > 0) {
+        await Promise.all(updated.map((t) => updateTask(t)));
+      }
+      setTasks((prev) =>
+        prev.map((t) =>
+          taskIds.includes(t.id)
+            ? {
+                ...t,
+                dispatched: false,
+                containerDraft: true,
+                dispatchInfo: undefined,
+              }
+            : t,
+        ),
+      );
+      setContainerToEdit({
+        loadedIds: taskIds,
+        containerInfo: container.info,
+      });
+      setCurrentView("dispatch");
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo actualizar el contenedor en Supabase.");
+    }
   };
 
   if (loading || !userEmail) {
@@ -216,6 +279,14 @@ export default function PanelPage() {
       currentView={currentView}
       setCurrentView={setCurrentView}
     >
+      {tasksLoading && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/70 backdrop-blur-sm">
+          <p className="text-sm font-black text-[#16263F] uppercase tracking-widest">
+            Cargando órdenes…
+          </p>
+        </div>
+      )}
+
       {currentView === "dashboard" && (
         <ControlPanelHome
           tasks={tasks}
@@ -298,4 +369,3 @@ export default function PanelPage() {
     </ControlPanelLayout>
   );
 }
-

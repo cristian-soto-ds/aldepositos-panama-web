@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Mail, Lock, ArrowRight, Ship, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase";
 
 type LoginFormProps = {
   onSuccess: (email: string) => void;

@@ -13,42 +13,7 @@ import {
   Plane,
 } from "lucide-react";
 
-import { supabase } from "@/lib/supabase/client";
-
-type Task = {
-  id: string;
-  ra: string;
-  mainClient: string;
-  provider: string;
-  subClient: string;
-  brand: string;
-  expectedBultos: number;
-  originalExpectedBultos: number;
-  expectedCbm: number;
-  expectedWeight: number;
-  notes: string;
-  currentBultos: number;
-  status: string;
-  measureData: any[];
-  weightMode: string;
-  manualTotalWeight: number;
-  type?: "quick" | "detailed" | "airway";
-  // Campos para módulos de despacho / prioridad
-  dispatched?: boolean;
-  containerDraft?: boolean;
-  dispatchInfo?: {
-    type: string;
-    tare?: number;
-    consignment: string;
-    number: string;
-    bl: string;
-    seal1: string;
-    seal2: string;
-    responsible: string;
-    date: string;
-  };
-  date?: string;
-};
+import type { Task } from "@/lib/types/task";
 
 type ControlPanelHomeProps = {
   tasks: Task[];

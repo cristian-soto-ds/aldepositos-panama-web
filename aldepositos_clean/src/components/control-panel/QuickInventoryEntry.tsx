@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -35,8 +35,29 @@ type MeasureRow = {
 };
 
 type WeightMode = "no_weight" | "per_bundle" | "by_reference" | "excel_fixed";
+type AutosaveState = "idle" | "saving" | "saved" | "error";
+
+type QuickDraft = {
+  updatedAt: number;
+  rows: MeasureRow[];
+  weightMode: WeightMode;
+};
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
+const QUICK_AUTOSAVE_MS = 700;
+const quickDraftKey = (taskId: string) => `quick_inventory_draft_v1_${taskId}`;
+
+function hasQuickRequiredData(rows: MeasureRow[]): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    const referencia = String(row.referencia ?? "").trim();
+    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  });
+}
 
 export function QuickInventoryEntry({
   tasks,
@@ -70,13 +91,29 @@ export function QuickInventoryEntry({
         (t.containerDraft === true || t.dispatched === true)
       );
     }
-    return t.status === "pending" && !t.containerDraft && !t.dispatched;
+    return (
+      (t.status === "pending" || t.status === "in_progress") &&
+      !t.containerDraft &&
+      !t.dispatched
+    );
   });
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState<string>("Todos");
   const [weightMode, setWeightMode] = useState<WeightMode>("by_reference");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
+  const [autosaveTick, setAutosaveTick] = useState(0);
+
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingRef = useRef(false);
+  const queuedRef = useRef(false);
+  const queuedHashRef = useRef<string>("");
+  const lastSavedHashRef = useRef<string>("");
+  const activeTaskIdRef = useRef<string | null>(null);
+  const latestRowsRef = useRef<MeasureRow[]>([]);
+  const latestModeRef = useRef<WeightMode>("by_reference");
+  const latestTaskRef = useRef<Task | null>(null);
 
   const groupedTasks = quickTasks.reduce<Record<string, Task[]>>((groups, task) => {
     const client = task.mainClient || "Sin Cliente";
@@ -125,28 +162,61 @@ export function QuickInventoryEntry({
 
   const handleSelectTask = (task: Task) => {
     setSelectedTask(task);
-    if (task.measureData && task.measureData.length > 0) {
-      setMeasureRows(
-        JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[],
-      );
-    } else {
-      setMeasureRows([
-        {
-          id: generateId(),
-          referencia: "",
-          bultos: "",
-          l: "",
-          w: "",
-          h: "",
-          weight: "",
-        },
-      ]);
+    activeTaskIdRef.current = task.id;
+
+    const taskRows =
+      task.measureData && task.measureData.length > 0
+        ? (JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[])
+        : [
+            {
+              id: generateId(),
+              referencia: "",
+              bultos: "",
+              l: "",
+              w: "",
+              h: "",
+              weight: "",
+            },
+          ];
+    const taskWeightMode = ((task.weightMode as WeightMode) || "by_reference") as WeightMode;
+
+    let rowsToUse = taskRows;
+    let modeToUse = taskWeightMode;
+    if (typeof window !== "undefined") {
+      const rawDraft = window.localStorage.getItem(quickDraftKey(task.id));
+      if (rawDraft) {
+        try {
+          const parsed = JSON.parse(rawDraft) as QuickDraft;
+          if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+            rowsToUse = parsed.rows;
+            modeToUse = parsed.weightMode || taskWeightMode;
+          }
+        } catch {
+          // ignore invalid draft
+        }
+      }
     }
-    // Siempre iniciar captura en "Por Referencia".
-    setWeightMode("by_reference");
+
+    setMeasureRows(rowsToUse);
+    setWeightMode(modeToUse);
+    latestRowsRef.current = rowsToUse;
+    latestModeRef.current = modeToUse;
+    latestTaskRef.current = task;
+    lastSavedHashRef.current = JSON.stringify({
+      rows: rowsToUse,
+      weightMode: modeToUse,
+    });
+    setAutosaveState("idle");
   };
 
-  const clearTask = () => setSelectedTask(null);
+  const clearTask = () => {
+    setSelectedTask(null);
+    activeTaskIdRef.current = null;
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+  };
 
   const addRow = () =>
     setMeasureRows((prev) => [
@@ -175,17 +245,116 @@ export function QuickInventoryEntry({
 
   const updateWeightMode = (mode: WeightMode) => {
     setWeightMode(mode);
-    if (selectedTask) {
-      onUpdateTask({ ...selectedTask, weightMode: mode });
+  };
+
+  const persistQuickDraft = (taskId: string, rows: MeasureRow[], mode: WeightMode) => {
+    if (typeof window === "undefined") return;
+    const draft: QuickDraft = {
+      updatedAt: Date.now(),
+      rows: JSON.parse(JSON.stringify(rows)) as MeasureRow[],
+      weightMode: mode,
+    };
+    window.localStorage.setItem(quickDraftKey(taskId), JSON.stringify(draft));
+  };
+
+  const runAutosave = async (
+    task: Task,
+    rows: MeasureRow[],
+    mode: WeightMode,
+    hash: string,
+  ) => {
+    if (isSavingRef.current) {
+      queuedRef.current = true;
+      queuedHashRef.current = hash;
+      return;
+    }
+    isSavingRef.current = true;
+    setAutosaveState("saving");
+
+    const totalsBultos = rows.reduce(
+      (a, b) => a + (parseFloat(String(b.bultos)) || 0),
+      0,
+    );
+    const originalExpected = task.originalExpectedBultos || task.expectedBultos;
+    const isCompleted =
+      totalsBultos >= task.expectedBultos && hasQuickRequiredData(rows);
+
+    const updatedTask: Task = {
+      ...task,
+      measureData: JSON.parse(JSON.stringify(rows)),
+      currentBultos: totalsBultos,
+      weightMode: mode,
+      status: isCompleted ? "completed" : "in_progress",
+      originalExpectedBultos: originalExpected,
+      manualTotalWeight:
+        task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+    };
+
+    try {
+      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+      if (activeTaskIdRef.current === task.id) {
+        setSelectedTask(updatedTask);
+      }
+      lastSavedHashRef.current = hash;
+      setAutosaveState("saved");
+      setAutosaveTick((v) => v + 1);
+    } catch {
+      setAutosaveState("error");
+    } finally {
+      isSavingRef.current = false;
+      if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
+        queuedRef.current = false;
+        const latestHash =
+          queuedHashRef.current ||
+          JSON.stringify({
+            rows: latestRowsRef.current,
+            weightMode: latestModeRef.current,
+          });
+        queuedHashRef.current = "";
+        if (latestTaskRef.current) {
+          await runAutosave(
+            latestTaskRef.current,
+            latestRowsRef.current,
+            latestModeRef.current,
+            latestHash,
+          );
+        }
+      }
     }
   };
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    latestRowsRef.current = measureRows;
+    latestModeRef.current = weightMode;
+    latestTaskRef.current = selectedTask;
+    const hash = JSON.stringify({ rows: measureRows, weightMode });
+    persistQuickDraft(selectedTask.id, measureRows, weightMode);
+    if (hash === lastSavedHashRef.current) return;
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = setTimeout(() => {
+      void runAutosave(selectedTask, measureRows, weightMode, hash);
+    }, QUICK_AUTOSAVE_MS);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [measureRows, weightMode, selectedTask]);
 
   const saveOrder = () => {
     if (!selectedTask) return;
     const totals = calculateTotals();
     const originalExpected =
       selectedTask.originalExpectedBultos || selectedTask.expectedBultos;
-    const isCompleted = totals.bultos >= selectedTask.expectedBultos;
+    const isCompleted =
+      totals.bultos >= selectedTask.expectedBultos &&
+      hasQuickRequiredData(measureRows);
 
     const updatedTask: Task = {
       ...selectedTask,
@@ -201,12 +370,10 @@ export function QuickInventoryEntry({
     };
 
     onUpdateTask(updatedTask);
-    // eslint-disable-next-line no-alert
-    alert(
-      `✅ Orden guardada.\nEstado: ${
-        isCompleted ? "COMPLETADO" : "PENDIENTE"
-      }`,
-    );
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(quickDraftKey(selectedTask.id));
+    }
+    setAutosaveState("saved");
     clearTask();
   };
 
@@ -405,6 +572,11 @@ export function QuickInventoryEntry({
                       >
                         RA: {t.ra}
                       </h3>
+                      {t.status === "in_progress" && (
+                        <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest">
+                          Pendiente por terminar
+                        </span>
+                      )}
                     </div>
                     <div
                       className={`px-3 py-1.5 rounded-xl text-center border min-w-[3.5rem] shadow-sm flex items-center gap-1.5 ${
@@ -504,9 +676,31 @@ export function QuickInventoryEntry({
           </div>
 
           {t && (
-            <span className="bg-white text-[#16263F] border border-slate-200 px-4 py-2.5 rounded-full text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
-              <Box className="w-4 h-4 text-blue-600" /> RA-{t.ra}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="bg-white text-[#16263F] border border-slate-200 px-4 py-2.5 rounded-full text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
+                <Box className="w-4 h-4 text-blue-600" /> RA-{t.ra}
+              </span>
+              <span
+                key={autosaveTick}
+                className={`px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                  autosaveState === "saving"
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : autosaveState === "saved"
+                      ? "bg-green-50 text-green-700 border-green-200"
+                      : autosaveState === "error"
+                        ? "bg-red-50 text-red-700 border-red-200"
+                        : "bg-slate-50 text-slate-600 border-slate-200"
+                }`}
+              >
+                {autosaveState === "saving"
+                  ? "Autoguardando..."
+                  : autosaveState === "saved"
+                    ? "Guardado"
+                    : autosaveState === "error"
+                      ? "Error al guardar"
+                      : "Listo"}
+              </span>
+            </div>
           )}
         </div>
       </div>

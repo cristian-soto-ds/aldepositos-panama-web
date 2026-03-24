@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -54,6 +54,26 @@ type DetailedInventoryEntryProps = {
 };
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
+const DETAILED_AUTOSAVE_MS = 700;
+const detailedDraftKey = (taskId: string) =>
+  `detailed_inventory_draft_v1_${taskId}`;
+type AutosaveState = "idle" | "saving" | "saved" | "error";
+type DetailedDraft = {
+  updatedAt: number;
+  rows: MeasureRow[];
+};
+
+function hasDetailedRequiredData(rows: MeasureRow[]): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => {
+    const referencia = String(row.referencia ?? "").trim();
+    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  });
+}
 
 export function DetailedInventoryEntry({
   tasks,
@@ -87,12 +107,27 @@ export function DetailedInventoryEntry({
         (t.containerDraft === true || t.dispatched === true)
       );
     }
-    return t.status === "pending" && !t.containerDraft && !t.dispatched;
+    return (
+      (t.status === "pending" || t.status === "partial") &&
+      !t.containerDraft &&
+      !t.dispatched
+    );
   });
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState("Todos");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
+  const [autosaveTick, setAutosaveTick] = useState(0);
+
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSavingRef = useRef(false);
+  const queuedRef = useRef(false);
+  const queuedHashRef = useRef<string>("");
+  const lastSavedHashRef = useRef<string>("");
+  const activeTaskIdRef = useRef<string | null>(null);
+  const latestRowsRef = useRef<MeasureRow[]>([]);
+  const latestTaskRef = useRef<Task | null>(null);
 
   const groupedTasks = detailedTasks.reduce<Record<string, Task[]>>(
     (groups, task) => {
@@ -159,28 +194,55 @@ export function DetailedInventoryEntry({
 
   const handleSelectTask = (task: Task) => {
     setSelectedTask(task);
-    if (task.measureData && task.measureData.length > 0) {
-      setMeasureRows(JSON.parse(JSON.stringify(task.measureData)));
-    } else {
-      setMeasureRows([
-        {
-          id: generateId(),
-          referencia: "",
-          descripcion: "",
-          bultos: "",
-          unidadesPorBulto: "",
-          pesoPorBulto: "",
-          l: "",
-          w: "",
-          h: "",
-        },
-      ]);
+    activeTaskIdRef.current = task.id;
+
+    const taskRows =
+      task.measureData && task.measureData.length > 0
+        ? (JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[])
+        : [
+            {
+              id: generateId(),
+              referencia: "",
+              descripcion: "",
+              bultos: "",
+              unidadesPorBulto: "",
+              pesoPorBulto: "",
+              l: "",
+              w: "",
+              h: "",
+            },
+          ];
+
+    let rowsToUse = taskRows;
+    if (typeof window !== "undefined") {
+      const rawDraft = window.localStorage.getItem(detailedDraftKey(task.id));
+      if (rawDraft) {
+        try {
+          const parsed = JSON.parse(rawDraft) as DetailedDraft;
+          if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+            rowsToUse = parsed.rows;
+          }
+        } catch {
+          // ignore invalid draft
+        }
+      }
     }
+
+    setMeasureRows(rowsToUse);
+    latestRowsRef.current = rowsToUse;
+    latestTaskRef.current = task;
+    lastSavedHashRef.current = JSON.stringify({ rows: rowsToUse });
+    setAutosaveState("idle");
   };
 
   const clearTask = () => {
     setSelectedTask(null);
     setMeasureRows([]);
+    activeTaskIdRef.current = null;
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
   };
 
   const addRow = () => {
@@ -212,13 +274,102 @@ export function DetailedInventoryEntry({
     );
   };
 
+  const persistDetailedDraft = (taskId: string, rows: MeasureRow[]) => {
+    if (typeof window === "undefined") return;
+    const draft: DetailedDraft = {
+      updatedAt: Date.now(),
+      rows: JSON.parse(JSON.stringify(rows)) as MeasureRow[],
+    };
+    window.localStorage.setItem(detailedDraftKey(taskId), JSON.stringify(draft));
+  };
+
+  const runAutosave = async (task: Task, rows: MeasureRow[], hash: string) => {
+    if (isSavingRef.current) {
+      queuedRef.current = true;
+      queuedHashRef.current = hash;
+      return;
+    }
+    isSavingRef.current = true;
+    setAutosaveState("saving");
+
+    let bultos = 0;
+    let weight = 0;
+    let cbm = 0;
+    rows.forEach((row) => {
+      const rowBultos = parseFloat(String(row.bultos ?? 0)) || 0;
+      const rowPesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
+      const l = parseFloat(String(row.l ?? 0)) || 0;
+      const w = parseFloat(String(row.w ?? 0)) || 0;
+      const h = parseFloat(String(row.h ?? 0)) || 0;
+      bultos += rowBultos;
+      weight += rowBultos * rowPesoPorBulto;
+      cbm += ((l * w * h) / 1_000_000) * rowBultos;
+    });
+
+    const originalExpected = task.originalExpectedBultos ?? task.expectedBultos;
+    const isCompleted =
+      bultos >= task.expectedBultos && hasDetailedRequiredData(rows);
+    const updatedTask: Task = {
+      ...task,
+      measureData: JSON.parse(JSON.stringify(rows)),
+      currentBultos: bultos,
+      expectedWeight: weight > 0 ? weight : task.expectedWeight,
+      expectedCbm: cbm > 0 ? parseFloat(cbm.toFixed(2)) : task.expectedCbm,
+      status: isCompleted ? "completed" : "partial",
+      originalExpectedBultos: originalExpected,
+    };
+
+    try {
+      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+      if (activeTaskIdRef.current === task.id) setSelectedTask(updatedTask);
+      lastSavedHashRef.current = hash;
+      setAutosaveState("saved");
+      setAutosaveTick((v) => v + 1);
+    } catch {
+      setAutosaveState("error");
+    } finally {
+      isSavingRef.current = false;
+      if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
+        queuedRef.current = false;
+        const latestHash = queuedHashRef.current || JSON.stringify({ rows: latestRowsRef.current });
+        queuedHashRef.current = "";
+        if (latestTaskRef.current) {
+          await runAutosave(latestTaskRef.current, latestRowsRef.current, latestHash);
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    latestRowsRef.current = measureRows;
+    latestTaskRef.current = selectedTask;
+    const hash = JSON.stringify({ rows: measureRows });
+    persistDetailedDraft(selectedTask.id, measureRows);
+    if (hash === lastSavedHashRef.current) return;
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      void runAutosave(selectedTask, measureRows, hash);
+    }, DETAILED_AUTOSAVE_MS);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [measureRows, selectedTask]);
+
   const saveOrder = () => {
     if (!selectedTask) return;
 
     const { bultos, weight, cbm } = calculateTotals();
     const originalExpected =
       selectedTask.originalExpectedBultos ?? selectedTask.expectedBultos;
-    const isCompleted = bultos >= selectedTask.expectedBultos;
+    const isCompleted =
+      bultos >= selectedTask.expectedBultos &&
+      hasDetailedRequiredData(measureRows);
 
     const updatedTask: Task = {
       ...selectedTask,
@@ -231,12 +382,10 @@ export function DetailedInventoryEntry({
     };
 
     onUpdateTask(updatedTask);
-    // eslint-disable-next-line no-alert
-    alert(
-      `✅ Orden Detallada guardada.\nEstado: ${
-        isCompleted ? "COMPLETADO" : "PENDIENTE"
-      }`,
-    );
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
+    }
+    setAutosaveState("saved");
     clearTask();
   };
 
@@ -445,6 +594,11 @@ export function DetailedInventoryEntry({
                           >
                             RA: {t.ra}
                           </h3>
+                        {t.status === "partial" && (
+                          <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest">
+                            Pendiente por terminar
+                          </span>
+                        )}
                         </div>
                         <div
                           className={`px-3 py-1.5 rounded-xl text-center border min-w-[3.5rem] shadow-sm flex items-center gap-1.5 ${
@@ -513,9 +667,29 @@ export function DetailedInventoryEntry({
             <ArrowLeft className="w-4 h-4" />{" "}
             <span className="hidden md:inline">Volver al listado</span>
           </button>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
             <span className="bg-white text-[#16263F] border border-slate-200 px-6 py-3 rounded-xl text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
               <ClipboardCheck className="w-5 h-5 text-blue-600" /> RA-{t.ra}
+            </span>
+            <span
+              key={autosaveTick}
+              className={`px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                autosaveState === "saving"
+                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                  : autosaveState === "saved"
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : autosaveState === "error"
+                      ? "bg-red-50 text-red-700 border-red-200"
+                      : "bg-slate-50 text-slate-600 border-slate-200"
+              }`}
+            >
+              {autosaveState === "saving"
+                ? "Autoguardando..."
+                : autosaveState === "saved"
+                  ? "Guardado"
+                  : autosaveState === "error"
+                    ? "Error al guardar"
+                    : "Listo"}
             </span>
           </div>
         </div>

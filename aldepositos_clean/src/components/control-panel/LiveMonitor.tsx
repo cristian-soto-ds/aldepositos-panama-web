@@ -87,6 +87,65 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
     return { completed, active, dispatched, priority };
   }, [tasks]);
 
+  const hasAnyRowData = (row: Record<string, unknown>) => {
+    const keys = ["referencia", "bultos", "l", "w", "h"];
+    return keys.some((key) => {
+      const value = row[key];
+      if (value == null) return false;
+      return String(value).trim() !== "";
+    });
+  };
+
+  const isRowCompleteForProgress = (row: Record<string, unknown>) => {
+    const referencia = String(row.referencia ?? "").trim();
+    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  };
+
+  const getRowPartialProgress = (row: Record<string, unknown>) => {
+    const checks = [
+      String(row.referencia ?? "").trim().length > 0,
+      (parseFloat(String(row.bultos ?? 0)) || 0) > 0,
+      (parseFloat(String(row.l ?? 0)) || 0) > 0,
+      (parseFloat(String(row.w ?? 0)) || 0) > 0,
+      (parseFloat(String(row.h ?? 0)) || 0) > 0,
+    ];
+    const filled = checks.filter(Boolean).length;
+    return Math.round((filled / checks.length) * 100);
+  };
+
+  const getTaskProgressPercent = (task: Task): number => {
+    const expected = task.originalExpectedBultos ?? task.expectedBultos ?? 0;
+    const current = task.currentBultos ?? 0;
+    const bultosProgress =
+      expected > 0 ? Math.min(100, Math.round((current / expected) * 100)) : 0;
+
+    const rows = Array.isArray(task.measureData)
+      ? (task.measureData as Record<string, unknown>[])
+      : [];
+    const effectiveRows = rows.filter((row) => hasAnyRowData(row));
+    const dataProgress =
+      effectiveRows.length > 0
+        ? Math.round(
+            effectiveRows.reduce(
+              (acc, row) => acc + getRowPartialProgress(row),
+              0,
+            ) / effectiveRows.length,
+          )
+        : 0;
+
+    // Avance parcial real, pero 100% solo si cumple todos los campos obligatorios.
+    const blended = Math.round(bultosProgress * 0.6 + dataProgress * 0.4);
+    const allRowsComplete =
+      effectiveRows.length > 0 &&
+      effectiveRows.every((row) => isRowCompleteForProgress(row));
+    if (!allRowsComplete && blended >= 100) return 99;
+    return Math.min(100, blended);
+  };
+
   return (
     <div className="w-full h-full min-h-0 flex flex-col animate-fade">
       <div className="max-w-6xl mx-auto w-full h-full min-h-0 flex flex-col">
@@ -237,18 +296,12 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                     </span>
                     <span className="text-xs font-black text-[#16263F]">
                       {(() => {
-                        const totalExpected = displayedTasks.reduce(
-                          (a, b) =>
-                            a + (b.originalExpectedBultos ?? b.expectedBultos ?? 0),
+                        if (displayedTasks.length === 0) return 0;
+                        const sum = displayedTasks.reduce(
+                          (acc, task) => acc + getTaskProgressPercent(task),
                           0,
                         );
-                        const totalCurrent = displayedTasks.reduce(
-                          (a, b) => a + (b.currentBultos ?? 0),
-                          0,
-                        );
-                        return totalExpected > 0
-                          ? Math.round((totalCurrent / totalExpected) * 100)
-                          : 0;
+                        return Math.round(sum / displayedTasks.length);
                       })()}%
                     </span>
                   </div>
@@ -257,18 +310,12 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                       className="bg-green-500 h-1.5 md:h-2 rounded-full"
                       style={{
                         width: `${(() => {
-                          const totalExpected = displayedTasks.reduce(
-                            (a, b) =>
-                              a + (b.originalExpectedBultos ?? b.expectedBultos ?? 0),
+                          if (displayedTasks.length === 0) return 0;
+                          const sum = displayedTasks.reduce(
+                            (acc, task) => acc + getTaskProgressPercent(task),
                             0,
                           );
-                          const totalCurrent = displayedTasks.reduce(
-                            (a, b) => a + (b.currentBultos ?? 0),
-                            0,
-                          );
-                          return totalExpected > 0
-                            ? Math.round((totalCurrent / totalExpected) * 100)
-                            : 0;
+                          return Math.round(sum / displayedTasks.length);
                         })()}%`,
                       }}
                     />
@@ -301,14 +348,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {displayedTasks.map((t) => {
-                      const taskExpected =
-                        t.originalExpectedBultos ?? t.expectedBultos ?? 0;
-                      const taskPercent =
-                        taskExpected > 0
-                          ? Math.round(
-                              ((t.currentBultos ?? 0) / taskExpected) * 100,
-                            )
-                          : 0;
+                      const taskPercent = getTaskProgressPercent(t);
                       const moduleName =
                         t.type === "quick"
                           ? "Rápido"
@@ -320,6 +360,8 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                           ? "Despachado"
                           : t.status === "completed"
                             ? "Completado"
+                            : t.status === "in_progress" || t.status === "partial"
+                              ? "En captura"
                             : t.containerDraft === true
                               ? "En contenedor"
                               : "En proceso";
@@ -328,6 +370,8 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                           ? "bg-blue-100 text-blue-700"
                           : t.status === "completed"
                             ? "bg-green-100 text-green-700"
+                            : t.status === "in_progress" || t.status === "partial"
+                              ? "bg-indigo-100 text-indigo-700"
                             : t.containerDraft === true
                               ? "bg-amber-100 text-amber-700"
                               : "bg-slate-100 text-slate-700";

@@ -1,0 +1,83 @@
+/**
+ * Estilos de impresión exclusivos del módulo REPORTES.
+ * Formato Carta (Letter). Importar solo desde CompletedReportsModule.tsx
+ *
+ * Nota: fecha, URL y título en el borde del papel los controla el navegador.
+ * En Chrome: Más opciones → desactivar "Encabezados y pies de página".
+ */
+
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 6mm;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-scheme: only light;
+  }
+
+  /* Solo el documento del reporte es visible; oculta sidebar, toolbar y resto de UI */
+  body * {
+    visibility: hidden;
+  }
+
+  #reports-print-root,
+  #reports-print-root * {
+    visibility: visible;
+  }
+
+  #reports-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none !important;
+    min-height: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .reports-print-toolbar,
+  .no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  .print-container {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    min-height: 100% !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .print-container:last-of-type {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* Una sola hoja tipo carta: el contenido usa casi todo el ancho útil */
+  .report-document-sheet {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4mm 6mm !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-height: calc(11in - 12mm) !important;
+    max-width: 100% !important;
+    background: #fff !important;
+  }
+}

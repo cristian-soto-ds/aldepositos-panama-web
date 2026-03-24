@@ -25,7 +25,7 @@ export function ControlPanelLayout({
   };
 
   return (
-    <div className="h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-gray-800 overflow-hidden">
+    <div className="h-dvh min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-gray-800 overflow-hidden">
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -34,7 +34,7 @@ export function ControlPanelLayout({
       )}
 
       <aside
-        className={`fixed md:relative z-50 w-64 md:w-72 bg-[#16263F] h-full min-h-screen flex flex-col shadow-2xl transition-transform duration-300 ${
+        className={`fixed md:relative z-50 w-[86vw] max-w-72 md:w-72 bg-[#16263F] h-full min-h-screen flex flex-col shadow-2xl transition-transform duration-300 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
@@ -58,10 +58,7 @@ export function ControlPanelLayout({
           </div>
         </div>
 
-        <nav
-          className="flex-1 p-4 md:p-6 space-y-2 md:space-y-4 overflow-y-auto"
-          style={{ scrollbarWidth: "none" }}
-        >
+        <nav className="flex-1 p-4 md:p-6 space-y-2 md:space-y-4 overflow-y-auto hide-scrollbar">
           <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
             Ingreso de Carga
           </p>
@@ -155,7 +152,7 @@ export function ControlPanelLayout({
         </div>
       </aside>
 
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-slate-50">
+      <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
         <header className="md:hidden bg-[#16263F] text-white p-4 flex justify-between items-center shadow-md z-30 shrink-0">
           <div className="flex items-center gap-3">
             <Ship className="text-blue-400 w-6 h-6" />
@@ -170,7 +167,7 @@ export function ControlPanelLayout({
             <Menu className="w-6 h-6" />
           </button>
         </header>
-        <main className="flex-1 min-h-0 overflow-hidden flex flex-col p-4 md:p-8 relative">
+        <main className="flex-1 min-h-0 overflow-hidden flex flex-col p-3 sm:p-4 md:p-8 relative">
           {children}
         </main>
       </div>
@@ -189,14 +186,14 @@ function NavItem({ icon, text, active, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-4 px-4 md:px-6 py-3 md:py-4 rounded-2xl transition-all duration-300 ${
+      className={`w-full flex items-center gap-3 md:gap-4 px-4 md:px-6 py-3 md:py-4 rounded-2xl transition-all duration-300 text-left ${
         active
           ? "bg-blue-600 text-white font-black shadow-xl md:scale-[1.05]"
           : "text-slate-400 hover:bg-white/5 hover:text-white"
       }`}
     >
       {icon}{" "}
-      <span className="text-xs md:text-sm uppercase tracking-widest font-bold">
+      <span className="text-[11px] md:text-sm uppercase tracking-widest font-bold leading-tight break-words">
         {text}
       </span>
     </button>

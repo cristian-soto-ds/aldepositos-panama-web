@@ -1,6 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import "./reports-print.css";
+import {
+  buildReportPdfFilename,
+  exportReportPdfFromExportRoot,
+  PDF_EXPORT_WIDTH_PX,
+  waitForReportDomReady,
+} from "./reportsPdfExport";
+import type { Task as TaskModel } from "@/lib/types/task";
+import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
 import {
   ArrowLeft,
   Check,
@@ -62,49 +71,69 @@ export function CompletedReportsModule({
     "Todos" | "quick" | "detailed" | "airway"
   >("Todos");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
+  /** Solo el árbol de exportación PDF (off-screen), no la vista en pantalla */
+  const pdfExportLayoutRef = useRef<HTMLDivElement>(null);
+
+  let tasksToPrint: Task[] = [];
+  if (singleViewTask) {
+    tasksToPrint = [singleViewTask];
+  } else if (isViewingReports && selectedReportIds.length > 0) {
+    tasksToPrint = completedTasks.filter((t) =>
+      selectedReportIds.includes(t.id),
+    );
+  }
+
+  const reportViewId = singleViewTask
+    ? singleViewTask.id
+    : isViewingReports && selectedReportIds.length > 0
+      ? [...selectedReportIds].sort().join("|")
+      : "";
+
+  const titleRa =
+    singleViewTask?.ra ??
+    (isViewingReports && selectedReportIds.length > 0
+      ? completedTasks.find((t) => selectedReportIds.includes(t.id))?.ra
+      : undefined) ??
+    "";
+
+  useEffect(() => {
+    if (!reportViewId) return;
+    const prev = document.title;
+    document.title = `Reporte RA-${titleRa} | Aldepositos`;
+    return () => {
+      document.title = prev;
+    };
+  }, [reportViewId, titleRa]);
+
+  useEffect(() => {
+    if (!reportViewId) setPdfExportError(null);
+  }, [reportViewId]);
 
   const handlePrint = () => {
     window.print();
   };
 
   const handleDownloadPdf = async () => {
-    if (!singleViewTask && selectedReportIds.length === 0) return;
+    if (tasksToPrint.length === 0) return;
+    setPdfExportError(null);
     setIsDownloadingPdf(true);
     try {
-      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-        import("jspdf"),
-        import("html2canvas"),
-      ]);
-      const doc = new jsPDF("p", "mm", "a4");
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const elements = document.querySelectorAll<HTMLElement>(
-        ".print-container",
-      );
-      let pageIndex = 0;
-      // eslint-disable-next-line no-restricted-syntax
-      for (const el of elements) {
-        // eslint-disable-next-line no-await-in-loop
-        const canvas = await html2canvas(el, {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: "#ffffff",
-        });
-        const imgData = canvas.toDataURL("image/jpeg", 0.92);
-        if (pageIndex > 0) doc.addPage();
-        doc.addImage(imgData, "JPEG", 0, 0, pageWidth, pageHeight);
-        pageIndex += 1;
+      const root = pdfExportLayoutRef.current;
+      if (!root) {
+        const err = new Error("[Reports PDF] pdfExportLayoutRef no montado.");
+        console.error(err);
+        setPdfExportError("No se pudo acceder al contenedor de exportación PDF.");
+        return;
       }
-      const first = singleViewTask
-        ? singleViewTask
-        : completedTasks.find((t) => t.id === selectedReportIds[0]);
-      const name = first ? `reporte-RA-${first.ra}.pdf` : "reportes.pdf";
-      doc.save(name);
+
+      await waitForReportDomReady();
+      const filename = buildReportPdfFilename(tasksToPrint);
+      await exportReportPdfFromExportRoot(root, filename);
     } catch (e) {
-      // eslint-disable-next-line no-alert
-      alert(
-        "No se pudo generar el PDF. Prueba con Imprimir → Guardar como PDF.",
+      console.error("[Reports PDF] Fallo al generar PDF:", e);
+      setPdfExportError(
+        e instanceof Error ? e.message : "Error al generar el PDF.",
       );
     } finally {
       setIsDownloadingPdf(false);
@@ -142,13 +171,6 @@ export function CompletedReportsModule({
     }
   };
 
-  let tasksToPrint: Task[] = [];
-  if (singleViewTask) {
-    tasksToPrint = [singleViewTask];
-  } else if (isViewingReports && selectedReportIds.length > 0) {
-    tasksToPrint = completedTasks.filter((t) => selectedReportIds.includes(t.id));
-  }
-
   if (tasksToPrint.length > 0) {
     const currentDate = new Date().toLocaleDateString("es-PA", {
       year: "numeric",
@@ -157,8 +179,41 @@ export function CompletedReportsModule({
     });
 
     return (
-      <div className="w-full h-full flex flex-col animate-fade bg-slate-100/50 print-wrapper relative">
-        <div className="shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 bg-white no-print shadow-sm z-50 sticky top-0">
+      <div className="w-full h-full flex flex-col animate-fade bg-slate-100/50 relative">
+        {/* Vista exclusiva para PDF: fuera de pantalla, estilos inline (no captura la UI de pantalla) */}
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: "-14000px",
+            top: 0,
+            zIndex: -1,
+            pointerEvents: "none",
+            width: `${PDF_EXPORT_WIDTH_PX}px`,
+            overflow: "visible",
+          }}
+        >
+          <div
+            ref={pdfExportLayoutRef}
+            id="report-pdf-export-root"
+            style={{
+              width: `${PDF_EXPORT_WIDTH_PX}px`,
+              backgroundColor: "#ffffff",
+              boxSizing: "border-box",
+            }}
+          >
+            {tasksToPrint.map((t) => (
+              <ReportPdfExportLayout
+                key={`pdf-export-${t.id}`}
+                task={t as TaskModel}
+                currentDate={currentDate}
+                compact={tasksToPrint.length > 1}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="reports-print-toolbar shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 bg-white shadow-sm z-50 sticky top-0">
           <button
             type="button"
             onClick={() => {
@@ -181,9 +236,10 @@ export function CompletedReportsModule({
             <button
               type="button"
               onClick={handlePrint}
+              title="En el diálogo de impresión desactiva «Encabezados y pies de página» para ocultar fecha y URL."
               className="bg-blue-600 text-white px-4 md:px-6 py-2.5 rounded-lg font-black shadow-md hover:bg-blue-700 transition-colors flex items-center gap-2 uppercase text-[10px] md:text-xs tracking-widest"
             >
-              <Printer className="w-4 h-4" /> Exportar PDF{" "}
+              <Printer className="w-4 h-4" /> Imprimir{" "}
               {tasksToPrint.length > 1 ? `(${tasksToPrint.length})` : ""}
             </button>
             <button
@@ -202,7 +258,19 @@ export function CompletedReportsModule({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 flex flex-col items-center gap-8 print-wrapper">
+        {pdfExportError && (
+          <div
+            role="status"
+            className="shrink-0 px-4 md:px-8 py-2 bg-red-50 border-b border-red-100 text-red-700 text-[11px] font-bold"
+          >
+            {pdfExportError}
+          </div>
+        )}
+
+        <div
+          id="reports-print-root"
+          className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 flex flex-col items-center gap-8"
+        >
           {tasksToPrint.map((t, index) => {
             const measureRows = (t.measureData || []) as any[];
             const isDetailed = t.type === "detailed";
@@ -260,38 +328,39 @@ export function CompletedReportsModule({
             return (
               <div
                 key={t.id}
-                className={`print-container relative w-full max-w-[210mm] min-h-[297mm] bg-white p-[10mm] shadow-2xl md:p-[20mm] ${
+                data-report-sheet
+                className={`print-container report-document-sheet relative w-full max-w-[210mm] min-h-[297mm] bg-white p-[10mm] shadow-xl ring-1 ring-slate-200/80 md:p-[18mm] rounded-sm ${
                   index < tasksToPrint.length - 1
                     ? "break-after-page print-page-break"
                     : ""
                 }`}
               >
-                <div className="border-b-2 border-[#16263F] pb-6 mb-8 flex justify-between items-end">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-[#16263F] p-3 rounded-xl">
-                      <Ship className="text-white w-8 h-8" />
+                <div className="border-b-[3px] border-[#16263F] pb-5 mb-7 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-[#16263F] p-3.5 rounded-lg shadow-inner">
+                      <Ship className="text-white w-9 h-9" strokeWidth={1.75} />
                     </div>
                     <div>
-                      <h1 className="text-2xl font-black text-[#16263F] tracking-tighter leading-none">
+                      <h1 className="text-[26px] font-black text-[#16263F] tracking-tight leading-none">
                         ALDEPOSITOS
                       </h1>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">
-                        Servicios Logísticos Integrales
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.22em] mt-1.5">
+                        Servicios logísticos integrales
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">
-                      Reporte de Ingreso {isDetailed ? "Detallado" : "Rápido"}
+                  <div className="text-left sm:text-right border-l-4 border-blue-600 pl-4 sm:border-0 sm:pl-0">
+                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-wide">
+                      Reporte de ingreso {isDetailed ? "detallado" : "rápido"}
                     </h2>
-                    <p className="text-xs font-bold text-slate-500 mt-1">
-                      FECHA: {currentDate}
+                    <p className="text-[11px] font-bold text-slate-500 mt-1 tabular-nums">
+                      Fecha: {currentDate}
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200 flex flex-col justify-between">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                  <div className="bg-slate-50/80 p-5 rounded-lg border border-slate-200 flex flex-col justify-between">
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                         CLIENTE / CONSIGNATARIO
@@ -309,8 +378,8 @@ export function CompletedReportsModule({
                       </p>
                     </div>
                   </div>
-                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200">
-                    <div className="border-b border-slate-200 pb-3 mb-3">
+                  <div className="bg-slate-50/80 p-5 rounded-lg border border-slate-200">
+                    <div className="border-b border-slate-200/80 pb-3 mb-3">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
                         NÚMERO DE RECEPCIÓN (RA)
                       </p>
@@ -603,9 +672,9 @@ export function CompletedReportsModule({
                   </div>
                 )}
 
-                <div className="absolute bottom-[10mm] left-0 right-0 text-center opacity-50">
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-                    Documento Generado por Warehouse OS v2.0
+                <div className="mt-10 pt-4 border-t border-slate-200 text-center">
+                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.18em]">
+                    Aldepositos · documento generado por Warehouse OS
                   </p>
                 </div>
               </div>
@@ -887,9 +956,6 @@ export function CompletedReportsModule({
                         <div className="text-right">
                           <p className="text-sm md:text-lg font-black text-[#16263F] leading-none">
                             {t.currentBultos} BULTOS
-                          </p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                            {t.expectedCbm} CBM
                           </p>
                         </div>
                         <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors border border-slate-200">

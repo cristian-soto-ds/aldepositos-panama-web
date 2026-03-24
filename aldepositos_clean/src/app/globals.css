@@ -28,6 +28,7 @@
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: #94a3b8 #e2e8f0;
+  overscroll-behavior: contain;
 }
 .custom-scrollbar::-webkit-scrollbar {
   width: 10px;
@@ -46,6 +47,13 @@
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+
+@media (max-width: 768px) {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
 }
 
 /* Quitar flechas de inputs numéricos — solo ingreso manual de datos */

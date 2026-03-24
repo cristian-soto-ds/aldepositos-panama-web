@@ -55,6 +55,17 @@ type DetailedRow = {
   cbm: string;
 };
 
+function normalizeDispatchDescription(...values: unknown[]): string {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (!text) continue;
+    const lower = text.toLowerCase();
+    if (lower === "sin descripción" || lower === "sin descripcion") continue;
+    return text;
+  }
+  return "N/A";
+}
+
 const capacityMap: Record<
   string,
   { name: string; maxCbm: number; tare: number }
@@ -196,17 +207,20 @@ export function DispatchEntry({
   );
 
   const getTaskCbm = (t: Task): number => {
-    if (t.measureData && t.measureData.length > 0 && t.status !== "pending") {
-      const fromMeasures = t.measureData.reduce((acc: number, row: any) => {
-        const l = parseFloat(String(row.l ?? 0)) || 0;
-        const w = parseFloat(String(row.w ?? 0)) || 0;
-        const h = parseFloat(String(row.h ?? 0)) || 0;
-        const b = parseFloat(String(row.bultos ?? 0)) || 0;
-        return acc + ((l * w * h) / 1_000_000) * b;
-      }, 0);
-      if (fromMeasures > 0) return fromMeasures;
-    }
-    return parseFloat(String(t.expectedCbm ?? 0)) || 0;
+    // Regla operativa:
+    // - Pendiente => siempre 0.00 CBM.
+    // - Listo/parcial => usar solo cubicaje del inventario (measureData),
+    //   sin fallback al valor de factura.
+    if (t.status === "pending") return 0;
+    if (!t.measureData || t.measureData.length === 0) return 0;
+
+    return t.measureData.reduce((acc: number, row: any) => {
+      const l = parseFloat(String(row.l ?? 0)) || 0;
+      const w = parseFloat(String(row.w ?? 0)) || 0;
+      const h = parseFloat(String(row.h ?? 0)) || 0;
+      const b = parseFloat(String(row.bultos ?? 0)) || 0;
+      return acc + ((l * w * h) / 1_000_000) * b;
+    }, 0);
   };
 
   const currentCbm = loadedTasks.reduce(
@@ -339,10 +353,7 @@ export function DispatchEntry({
             lineWeight = bultos * perRefWeightPerBundle;
           }
 
-          const desc =
-            t.type === "detailed"
-              ? t.notes || "Sin descripción"
-              : m.descripcion || "Sin descripción";
+          const desc = normalizeDispatchDescription(t.notes, m.descripcion);
 
           rows.push({
             id: `${t.id}-${idx}`,
@@ -375,13 +386,13 @@ export function DispatchEntry({
           desc:
             t.status === "pending"
               ? "PRIORIDAD (PENDIENTE DE INGRESO)"
-              : t.notes || "Carga General (Resumida)",
+              : normalizeDispatchDescription(t.notes),
           bultos:
             t.status === "pending"
               ? t.expectedBultos
               : t.currentBultos || t.expectedBultos,
           weight: String(getTaskWeight(t)),
-          cbm: String(t.expectedCbm ?? 0),
+          cbm: getTaskCbm(t).toFixed(2),
         });
       }
     });
@@ -795,7 +806,7 @@ export function DispatchEntry({
                       return -1;
                     if (a.status !== "pending" && b.status === "pending")
                       return 1;
-                    return (b.expectedCbm || 0) - (a.expectedCbm || 0);
+                    return getTaskCbm(b) - getTaskCbm(a);
                   })
                   .map((t) => (
                     <div
@@ -825,7 +836,7 @@ export function DispatchEntry({
                         </p>
                         <div className="flex gap-2 mt-2 text-[9px] font-black text-[#16263F]">
                           <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                            {t.expectedCbm} CBM
+                            {getTaskCbm(t).toFixed(2)} CBM
                           </span>
                           <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded">
                             {t.status === "pending"

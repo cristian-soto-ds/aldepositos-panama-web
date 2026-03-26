@@ -75,6 +75,29 @@ function hasDetailedRequiredData(rows: MeasureRow[]): boolean {
   });
 }
 
+function detailedRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
+  return rows.some((row) => {
+    const referencia = String(row.referencia ?? "").trim();
+    const descripcion = String(row.descripcion ?? "").trim();
+    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const upb = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
+    const peso = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    return (
+      referencia.length > 0 ||
+      descripcion.length > 0 ||
+      bultos > 0 ||
+      upb > 0 ||
+      peso > 0 ||
+      l > 0 ||
+      w > 0 ||
+      h > 0
+    );
+  });
+}
+
 export function DetailedInventoryEntry({
   tasks,
   onUpdateTask,
@@ -306,16 +329,25 @@ export function DetailedInventoryEntry({
       cbm += ((l * w * h) / 1_000_000) * rowBultos;
     });
 
+    const hasCapture = detailedRowsHaveAnyCapture(rows);
     const originalExpected = task.originalExpectedBultos ?? task.expectedBultos;
     const isCompleted =
-      bultos >= task.expectedBultos && hasDetailedRequiredData(rows);
+      hasCapture &&
+      bultos >= task.expectedBultos &&
+      hasDetailedRequiredData(rows);
+
+    const persistedRows = hasCapture ? rows : [];
+    if (!hasCapture && typeof window !== "undefined") {
+      window.localStorage.removeItem(detailedDraftKey(task.id));
+    }
+
     const updatedTask: Task = {
       ...task,
-      measureData: JSON.parse(JSON.stringify(rows)),
-      currentBultos: bultos,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? bultos : 0,
       expectedWeight: weight > 0 ? weight : task.expectedWeight,
       expectedCbm: cbm > 0 ? parseFloat(cbm.toFixed(2)) : task.expectedCbm,
-      status: isCompleted ? "completed" : "partial",
+      status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
       originalExpectedBultos: originalExpected,
     };
 
@@ -367,17 +399,24 @@ export function DetailedInventoryEntry({
     const { bultos, weight, cbm } = calculateTotals();
     const originalExpected =
       selectedTask.originalExpectedBultos ?? selectedTask.expectedBultos;
+    const hasCapture = detailedRowsHaveAnyCapture(measureRows);
     const isCompleted =
+      hasCapture &&
       bultos >= selectedTask.expectedBultos &&
       hasDetailedRequiredData(measureRows);
 
+    const persistedRows = hasCapture ? measureRows : [];
+    if (!hasCapture && typeof window !== "undefined") {
+      window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
+    }
+
     const updatedTask: Task = {
       ...selectedTask,
-      measureData: JSON.parse(JSON.stringify(measureRows)),
-      currentBultos: bultos,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? bultos : 0,
       expectedWeight: weight > 0 ? weight : selectedTask.expectedWeight,
       expectedCbm: parseFloat(cbm) > 0 ? parseFloat(cbm) : selectedTask.expectedCbm,
-      status: isCompleted ? "completed" : "partial",
+      status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
       originalExpectedBultos: originalExpected,
     };
 
@@ -596,7 +635,7 @@ export function DetailedInventoryEntry({
                           </h3>
                         {t.status === "partial" && (
                           <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest">
-                            Pendiente por terminar
+                            En curso
                           </span>
                         )}
                         </div>

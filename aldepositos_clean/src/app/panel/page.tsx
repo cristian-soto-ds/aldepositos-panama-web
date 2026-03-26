@@ -347,6 +347,7 @@ export default function PanelPage() {
           onUpdateTask={handleUpdateTask}
           containerToEdit={containerToEdit}
           clearEdit={() => setContainerToEdit(null)}
+          userEmail={userEmail}
         />
       )}
 

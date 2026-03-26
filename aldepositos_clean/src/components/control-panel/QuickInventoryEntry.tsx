@@ -59,6 +59,26 @@ function hasQuickRequiredData(rows: MeasureRow[]): boolean {
   });
 }
 
+/** True si hay al menos un dato capturado (si está todo vacío => estado “sin registrar”). */
+function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
+  return rows.some((row) => {
+    const referencia = String(row.referencia ?? "").trim();
+    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    const weight = parseFloat(String(row.weight ?? 0)) || 0;
+    return (
+      referencia.length > 0 ||
+      bultos > 0 ||
+      l > 0 ||
+      w > 0 ||
+      h > 0 ||
+      weight > 0
+    );
+  });
+}
+
 export function QuickInventoryEntry({
   tasks,
   onUpdateTask,
@@ -271,20 +291,28 @@ export function QuickInventoryEntry({
     isSavingRef.current = true;
     setAutosaveState("saving");
 
+    const hasCapture = quickRowsHaveAnyCapture(rows);
     const totalsBultos = rows.reduce(
       (a, b) => a + (parseFloat(String(b.bultos)) || 0),
       0,
     );
     const originalExpected = task.originalExpectedBultos || task.expectedBultos;
     const isCompleted =
-      totalsBultos >= task.expectedBultos && hasQuickRequiredData(rows);
+      hasCapture &&
+      totalsBultos >= task.expectedBultos &&
+      hasQuickRequiredData(rows);
+
+    const persistedRows = hasCapture ? rows : [];
+    if (!hasCapture && typeof window !== "undefined") {
+      window.localStorage.removeItem(quickDraftKey(task.id));
+    }
 
     const updatedTask: Task = {
       ...task,
-      measureData: JSON.parse(JSON.stringify(rows)),
-      currentBultos: totalsBultos,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? totalsBultos : 0,
       weightMode: mode,
-      status: isCompleted ? "completed" : "in_progress",
+      status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
       originalExpectedBultos: originalExpected,
       manualTotalWeight:
         task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
@@ -350,18 +378,25 @@ export function QuickInventoryEntry({
   const saveOrder = () => {
     if (!selectedTask) return;
     const totals = calculateTotals();
+    const hasCapture = quickRowsHaveAnyCapture(measureRows);
     const originalExpected =
       selectedTask.originalExpectedBultos || selectedTask.expectedBultos;
     const isCompleted =
+      hasCapture &&
       totals.bultos >= selectedTask.expectedBultos &&
       hasQuickRequiredData(measureRows);
 
+    const persistedRows = hasCapture ? measureRows : [];
+    if (!hasCapture && typeof window !== "undefined") {
+      window.localStorage.removeItem(quickDraftKey(selectedTask.id));
+    }
+
     const updatedTask: Task = {
       ...selectedTask,
-      measureData: JSON.parse(JSON.stringify(measureRows)),
-      currentBultos: totals.bultos,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? totals.bultos : 0,
       weightMode,
-      status: isCompleted ? "completed" : "in_progress",
+      status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
       originalExpectedBultos: originalExpected,
       manualTotalWeight:
         selectedTask.manualTotalWeight !== undefined
@@ -574,7 +609,7 @@ export function QuickInventoryEntry({
                       </h3>
                       {t.status === "in_progress" && (
                         <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest">
-                          Pendiente por terminar
+                          En curso
                         </span>
                       )}
                     </div>

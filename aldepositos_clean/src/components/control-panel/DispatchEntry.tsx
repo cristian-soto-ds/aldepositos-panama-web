@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
+import { downloadRelacionCargaExcel } from "@/lib/exportRelacionCargaExcel";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -26,6 +27,8 @@ type DispatchEntryProps = {
     containerInfo: ContainerInfo;
   } | null;
   clearEdit: () => void;
+  /** Correo del usuario (fallback “Cargado por” si no hay responsable en el formulario). */
+  userEmail?: string | null;
 };
 
 type ContainerInfo = {
@@ -75,11 +78,35 @@ const capacityMap: Record<
   furgon: { name: "Contenedor 40' HQ", maxCbm: 70, tare: 0 },
 };
 
+/** Inventario cerrado: listo para planificar en relación de carga. */
+function isInventoryComplete(t: Task): boolean {
+  return t.status === "completed";
+}
+
+/** Sin medir / sin ingresar aún. */
+function isAwaitingEntry(t: Task): boolean {
+  return t.status === "pending";
+}
+
+/** Medición iniciada pero no terminada (ingreso rápido o detallado). */
+function isInventoryInProgress(t: Task): boolean {
+  return t.status === "in_progress" || t.status === "partial";
+}
+
+/** Orden en bodega: pendientes primero, luego en proceso, luego listos. */
+function warehouseListRank(t: Task): number {
+  if (isAwaitingEntry(t)) return 0;
+  if (isInventoryInProgress(t)) return 1;
+  if (isInventoryComplete(t)) return 2;
+  return 1;
+}
+
 export function DispatchEntry({
   tasks,
   onUpdateTask,
   containerToEdit,
   clearEdit,
+  userEmail = null,
 }: DispatchEntryProps) {
   const availableTasks = useMemo(
     () => tasks.filter((t) => !t.dispatched),
@@ -240,6 +267,40 @@ export function DispatchEntry({
       ) || 0),
     0,
   );
+
+  const excelPrimaryClient = useMemo(() => {
+    const set = new Set(
+      loadedTasks
+        .map((t) => String(t.mainClient || "").trim())
+        .filter(Boolean),
+    );
+    if (set.size === 0) return "—";
+    if (set.size === 1) return [...set][0]!;
+    return "VARIOS";
+  }, [loadedTasks]);
+
+  const excelTrackingRef = useMemo(() => {
+    const tracking = (containerInfo.bl || "").trim();
+    if (tracking) return tracking;
+    const c = (containerInfo.consignment || "").trim();
+    if (c) return c;
+    const brand = loadedTasks[0]?.brand;
+    if (brand && String(brand).trim()) return String(brand).trim();
+    return "";
+  }, [containerInfo.consignment, containerInfo.bl, loadedTasks]);
+
+  const excelExportedBy = useMemo(() => {
+    const r = (containerInfo.responsible || "").trim();
+    if (r) return r;
+    const mail = (userEmail || "").trim();
+    if (mail) return mail.split("@")[0] || mail;
+    return "Operador";
+  }, [containerInfo.responsible, userEmail]);
+
+  const resolvedTare =
+    typeof containerInfo.tare === "number"
+      ? containerInfo.tare
+      : capacityMap[containerInfo.type]?.tare ?? capacityMap["40"].tare;
 
   const maxCbm = capacityMap[containerInfo.type].maxCbm;
   const percentFilled = maxCbm > 0 ? (currentCbm / maxCbm) * 100 : 0;
@@ -402,40 +463,44 @@ export function DispatchEntry({
 
   const detailedRows = getDetailedRows();
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
     if (detailedRows.length === 0) {
       // eslint-disable-next-line no-alert
       alert("No hay datos para exportar.");
       return;
     }
-    if (typeof window === "undefined" || !(window as any).XLSX) {
+    try {
+      await downloadRelacionCargaExcel({
+        containerInfo,
+        rows: detailedRows.map((r) => ({
+          ra: r.ra,
+          partial: r.partial,
+          provider: r.provider,
+          subClient: r.subClient,
+          brand: r.brand,
+          date: r.date,
+          cbm: r.cbm,
+          weight: r.weight || "0",
+          desc: r.desc,
+          bultos: r.bultos,
+        })),
+        totals: {
+          bultos: currentBultos,
+          cbm: currentCbm,
+          netWeight: currentWeight,
+          tare: resolvedTare,
+          grossWeight: currentWeight + resolvedTare,
+        },
+        primaryClient: excelPrimaryClient,
+        trackingRef: excelTrackingRef,
+        exportedByLabel: excelExportedBy,
+        fileBaseName: `Relacion_Carga_${containerInfo.number || "Draft"}`,
+      });
+    } catch (e) {
+      console.error(e);
       // eslint-disable-next-line no-alert
-      alert(
-        "El exportador a Excel no está disponible. Asegúrate de haber cargado XLSX en el navegador.",
-      );
-      return;
+      alert("No se pudo generar el archivo Excel.");
     }
-    const XLSX = (window as any).XLSX;
-    const ws = XLSX.utils.json_to_sheet(
-      detailedRows.map((r) => ({
-        "R/A": r.ra,
-        PARCIAL: r.partial,
-        "COMPAÑÍA (PROVEEDOR)": r.provider,
-        "CLIENTE (EXPEDIDOR)": r.subClient,
-        BULTOS: r.bultos,
-        MARCA: r.brand,
-        FECHA: r.date,
-        CBM: r.cbm,
-        "PESO (KG)": r.weight,
-        DESCRIPCIÓN: r.desc,
-      })),
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Relacion_Carga");
-    XLSX.writeFile(
-      wb,
-      `Relacion_Carga_${containerInfo.number || "Draft"}.xlsx`,
-    );
   };
 
   if (isPrinting) {
@@ -664,11 +729,11 @@ export function DispatchEntry({
             </div>
             <div className="space-y-1">
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
-                BL
+                Seguimiento
               </label>
               <input
                 type="text"
-                placeholder="Nº BL"
+                placeholder="Nº o referencia de seguimiento"
                 value={containerInfo.bl}
                 onChange={(e) =>
                   setContainerInfo({ ...containerInfo, bl: e.target.value })
@@ -802,10 +867,8 @@ export function DispatchEntry({
                 pendingTasksList
                   .slice()
                   .sort((a, b) => {
-                    if (a.status === "pending" && b.status !== "pending")
-                      return -1;
-                    if (a.status !== "pending" && b.status === "pending")
-                      return 1;
+                    const diff = warehouseListRank(a) - warehouseListRank(b);
+                    if (diff !== 0) return diff;
                     return getTaskCbm(b) - getTaskCbm(a);
                   })
                   .map((t) => (
@@ -813,19 +876,26 @@ export function DispatchEntry({
                       key={t.id}
                       onClick={() => handleToggleLoad(t.id)}
                       className={`p-3 rounded-xl border hover:shadow-md transition-all cursor-pointer group flex items-center justify-between ${
-                        t.status === "pending"
+                        isAwaitingEntry(t)
                           ? "bg-red-50 border-red-200 hover:border-red-400"
-                          : "bg-white border-slate-200 hover:border-blue-400"
+                          : isInventoryComplete(t)
+                            ? "bg-white border-slate-200 hover:border-blue-400"
+                            : "bg-amber-50 border-amber-200 hover:border-amber-400"
                       }`}
                     >
                       <div className="w-full">
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          {t.status === "pending" ? (
+                          {isAwaitingEntry(t) ? (
                             <span className="text-[8px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded uppercase tracking-widest animate-pulse flex items-center gap-1">
                               <AlertCircle size={10} /> PENDIENTE
                             </span>
+                          ) : isInventoryComplete(t) ? (
+                            <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Inventario completo" />
                           ) : (
-                            <span className="w-2 h-2 rounded-full bg-green-500" />
+                            <span className="text-[8px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded uppercase tracking-widest flex items-center gap-1">
+                              <Activity size={10} className="shrink-0" />
+                              {t.status === "partial" ? "PARCIAL" : "EN CURSO"}
+                            </span>
                           )}
                           <p className="text-base font-black text-[#16263F] leading-none">
                             RA: {t.ra}
@@ -839,7 +909,7 @@ export function DispatchEntry({
                             {getTaskCbm(t).toFixed(2)} CBM
                           </span>
                           <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                            {t.status === "pending"
+                            {isAwaitingEntry(t)
                               ? t.expectedBultos
                               : t.currentBultos ?? t.expectedBultos}{" "}
                             BLT
@@ -849,9 +919,11 @@ export function DispatchEntry({
                       <button
                         type="button"
                         className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ml-2 ${
-                          t.status === "pending"
+                          isAwaitingEntry(t)
                             ? "bg-red-100 text-red-500 group-hover:bg-red-600 group-hover:text-white"
-                            : "bg-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white"
+                            : isInventoryComplete(t)
+                              ? "bg-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white"
+                              : "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white"
                         }`}
                       >
                         <ArrowRight size={14} />
@@ -1207,7 +1279,7 @@ function ContainerManifestPrintView({
           </div>
           <div>
             <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
-              B/L
+              Seguimiento
             </p>
             <p className="font-bold text-slate-700 text-xs uppercase">
               {containerInfo.bl || "N/A"}

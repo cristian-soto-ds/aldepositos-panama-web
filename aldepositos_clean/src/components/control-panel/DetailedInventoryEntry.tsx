@@ -6,11 +6,18 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
+  Boxes,
   ClipboardCheck,
   Edit,
+  FileSpreadsheet,
+  FileText,
+  Package,
   Plus,
+  Scale,
   Trash2,
 } from "lucide-react";
+import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
+import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 
 type MeasureRow = {
   id: string;
@@ -151,6 +158,8 @@ export function DetailedInventoryEntry({
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
+  const referenciasExcelRef = useRef<HTMLInputElement>(null);
+  const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
 
   const groupedTasks = detailedTasks.reduce<Record<string, Task[]>>(
     (groups, task) => {
@@ -283,6 +292,80 @@ export function DetailedInventoryEntry({
         h: "",
       },
     ]);
+  };
+
+  const onReferenciasExcelSelected: React.ChangeEventHandler<
+    HTMLInputElement
+  > = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setReferenciasImportBusy(true);
+    try {
+      const { rows, sourceColumnLabel, error } =
+        await parseReferenciasFromExcel(file);
+      if (error) {
+        // eslint-disable-next-line no-alert
+        alert(error);
+        return;
+      }
+      if (rows.length === 0) {
+        // eslint-disable-next-line no-alert
+        alert("No hay referencias para importar.");
+        return;
+      }
+      setMeasureRows((prev) => {
+        const existing = new Set(
+          prev
+            .map((r) => String(r.referencia ?? "").trim().toUpperCase())
+            .filter(Boolean),
+        );
+        const additions: MeasureRow[] = [];
+        let skipped = 0;
+        for (const r of rows) {
+          const ref = r.referencia.trim();
+          if (!ref) continue;
+          const k = ref.toUpperCase();
+          if (existing.has(k)) {
+            skipped += 1;
+            continue;
+          }
+          existing.add(k);
+          additions.push({
+            id: generateId(),
+            referencia: ref,
+            descripcion: "",
+            bultos: r.bultos !== undefined ? String(r.bultos) : "",
+            unidadesPorBulto: "",
+            pesoPorBulto: "",
+            l: "",
+            w: "",
+            h: "",
+          });
+        }
+        if (additions.length === 0) {
+          // eslint-disable-next-line no-alert
+          alert(
+            skipped > 0
+              ? "Todas las referencias del archivo ya están en la tabla."
+              : "No se añadieron filas nuevas.",
+          );
+          return prev;
+        }
+        // eslint-disable-next-line no-alert
+        alert(
+          `Añadidas ${additions.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
+            (skipped ? ` Omitidas ${skipped} duplicada(s).` : ""),
+        );
+        return [...prev, ...additions];
+      });
+    } catch (err) {
+      console.error(err);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo leer el archivo. Usa formato .xlsx o .xls.");
+    } finally {
+      setReferenciasImportBusy(false);
+    }
   };
 
   const deleteRow = (idToRemove: string) => {
@@ -430,8 +513,8 @@ export function DetailedInventoryEntry({
 
   if (!selectedTask) {
     return (
-      <div className="w-full h-full flex flex-col animate-fade">
-        <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade overflow-y-auto">
+        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
           <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 md:px-0">
               <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
@@ -695,9 +778,9 @@ export function DetailedInventoryEntry({
   const faltantes = originalExpected - totals.bultos;
 
   return (
-    <div className="w-full h-full flex flex-col animate-fade">
-      <div className="max-w-[1600px] mx-auto w-full flex flex-col h-full">
-        <div className="shrink-0 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 md:mb-6 px-2 md:px-0">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col">
+        <div className="mb-2 flex shrink-0 flex-col items-start justify-between gap-3 px-2 md:mb-3 md:flex-row md:items-center md:px-0">
           <button
             type="button"
             onClick={clearTask}
@@ -733,160 +816,251 @@ export function DetailedInventoryEntry({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-20">
-          <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[3rem] border border-slate-100 shadow-xl md:shadow-2xl space-y-6 md:space-y-8">
-            <div className="bg-[#F8FAFC] border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-6 shadow-sm">
-              <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-200 pb-3">
-                DATOS ORIGINALES DE CARGA
-              </h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 pb-4 border-b border-slate-200">
-                <div className="col-span-2 lg:col-span-2">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                    PROVEEDOR
-                  </p>
-                  <p className="text-sm font-black text-[#16263F] uppercase truncate">
-                    {t.provider}
-                  </p>
-                </div>
-                <div className="col-span-2 lg:col-span-1">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                    MARCA / TRACKING
-                  </p>
-                  <p className="text-sm font-black text-[#16263F] uppercase truncate">
-                    {t.brand}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                    VOLUMEN EST.
-                  </p>
-                  <p className="text-sm font-black text-slate-700">
-                    {t.expectedCbm ?? 0}{" "}
-                    <span className="text-xs font-bold text-slate-500">m³</span>
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                    PESO EST.
-                  </p>
-                  <p className="text-sm font-black text-slate-700">
-                    {t.expectedWeight ?? 0}{" "}
-                    <span className="text-xs font-bold text-slate-500">kg</span>
-                  </p>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden pr-1">
+          <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1 overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xl sm:p-3 md:shadow-2xl lg:rounded-[3rem]">
+            <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-3">
+              <div className="relative min-w-0 flex-1 overflow-x-hidden rounded-2xl border-2 border-slate-200/90 bg-white shadow-md ring-1 ring-slate-900/[0.04]">
+                <div
+                  className="absolute left-0 top-0 h-full w-1.5 rounded-l-2xl bg-[#16263F]"
+                  aria-hidden
+                />
+                <div className="pl-3 pr-3 pb-3 pt-3 sm:pl-5 sm:pr-5 sm:pb-4 sm:pt-4">
+                  <div className="mb-3 flex flex-wrap items-center gap-2.5 border-b-2 border-slate-100 pb-3 sm:gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#16263F] text-white shadow-md ring-2 ring-[#16263F]/20">
+                      <ClipboardCheck className="h-5 w-5" aria-hidden />
+                    </span>
+                    <h4 className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-[#16263F] sm:text-base">
+                      Datos originales
+                    </h4>
+                    <span className="inline-flex shrink-0 items-center rounded-full border-2 border-blue-200/80 bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-800 shadow-sm sm:text-[11px]">
+                      Ingreso detallado
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+                    <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                        Proveedor / naviera
+                      </p>
+                      <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                        {t.provider}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                        Marca · tracking
+                      </p>
+                      <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                        {t.brand}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:grid-cols-2 sm:gap-3">
+                      <div className="rounded-xl border-2 border-sky-200/80 bg-gradient-to-br from-sky-50 to-sky-100/40 px-3 py-2.5 shadow-sm sm:py-3">
+                        <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-sky-800 sm:text-[11px]">
+                          Volumen en documento
+                        </p>
+                        <p className="flex flex-wrap items-baseline gap-1 text-lg font-black tabular-nums text-sky-950 sm:text-xl">
+                          {t.expectedCbm ?? 0}
+                          <M3Unit
+                            size="md"
+                            className="font-black text-sky-800 text-sm sm:text-base"
+                          />
+                        </p>
+                      </div>
+                      <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 shadow-sm sm:py-3">
+                        <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-600 sm:text-[11px]">
+                          Peso en documento
+                        </p>
+                        <p className="text-lg font-black tabular-nums text-slate-900 sm:text-xl">
+                          {t.expectedWeight ?? 0}
+                          <span className="ml-1 text-sm font-bold text-slate-500 sm:text-base">
+                            kg
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border-2 border-dashed border-amber-400/70 bg-gradient-to-br from-amber-50/95 to-orange-50/50 px-3 py-2.5 shadow-sm sm:mt-4 sm:px-4 sm:py-3">
+                    <p className="mb-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-wide text-amber-900 sm:text-[11px]">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-200/60 text-amber-900">
+                        <FileText className="h-4 w-4" aria-hidden />
+                      </span>
+                      Expedidor · notas
+                    </p>
+                    <p className="text-sm font-semibold leading-relaxed text-amber-950/95 sm:text-[15px]">
+                      {t.subClient}
+                      {t.notes ? (
+                        <>
+                          <span className="mx-2 inline font-light text-amber-700/50">
+                            |
+                          </span>
+                          {t.notes}
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
                 </div>
               </div>
-              <div className="pt-4">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  EXPEDIDOR / NOTAS
-                </p>
-                <p className="text-sm font-medium text-slate-600 italic uppercase">
-                  {t.subClient}{" "}
-                  {t.notes ? (
-                    <>
-                      <span className="mx-2 font-light text-slate-300">|</span>{" "}
-                      {t.notes}
-                    </>
-                  ) : (
-                    ""
-                  )}
-                </p>
+
+              <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:w-[min(100%,24.5rem)] lg:border-l lg:border-slate-200 lg:pl-4">
+                <div className="rounded-xl bg-[#16263F] px-3 py-2 shadow-md ring-1 ring-black/10">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/85">
+                    Captura actual
+                  </p>
+                  <p className="mt-0.5 text-balance text-sm font-black leading-snug text-white sm:text-[0.95rem]">
+                    Bultos · totales líneas
+                  </p>
+                </div>
+                <div className="grid min-w-0 grid-cols-2 gap-2">
+                  <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
+                        <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                      </span>
+                      <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-slate-600 sm:text-[11px]">
+                        Declarados
+                      </p>
+                    </div>
+                    <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-[#16263F] sm:text-[1.85rem]">
+                      {originalExpected}
+                    </p>
+                  </div>
+                  <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-violet-300 bg-gradient-to-b from-violet-50 to-violet-100/40 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
+                        <Boxes className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                      </span>
+                      <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-violet-900 sm:text-[11px]">
+                        Físicos
+                      </p>
+                    </div>
+                    <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-violet-950 sm:text-[1.85rem]">
+                      {totals.bultos}
+                    </p>
+                  </div>
+                  <div
+                    className={`col-span-2 flex min-h-[4.25rem] items-center justify-between gap-3 rounded-xl border-2 px-3 py-2 shadow-sm sm:min-h-[4.5rem] sm:py-2.5 ${
+                      faltantes > 0
+                        ? "border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100/40"
+                        : faltantes < 0
+                          ? "border-red-400 bg-gradient-to-r from-red-50 to-red-100/35"
+                          : "border-emerald-400 bg-gradient-to-r from-emerald-50 to-emerald-100/40"
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl ${
+                          faltantes > 0
+                            ? "bg-amber-600"
+                            : faltantes < 0
+                              ? "bg-red-600"
+                              : "bg-emerald-600"
+                        }`}
+                      >
+                        <Scale className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-900 sm:text-[11px]">
+                          Diferencia
+                        </p>
+                        <p
+                          className={`text-[9px] font-bold uppercase tracking-wide sm:text-[10px] ${
+                            faltantes === 0
+                              ? "text-emerald-800"
+                              : faltantes > 0
+                                ? "text-amber-900"
+                                : "text-red-800"
+                          }`}
+                        >
+                          {faltantes === 0
+                            ? "Cuadra con declarado"
+                            : faltantes > 0
+                              ? "Faltan por contar"
+                              : "Revisar exceso"}
+                        </p>
+                      </div>
+                    </div>
+                    <p
+                      className={`shrink-0 text-3xl font-black tabular-nums leading-none sm:text-[2.25rem] ${
+                        faltantes > 0
+                          ? "text-amber-800"
+                          : faltantes < 0
+                            ? "text-red-600"
+                            : "text-emerald-800"
+                      }`}
+                    >
+                      {faltantes}
+                    </p>
+                  </div>
+                  <div className="col-span-2 rounded-xl border-2 border-slate-200 bg-slate-50/90 px-3 py-2 shadow-sm sm:py-2.5">
+                    <p className="mb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 sm:mb-2 sm:text-[10px]">
+                      Resumen tabla
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase text-slate-500">
+                          Unidades
+                        </p>
+                        <p className="text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                          {totals.unidades}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase text-slate-500">
+                          Volumen
+                        </p>
+                        <p className="flex flex-wrap items-baseline gap-1 text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                          {Number(totals.cbm).toFixed(2)}
+                          <M3Unit size="sm" className="text-xs font-black sm:text-sm" />
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase text-slate-500">
+                          Peso
+                        </p>
+                        <p className="text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                          {totals.weight.toFixed(2)}
+                          <span className="ml-1 text-sm font-bold text-slate-500">
+                            kg
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 pb-4 border-b border-slate-100">
-              <div className="p-4 md:p-6 bg-white rounded-2xl md:rounded-3xl border border-slate-200 flex flex-col justify-center">
-                <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
-                  BULTOS DECLARADOS
-                </p>
-                <p className="text-3xl md:text-4xl font-black text-[#16263F] leading-none">
-                  {originalExpected}
-                </p>
-              </div>
-              <div className="p-4 md:p-6 bg-[#F5F3FF] rounded-2xl md:rounded-3xl border border-[#EDE9FE] flex flex-col justify-center">
-                <p className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-1.5">
-                  BULTOS FÍSICOS
-                </p>
-                <p className="text-3xl md:text-4xl font-black text-purple-700 leading-none">
-                  {totals.bultos}
-                </p>
-              </div>
-              <div
-                className={`p-4 md:p-6 rounded-2xl md:rounded-3xl border flex flex-col justify-center ${
-                  faltantes > 0
-                    ? "bg-orange-50 border-orange-200"
-                    : faltantes < 0
-                      ? "bg-red-50 border-red-200"
-                      : "bg-[#F0FDF4] border-green-200"
-                }`}
-              >
-                <p
-                  className={`text-[9px] font-black uppercase tracking-widest mb-1.5 ${
-                    faltantes > 0
-                      ? "text-orange-600"
-                      : faltantes < 0
-                        ? "text-red-600"
-                        : "text-green-600"
-                  }`}
-                >
-                  DIFERENCIA BODEGA
-                </p>
-                <p
-                  className={`text-3xl md:text-4xl font-black leading-none ${
-                    faltantes > 0
-                      ? "text-orange-600"
-                      : faltantes < 0
-                        ? "text-red-600"
-                        : "text-green-600"
-                  }`}
-                >
-                  {faltantes}
-                </p>
-              </div>
-              <div className="p-4 md:p-6 text-center lg:text-right flex flex-col justify-center">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  RESUMEN ADICIONAL
-                </p>
-                <p className="text-xl md:text-2xl font-black text-[#16263F] leading-none">
-                  {totals.unidades}{" "}
-                  <span className="text-xs font-bold text-slate-400">Und</span>
-                  <span className="text-slate-300 font-light mx-2">|</span>
-                  {Number(totals.cbm).toFixed(2)}{" "}
-                  <span className="text-xs font-bold text-slate-400">m³</span>
-                  <span className="text-slate-300 font-light mx-2">|</span>
-                  {totals.weight.toFixed(2)}{" "}
-                  <span className="text-xs font-bold text-slate-400">kg</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto w-full custom-scrollbar pb-4">
-              <table className="w-full text-sm text-left min-w-[1300px] border-collapse">
-                <thead className="bg-white text-slate-500 font-black uppercase text-[10px] tracking-widest border-b border-slate-200">
+            <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)]">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
+              <table className="w-full min-w-[1300px] border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                   <tr>
-                    <th className="px-2 py-4 w-10 text-center">#</th>
-                    <th className="px-2 py-4 w-32 text-left">REFERENCIA</th>
-                    <th className="px-2 py-4 w-40 text-left">DESCRIPCIÓN</th>
-                    <th className="px-2 py-4 w-20 text-center text-purple-600 bg-purple-50 rounded-tl-lg border-b border-purple-100">
+                    <th className="w-10 px-2 py-2 text-center">#</th>
+                    <th className="w-32 px-2 py-2 text-left">REFERENCIA</th>
+                    <th className="w-40 px-2 py-2 text-left">DESCRIPCIÓN</th>
+                    <th className="w-20 border-b border-purple-100 bg-purple-50 px-2 py-2 text-center text-purple-600">
                       BULTOS
                     </th>
-                    <th className="px-2 py-4 w-24 text-center">UND/BULTO</th>
-                    <th className="px-2 py-4 w-20 text-center bg-slate-50">
+                    <th className="w-24 px-2 py-2 text-center">UND/BULTO</th>
+                    <th className="w-20 bg-slate-50 px-2 py-2 text-center">
                       TOT UND
                     </th>
-                    <th className="px-2 py-4 w-24 text-center">PESO/B (KG)</th>
-                    <th className="px-2 py-4 w-20 text-center bg-slate-50">
+                    <th className="w-24 px-2 py-2 text-center">PESO/B (KG)</th>
+                    <th className="w-20 bg-slate-50 px-2 py-2 text-center">
                       PESO TOT
                     </th>
-                    <th className="px-2 py-4 w-20 text-center">L (CM)</th>
-                    <th className="px-2 py-4 w-20 text-center">W (CM)</th>
-                    <th className="px-2 py-4 w-20 text-center">H (CM)</th>
-                    <th className="px-2 py-4 w-24 text-center bg-slate-50">
+                    <th className="w-20 px-2 py-2 text-center">L (CM)</th>
+                    <th className="w-20 px-2 py-2 text-center">W (CM)</th>
+                    <th className="w-20 px-2 py-2 text-center">H (CM)</th>
+                    <th className="w-24 bg-slate-50 px-2 py-2 text-center">
                       CBM/BULTO
                     </th>
-                    <th className="px-2 py-4 bg-blue-50 text-blue-700 text-center font-black rounded-tr-lg border-b border-blue-100 w-28">
+                    <th className="w-28 border-b border-blue-100 bg-blue-50 px-2 py-2 text-center font-black text-blue-700">
                       CUBICAJE TOT
                     </th>
-                    <th className="px-2 py-4 w-12 text-center" />
+                    <th className="w-12 px-2 py-2 text-center" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -909,48 +1083,48 @@ export function DetailedInventoryEntry({
                     return (
                       <tr
                         key={row.id}
-                        className="group hover:bg-slate-50 transition-colors"
+                        className="group transition-colors odd:bg-white even:bg-slate-50/60 hover:bg-sky-50/80"
                       >
-                        <td className="p-2 text-center font-black text-slate-300 text-sm">
+                        <td className="px-2 py-1 text-center text-sm font-black text-slate-300">
                           {idx + 1}
                         </td>
 
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="text"
                             onChange={(e) =>
                               updateRowValue(row.id, "referencia", e.target.value)
                             }
                             value={row.referencia || ""}
-                            className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg py-2 px-2 text-left font-bold text-[#16263F] text-xs outline-none transition-all"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-xs font-bold text-[#16263F] outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Ref..."
                           />
                         </td>
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="text"
                             onChange={(e) =>
                               updateRowValue(row.id, "descripcion", e.target.value)
                             }
                             value={row.descripcion || ""}
-                            className="w-full bg-white border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg py-2 px-2 text-left font-medium text-slate-600 text-xs outline-none transition-all"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-xs font-medium text-slate-600 outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Desc..."
                           />
                         </td>
 
-                        <td className="p-2 bg-purple-50/50">
+                        <td className="bg-purple-50/50 px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
                               updateRowValue(row.id, "bultos", e.target.value)
                             }
                             value={row.bultos ?? ""}
-                            className="no-spinners w-full bg-white border border-purple-200 focus:border-purple-400 rounded-lg py-2 text-center font-black text-purple-700 text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-purple-200 bg-white py-1 text-center text-sm font-black text-purple-700 outline-none transition-all focus:border-purple-400"
                             placeholder="0"
                           />
                         </td>
 
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
@@ -961,16 +1135,16 @@ export function DetailedInventoryEntry({
                               )
                             }
                             value={row.unidadesPorBulto ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2 text-center font-bold text-[#16263F] text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
                             placeholder="0"
                           />
                         </td>
 
-                        <td className="p-2 text-center font-black text-[#16263F] text-sm bg-slate-50">
+                        <td className="bg-slate-50 px-2 py-1 text-center text-sm font-black text-[#16263F]">
                           {totalUnidades}
                         </td>
 
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             step="0.01"
@@ -982,62 +1156,62 @@ export function DetailedInventoryEntry({
                               )
                             }
                             value={row.pesoPorBulto ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2 text-center font-bold text-[#16263F] text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
                             placeholder="0.0"
                           />
                         </td>
 
-                        <td className="p-2 text-center font-black text-[#16263F] text-sm bg-slate-50">
+                        <td className="bg-slate-50 px-2 py-1 text-center text-sm font-black text-[#16263F]">
                           {pesoTotal.toFixed(2)}
                         </td>
 
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
                               updateRowValue(row.id, "l", e.target.value)
                             }
                             value={row.l ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2 text-center font-bold text-[#16263F] text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
                             placeholder="0"
                           />
                         </td>
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
                               updateRowValue(row.id, "w", e.target.value)
                             }
                             value={row.w ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2 text-center font-bold text-[#16263F] text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
                             placeholder="0"
                           />
                         </td>
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
                               updateRowValue(row.id, "h", e.target.value)
                             }
                             value={row.h ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2 text-center font-bold text-[#16263F] text-sm outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
                             placeholder="0"
                           />
                         </td>
 
-                        <td className="p-2 text-center font-bold text-slate-500 text-xs bg-slate-50">
+                        <td className="bg-slate-50 px-2 py-1 text-center text-xs font-bold text-slate-500">
                           {cbmPorBulto.toFixed(2)}
                         </td>
 
-                        <td className="p-2 text-center font-black text-blue-700 text-sm bg-blue-50/50">
+                        <td className="bg-blue-50/50 px-2 py-1 text-center text-sm font-black text-blue-700">
                           {cubicajeTotal.toFixed(2)}
                         </td>
 
-                        <td className="p-2 text-center">
+                        <td className="px-2 py-1 text-center">
                           <button
                             type="button"
                             onClick={() => deleteRow(row.id)}
-                            className="w-8 h-8 rounded-lg bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-all shadow-sm mx-auto flex items-center justify-center"
+                            className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-400 shadow-sm transition-all hover:bg-red-500 hover:text-white"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -1048,19 +1222,38 @@ export function DetailedInventoryEntry({
                 </tbody>
               </table>
             </div>
+            </div>
 
-            <div className="flex flex-col md:flex-row gap-4 pt-6">
-              <button
-                type="button"
-                onClick={addRow}
-                className="flex-1 py-4 md:py-5 bg-white rounded-full border-2 border-dashed border-slate-300 text-slate-500 font-black hover:bg-slate-50 hover:border-slate-400 hover:text-slate-600 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest"
-              >
-                <Plus className="w-5 h-5" /> AGREGAR LÍNEA ADICIONAL
-              </button>
+            <div className="isolate z-10 mt-1 shrink-0 border-t border-slate-200 bg-white pt-2 shadow-[0_-8px_24px_-10px_rgba(15,23,42,0.1)] md:pt-3">
+              <input
+                ref={referenciasExcelRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={onReferenciasExcelSelected}
+              />
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:border-slate-400 hover:bg-slate-50 hover:text-slate-600 md:rounded-full md:py-4 md:text-sm"
+                >
+                  <Plus className="w-5 h-5" /> AGREGAR LÍNEA ADICIONAL
+                </button>
+                <button
+                  type="button"
+                  disabled={referenciasImportBusy}
+                  onClick={() => referenciasExcelRef.current?.click()}
+                  className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-emerald-800 transition-all hover:border-emerald-500 hover:bg-emerald-50 disabled:opacity-60 md:rounded-full md:py-4 md:text-sm"
+                >
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                  IMPORTAR REFERENCIAS (EXCEL)
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={saveOrder}
-                className="flex-1 py-4 md:py-5 bg-[#0f172a] text-white font-black rounded-full shadow-lg hover:bg-black transition-all active:scale-95 text-sm uppercase tracking-widest flex justify-center items-center gap-2"
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f172a] py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-all hover:bg-black active:scale-95 md:rounded-full md:py-4 md:text-sm"
               >
                 GUARDAR ORDEN DETALLADA <Box className="w-5 h-5" />
               </button>

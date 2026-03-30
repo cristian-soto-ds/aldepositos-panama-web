@@ -11,18 +11,23 @@ import {
 } from "@/lib/supabase";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
 import type { Task } from "@/lib/types/task";
-import { Hammer, Plane } from "lucide-react";
 import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { QuickInventoryEntry } from "@/components/control-panel/QuickInventoryEntry";
 import { DetailedInventoryEntry } from "@/components/control-panel/DetailedInventoryEntry";
 import { CompletedReportsModule } from "@/components/control-panel/CompletedReportsModule";
 import { LiveMonitor } from "@/components/control-panel/LiveMonitor";
-import { ModulePlaceholder } from "@/components/control-panel/ModulePlaceholder";
 import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
 import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
+
+/** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
+const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
+  "quick-entry",
+  "detailed-entry",
+  "airway",
+]);
 
 export default function PanelPage() {
   const router = useRouter();
@@ -287,77 +292,83 @@ export default function PanelPage() {
         </div>
       )}
 
-      {currentView === "dashboard" && (
-        <ControlPanelHome
-          tasks={tasks}
-          onImport={handleImport}
-          openManualModal={() => openManualModal("quick")}
-          userEmail={userEmail}
-        />
-      )}
+      <div
+        className={
+          FULL_HEIGHT_INVENTORY_VIEWS.has(currentView)
+            ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-hidden"
+            : "flex min-h-0 flex-1 flex-col w-full overflow-x-hidden overflow-y-auto"
+        }
+      >
+        {currentView === "dashboard" && (
+          <ControlPanelHome
+            tasks={tasks}
+            onImport={handleImport}
+            openManualModal={() => openManualModal("quick")}
+            userEmail={userEmail}
+          />
+        )}
 
-      {currentView === "quick-entry" && (
-        <QuickInventoryEntry
-          tasks={tasks}
-          onUpdateTask={handleUpdateTask}
-          onDeleteTask={handleDeleteTask}
-          onTransferTask={handleTransferTask}
-          openManualModal={() => openManualModal("quick")}
-          openEditModal={openEditModal}
-        />
-      )}
+        {currentView === "quick-entry" && (
+          <QuickInventoryEntry
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
+            onTransferTask={handleTransferTask}
+            openManualModal={() => openManualModal("quick")}
+            openEditModal={openEditModal}
+          />
+        )}
 
-      {currentView === "detailed-entry" && (
-        <DetailedInventoryEntry
-          tasks={tasks}
-          onUpdateTask={handleUpdateTask}
-          onDeleteTask={handleDeleteTask}
-          onTransferTask={handleTransferTask}
-          openManualModal={() => openManualModal("detailed")}
-          openEditModal={openEditModal}
-        />
-      )}
+        {currentView === "detailed-entry" && (
+          <DetailedInventoryEntry
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
+            onTransferTask={handleTransferTask}
+            openManualModal={() => openManualModal("detailed")}
+            openEditModal={openEditModal}
+          />
+        )}
 
-      {currentView === "airway" && (
-        <ModulePlaceholder
-          moduleTitle={
-            <>
-              <Plane className="text-orange-500 w-5 h-5 md:w-8 md:h-8" /> GUÍA
-              AÉREA
-            </>
-          }
-          icon={<Hammer className="w-16 h-16 text-orange-200" />}
-          subtitle="Módulo en Actualización"
-          description="Esta sección está siendo ajustada. Estará operativa pronto."
-        />
-      )}
+        {currentView === "airway" && (
+          <QuickInventoryEntry
+            moduleType="airway"
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            onDeleteTask={handleDeleteTask}
+            onTransferTask={handleTransferTask}
+            openManualModal={() => openManualModal("airway")}
+            openEditModal={openEditModal}
+          />
+        )}
 
-      {currentView === "reports" && (
-        <CompletedReportsModule
-          tasks={tasks}
-          onDeleteTask={handleDeleteTask}
-          onUpdateTask={handleUpdateTask}
-          onAddTasks={handleImport}
-        />
-      )}
+        {currentView === "reports" && (
+          <CompletedReportsModule
+            tasks={tasks}
+            onDeleteTask={handleDeleteTask}
+            onUpdateTask={handleUpdateTask}
+            onAddTasks={handleImport}
+          />
+        )}
 
-      {currentView === "dispatch" && (
-        <DispatchEntry
-          tasks={tasks}
-          onUpdateTask={handleUpdateTask}
-          containerToEdit={containerToEdit}
-          clearEdit={() => setContainerToEdit(null)}
-          userEmail={userEmail}
-        />
-      )}
+        {currentView === "dispatch" && (
+          <DispatchEntry
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            containerToEdit={containerToEdit}
+            clearEdit={() => setContainerToEdit(null)}
+            userEmail={userEmail}
+          />
+        )}
 
-      {currentView === "container-reports" && (
-        <ContainerReportsModule tasks={tasks} onEditContainer={handleEditContainer} />
-      )}
+        {currentView === "container-reports" && (
+          <ContainerReportsModule tasks={tasks} onEditContainer={handleEditContainer} />
+        )}
 
-      {currentView === "monitor" && (
-        <LiveMonitor tasks={tasks} onDeleteTask={handleDeleteTask} />
-      )}
+        {currentView === "monitor" && (
+          <LiveMonitor tasks={tasks} onDeleteTask={handleDeleteTask} />
+        )}
+      </div>
 
       {modalState.isOpen && (
         <ManualEntryModal

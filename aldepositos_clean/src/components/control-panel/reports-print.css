@@ -9,7 +9,7 @@
 @media print {
   @page {
     size: letter portrait;
-    margin: 6mm;
+    margin: 12mm;
   }
 
   html,
@@ -69,15 +69,20 @@
     break-after: auto;
   }
 
-  /* Una sola hoja tipo carta: el contenido usa casi todo el ancho útil */
+  /* Carta 8.5" × 11": contenido al ancho útil, sin “tarjeta” centrada */
   .report-document-sheet {
     border: none !important;
     box-shadow: none !important;
-    padding: 4mm 6mm !important;
+    padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
-    min-height: calc(11in - 12mm) !important;
-    max-width: 100% !important;
+    max-width: 8.5in !important;
+    min-height: calc(11in - 24mm) !important;
     background: #fff !important;
+  }
+
+  .report-letter-inner {
+    padding: 10mm 12mm !important;
+    box-sizing: border-box !important;
   }
 }

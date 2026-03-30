@@ -10,6 +10,7 @@ import {
 } from "./reportsPdfExport";
 import type { Task as TaskModel } from "@/lib/types/task";
 import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
+import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import {
   ArrowLeft,
   Check,
@@ -20,7 +21,6 @@ import {
   Loader2,
   Printer,
   Search,
-  Ship,
   Zap,
 } from "lucide-react";
 
@@ -329,78 +329,79 @@ export function CompletedReportsModule({
               <div
                 key={t.id}
                 data-report-sheet
-                className={`print-container report-document-sheet relative w-full max-w-[210mm] min-h-[297mm] bg-white p-[10mm] shadow-xl ring-1 ring-slate-200/80 md:p-[18mm] rounded-sm ${
+                className={`print-container report-document-sheet relative w-full max-w-[8.5in] min-h-[11in] bg-white shadow-xl ring-1 ring-slate-200/80 rounded-sm max-md:rounded-lg flex flex-col ${
                   index < tasksToPrint.length - 1
                     ? "break-after-page print-page-break"
                     : ""
                 }`}
               >
-                <div className="border-b-[3px] border-[#16263F] pb-5 mb-7 flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-[#16263F] p-3.5 rounded-lg shadow-inner">
-                      <Ship className="text-white w-9 h-9" strokeWidth={1.75} />
-                    </div>
-                    <div>
-                      <h1 className="text-[26px] font-black text-[#16263F] tracking-tight leading-none">
+                <div className="report-letter-inner p-6 md:p-10 lg:p-11 flex flex-col flex-1 min-h-0 box-border">
+                <div className="border-b-4 border-[#16263F] pb-6 mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-stretch gap-5">
+                  <div className="flex items-center gap-4 md:gap-5 min-w-0">
+                    <BrandLogoMark variant="reportHeader" />
+                    <div className="min-w-0">
+                      <h1 className="text-2xl md:text-[28px] font-black text-[#16263F] tracking-tight leading-none">
                         ALDEPOSITOS
                       </h1>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.22em] mt-1.5">
+                      <p className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-2">
                         Servicios logísticos integrales
                       </p>
                     </div>
                   </div>
-                  <div className="text-left sm:text-right border-l-4 border-blue-600 pl-4 sm:border-0 sm:pl-0">
-                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-wide">
-                      Reporte de ingreso {isDetailed ? "detallado" : "rápido"}
+                  <div className="text-left sm:text-right border-l-4 border-blue-600 pl-4 sm:min-w-[11rem] flex flex-col justify-center">
+                    <h2 className="text-sm md:text-base font-black text-slate-800 uppercase tracking-wide leading-snug">
+                      Reporte de ingreso
+                      <br />
+                      {isDetailed ? "detallado" : "rápido"}
                     </h2>
-                    <p className="text-[11px] font-bold text-slate-500 mt-1 tabular-nums">
+                    <p className="text-[11px] font-bold text-slate-500 mt-2 tabular-nums">
                       Fecha: {currentDate}
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-                  <div className="bg-slate-50/80 p-5 rounded-lg border border-slate-200 flex flex-col justify-between">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 md:gap-4 mb-7">
+                  <div className="bg-slate-100/90 p-4 md:p-5 rounded-md border border-slate-200 flex flex-col justify-between">
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.14em] mb-1.5">
                         CLIENTE / CONSIGNATARIO
                       </p>
-                      <p className="text-base font-black text-[#16263F] uppercase">
+                      <p className="text-sm md:text-[15px] font-black text-[#16263F] uppercase leading-tight">
                         {t.mainClient}
                       </p>
                     </div>
-                    <div className="mt-4">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    <div className="mt-3 md:mt-4 pt-3 md:pt-0">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.14em] mb-1.5">
                         EXPEDIDOR
                       </p>
-                      <p className="text-sm font-bold text-slate-700 uppercase">
+                      <p className="text-xs font-bold text-slate-800 uppercase">
                         {t.subClient}
                       </p>
                     </div>
                   </div>
-                  <div className="bg-slate-50/80 p-5 rounded-lg border border-slate-200">
-                    <div className="border-b border-slate-200/80 pb-3 mb-3">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                  <div className="bg-slate-100/90 p-4 md:p-5 rounded-md border border-slate-200">
+                    <div className="pb-3 mb-3">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.14em] mb-1.5">
                         NÚMERO DE RECEPCIÓN (RA)
                       </p>
-                      <p className="text-2xl font-black text-[#16263F] uppercase">
+                      <p className="text-xl md:text-[26px] font-black text-[#16263F] uppercase tracking-tight">
                         RA-{t.ra}
                       </p>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200">
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.12em] mb-1">
                           PROVEEDOR
                         </p>
-                        <p className="text-xs font-bold text-slate-700 uppercase truncate">
+                        <p className="text-[10px] font-bold text-slate-800 uppercase leading-snug break-words">
                           {t.provider}
                         </p>
                       </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.12em] mb-1">
                           MARCA / TRACKING
                         </p>
-                        <p className="text-xs font-bold text-slate-700 uppercase truncate">
+                        <p className="text-[10px] font-bold text-slate-800 uppercase leading-snug break-words">
                           {t.brand}
                         </p>
                       </div>
@@ -408,102 +409,96 @@ export function CompletedReportsModule({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mb-3 mt-8">
-                  <div className="w-1.5 h-4 bg-purple-600 rounded-full" />
-                  <h3 className="text-xs font-black text-[#16263F] uppercase tracking-widest">
-                    Resumen Físico Consolidado
-                  </h3>
-                </div>
+                <h3 className="text-[11px] font-black text-[#16263F] uppercase tracking-[0.18em] mb-2.5 pl-3 border-l-4 border-blue-600">
+                  Resumen físico consolidado
+                </h3>
 
-                <div className="flex border border-slate-200 rounded-xl overflow-hidden mb-8 shadow-sm">
-                  <div className="flex-1 p-4 bg-white text-center border-r border-slate-200">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                      Bultos Físicos
+                <div className="flex border border-slate-200 rounded-md overflow-hidden mb-7 shadow-sm">
+                  <div className="flex-1 p-3 md:p-4 bg-white text-center border-r border-slate-200">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.1em] mb-1">
+                      Bultos físicos
                     </p>
-                    <p className="text-3xl font-black text-[#16263F]">
+                    <p className="text-2xl md:text-[26px] font-black text-[#16263F] tabular-nums">
                       {totals.bultos}
                     </p>
                   </div>
                   {isDetailed && (
-                    <div className="flex-1 p-4 bg-purple-50/50 text-center border-r border-slate-200">
-                      <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest mb-1">
-                        Total Unidades
+                    <div className="flex-1 p-3 md:p-4 bg-purple-50/80 text-center border-r border-slate-200">
+                      <p className="text-[9px] font-black text-violet-700 uppercase tracking-[0.1em] mb-1">
+                        Total unidades
                       </p>
-                      <p className="text-3xl font-black text-purple-700">
+                      <p className="text-2xl md:text-[26px] font-black text-violet-800 tabular-nums">
                         {totals.unidades}
                       </p>
                     </div>
                   )}
-                  <div className="flex-1 p-4 bg-slate-50/50 text-center border-r border-slate-200">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                      Volumen Total (CBM)
+                  <div className="flex-1 p-3 md:p-4 bg-slate-100/90 text-center border-r border-slate-200">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.1em] mb-1">
+                      Volumen total (CBM)
                     </p>
-                    <p className="text-3xl font-black text-[#16263F]">
+                    <p className="text-2xl md:text-[26px] font-black text-[#16263F] tabular-nums">
                       {totals.cbm} <span className="text-sm">m³</span>
                     </p>
                   </div>
-                  <div className="flex-1 p-4 bg-white text-center">
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
-                      Peso Total
+                  <div className="flex-1 p-3 md:p-4 bg-white text-center">
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.1em] mb-1">
+                      Peso total
                     </p>
-                    <p className="text-3xl font-black text-[#16263F]">
+                    <p className="text-2xl md:text-[26px] font-black text-[#16263F] tabular-nums">
                       {totals.weight.toFixed(2)}{" "}
                       <span className="text-sm">kg</span>
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 mb-3 mt-8">
-                  <div className="w-1.5 h-4 bg-blue-600 rounded-full" />
-                  <h3 className="text-xs font-black text-[#16263F] uppercase tracking-widest">
-                    Detalle de Dimensiones
-                  </h3>
-                </div>
+                <h3 className="text-[11px] font-black text-[#16263F] uppercase tracking-[0.18em] mb-2.5 mt-6 pl-3 border-l-4 border-blue-600">
+                  Detalle de dimensiones
+                </h3>
 
                 {isDetailed ? (
                   <table
-                    className="w-full text-left mb-8 border-collapse border border-slate-200"
+                    className="w-full text-left mb-7 border-collapse border border-slate-200"
                     style={{ fontSize: "9px" }}
                   >
                     <thead>
-                      <tr className="text-white font-bold uppercase tracking-widest text-[8px]">
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[3%] bg-[#1E293B]">
+                      <tr className="text-white font-bold uppercase tracking-wider text-[8px]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[3%] bg-[#16263F]">
                           #
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-left w-[12%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-left w-[12%] bg-[#16263F]">
                           REFERENCIA
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-left w-[18%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-left w-[18%] bg-[#16263F]">
                           DESCRIPCIÓN
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[6%] bg-[#6B21A8]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[6%] bg-[#16263F]">
                           BULTOS
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[6%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[6%] bg-[#16263F]">
                           UND/B
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[7%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[7%] bg-[#16263F]">
                           TOT UND
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[7%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[7%] bg-[#16263F]">
                           PESO/B
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[8%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[8%] bg-[#16263F]">
                           PESO TOT
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[5%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[5%] bg-[#16263F]">
                           L
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[5%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[5%] bg-[#16263F]">
                           W
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[5%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[5%] bg-[#16263F]">
                           H
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[8%] bg-[#1E293B]">
+                        <th className="px-2 py-3 border border-white/20 text-center w-[8%] bg-[#16263F]">
                           CBM/B
                         </th>
-                        <th className="px-2 py-3 border border-slate-600 text-center w-[10%] bg-[#2563EB]">
+                        <th className="px-2 py-3 border border-white/25 text-center w-[10%] bg-blue-600">
                           TOT CBM
                         </th>
                       </tr>
@@ -528,7 +523,7 @@ export function CompletedReportsModule({
                         return (
                           <tr
                             key={idx}
-                            className="even:bg-slate-50/50 text-slate-800 font-medium"
+                            className="even:bg-slate-100/70 text-slate-800 font-medium"
                           >
                             <td className="px-2 py-2.5 border border-slate-200 text-center font-bold">
                               {idx + 1}
@@ -539,7 +534,7 @@ export function CompletedReportsModule({
                             <td className="px-2 py-2.5 border border-slate-200 uppercase break-words whitespace-normal">
                               {row.descripcion || "-"}
                             </td>
-                            <td className="px-2 py-2.5 border border-slate-200 text-center font-bold bg-purple-50/50 text-purple-900">
+                            <td className="px-2 py-2.5 border border-slate-200 text-center font-bold bg-violet-50/80 text-violet-900">
                               {bultos}
                             </td>
                             <td className="px-2 py-2.5 border border-slate-200 text-center">
@@ -566,7 +561,7 @@ export function CompletedReportsModule({
                             <td className="px-2 py-2.5 border border-slate-200 text-center text-slate-400">
                               {cbmPorBulto.toFixed(2)}
                             </td>
-                            <td className="px-2 py-2.5 border border-slate-200 text-center font-bold bg-blue-50/50 text-blue-900">
+                            <td className="px-2 py-2.5 border border-slate-200 text-center font-bold text-blue-900 bg-blue-50/40">
                               {cubicajeTotal.toFixed(2)}
                             </td>
                           </tr>
@@ -576,37 +571,37 @@ export function CompletedReportsModule({
                   </table>
                 ) : (
                   <table
-                    className="w-full text-left mb-8 border-collapse border border-slate-200"
+                    className="w-full text-left mb-7 border-collapse border border-slate-200"
                     style={{ fontSize: "9px" }}
                   >
                     <thead>
-                      <tr className="text-white font-bold uppercase tracking-widest text-[8px]">
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[5%] bg-[#1E293B]">
+                      <tr className="text-white font-bold uppercase tracking-wider text-[8px]">
+                        <th className="px-3 py-3 border border-white/20 text-center w-[5%] bg-[#16263F]">
                           #
                         </th>
                         {showReferenceColumn && (
-                          <th className="px-3 py-3 border border-slate-600 bg-[#1E293B]">
+                          <th className="px-3 py-3 border border-white/20 bg-[#16263F]">
                             Referencia
                           </th>
                         )}
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[10%] bg-[#6B21A8]">
+                        <th className="px-3 py-3 border border-white/20 text-center w-[10%] bg-[#16263F]">
                           Bultos
                         </th>
                         {showWeightColumn && (
-                          <th className="px-3 py-3 border border-slate-600 text-center w-[10%] bg-[#1E293B]">
+                          <th className="px-3 py-3 border border-white/20 text-center w-[10%] bg-[#16263F]">
                             Peso(kg)
                           </th>
                         )}
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[10%] bg-[#1E293B]">
+                        <th className="px-3 py-3 border border-white/20 text-center w-[10%] bg-[#16263F]">
                           L
                         </th>
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[10%] bg-[#1E293B]">
+                        <th className="px-3 py-3 border border-white/20 text-center w-[10%] bg-[#16263F]">
                           W
                         </th>
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[10%] bg-[#1E293B]">
+                        <th className="px-3 py-3 border border-white/20 text-center w-[10%] bg-[#16263F]">
                           H
                         </th>
-                        <th className="px-3 py-3 border border-slate-600 text-center w-[15%] bg-[#2563EB]">
+                        <th className="px-3 py-3 border border-white/25 text-center w-[15%] bg-blue-600">
                           Total CBM
                         </th>
                       </tr>
@@ -621,7 +616,7 @@ export function CompletedReportsModule({
                         return (
                           <tr
                             key={idx}
-                            className="even:bg-slate-50/50 text-slate-800 font-medium"
+                            className="even:bg-slate-100/70 text-slate-800 font-medium"
                           >
                             <td className="px-3 py-2.5 border border-slate-200 text-center font-bold">
                               {idx + 1}
@@ -631,7 +626,7 @@ export function CompletedReportsModule({
                                 {row.referencia || "-"}
                               </td>
                             )}
-                            <td className="px-3 py-2.5 border border-slate-200 text-center font-bold bg-purple-50/50 text-purple-900">
+                            <td className="px-3 py-2.5 border border-slate-200 text-center font-bold bg-violet-50/80 text-violet-900">
                               {row.bultos}
                             </td>
                             {showWeightColumn && (
@@ -648,7 +643,7 @@ export function CompletedReportsModule({
                             <td className="px-3 py-2.5 border border-slate-200 text-center text-slate-500">
                               {row.h || 0}
                             </td>
-                            <td className="px-3 py-2.5 border border-slate-200 text-center font-bold bg-blue-50/50 text-blue-900">
+                            <td className="px-3 py-2.5 border border-slate-200 text-center font-bold text-blue-900 bg-blue-50/40">
                               {rowCbm.toFixed(2)}
                             </td>
                           </tr>
@@ -659,23 +654,21 @@ export function CompletedReportsModule({
                 )}
 
                 {t.notes && (
-                  <div className="mb-8">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-1.5 h-4 bg-orange-500 rounded-full" />
-                      <h3 className="text-xs font-black text-[#16263F] uppercase tracking-widest">
-                        Observaciones
-                      </h3>
-                    </div>
-                    <div className="p-4 bg-white border border-slate-200 rounded-xl text-xs text-slate-600 font-medium uppercase">
+                  <div className="mb-7">
+                    <h3 className="text-[11px] font-black text-[#16263F] uppercase tracking-[0.18em] mb-2.5 pl-3 border-l-4 border-blue-600">
+                      Observaciones
+                    </h3>
+                    <div className="p-4 bg-white border border-slate-200 rounded-md text-xs text-slate-700 font-medium uppercase leading-relaxed">
                       {t.notes}
                     </div>
                   </div>
                 )}
 
-                <div className="mt-10 pt-4 border-t border-slate-200 text-center">
-                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.18em]">
+                <div className="mt-auto pt-6 border-t border-slate-200 text-center">
+                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.16em]">
                     Aldepositos · documento generado por Warehouse OS
                   </p>
+                </div>
                 </div>
               </div>
             );

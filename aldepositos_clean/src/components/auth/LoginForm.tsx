@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Mail, Lock, ArrowRight, Ship, Loader2 } from "lucide-react";
+import { Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 
 type LoginFormProps = {
@@ -40,8 +41,12 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-[#16263F]/5 to-transparent pointer-events-none" />
 
       <div className="relative z-10 flex flex-col items-center text-center mb-10">
-        <div className="bg-[#16263F] w-20 h-20 rounded-[1.5rem] flex items-center justify-center mb-6 shadow-xl shadow-[#16263F]/20">
-          <Ship className="text-white w-10 h-10" strokeWidth={1.5} />
+        <div className="relative mb-6 flex items-center justify-center">
+          <div
+            className="absolute left-1/2 top-1/2 h-[8rem] w-[8rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#16263F]/[0.07] blur-2xl pointer-events-none"
+            aria-hidden
+          />
+          <BrandLogoMark variant="loginHero" priority />
         </div>
         <h1 className="text-3xl font-black text-[#16263F] tracking-tighter leading-none mb-2">
           ALDEPOSITOS

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { ReactNode, useState } from "react";
-import { LogOut, Menu, Ship, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch } from "lucide-react";
+import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch } from "lucide-react";
+import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
@@ -45,9 +46,7 @@ export function ControlPanelLayout({
           >
             <X size={20} />
           </button>
-          <div className="bg-blue-600 p-3 md:p-4 rounded-3xl text-white shadow-lg mb-3 md:mb-4">
-            <Ship className="w-8 h-8 md:w-10 md:h-10" />
-          </div>
+          <BrandLogoMark variant="sidebar" priority />
           <div className="text-center">
             <p className="font-black text-xl md:text-2xl tracking-tighter leading-none text-white">
               ALDEPOSITOS
@@ -154,8 +153,8 @@ export function ControlPanelLayout({
 
       <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
         <header className="md:hidden bg-[#16263F] text-white p-4 flex justify-between items-center shadow-md z-30 shrink-0">
-          <div className="flex items-center gap-3">
-            <Ship className="text-blue-400 w-6 h-6" />
+          <div className="flex items-center gap-3 min-w-0">
+            <BrandLogoMark variant="headerCompact" />
             <span className="font-black tracking-tighter uppercase text-lg">
               Aldepósitos
             </span>

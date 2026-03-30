@@ -56,6 +56,36 @@
   }
 }
 
+/* Tabla de medidas — barra vertical siempre al borde derecho del bloque, más visible */
+.inventory-measures-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: #64748b #e2e8f0;
+  overscroll-behavior: contain;
+}
+.inventory-measures-scroll::-webkit-scrollbar {
+  width: 14px;
+  height: 12px;
+}
+.inventory-measures-scroll::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 8px;
+  margin: 4px 2px 4px 0;
+}
+.inventory-measures-scroll::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 8px;
+  border: 3px solid #e2e8f0;
+  min-height: 48px;
+}
+.inventory-measures-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+@media (max-width: 768px) {
+  .inventory-measures-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+}
+
 /* Quitar flechas de inputs numéricos — solo ingreso manual de datos */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {

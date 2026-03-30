@@ -6,16 +6,26 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
+  Boxes,
   Check,
   Edit,
+  FileSpreadsheet,
+  FileText,
+  Package,
+  Plane,
   Plus,
+  Scale,
   Trash2,
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
+import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
+import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type QuickInventoryEntryProps = {
+  /** "quick" = Ingreso Rápido; "airway" = Guía Aérea (misma captura, otro tipo de RA). */
+  moduleType?: "quick" | "airway";
   tasks: Task[];
   onUpdateTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
@@ -45,7 +55,8 @@ type QuickDraft = {
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const QUICK_AUTOSAVE_MS = 700;
-const quickDraftKey = (taskId: string) => `quick_inventory_draft_v1_${taskId}`;
+const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
+  `${kind}_inventory_draft_v1_${taskId}`;
 
 function hasQuickRequiredData(rows: MeasureRow[]): boolean {
   if (rows.length === 0) return false;
@@ -80,6 +91,7 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
 }
 
 export function QuickInventoryEntry({
+  moduleType = "quick",
   tasks,
   onUpdateTask,
   onDeleteTask,
@@ -100,8 +112,8 @@ export function QuickInventoryEntry({
     }
   }, [transferOpenId]);
 
-  const quickTasks = tasks.filter((t) => {
-    if (t.type !== "quick") return false;
+  const moduleTasks = tasks.filter((t) => {
+    if (t.type !== moduleType) return false;
     if (viewMode === "completed") {
       return t.status === "completed";
     }
@@ -134,8 +146,10 @@ export function QuickInventoryEntry({
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestModeRef = useRef<WeightMode>("by_reference");
   const latestTaskRef = useRef<Task | null>(null);
+  const referenciasExcelRef = useRef<HTMLInputElement>(null);
+  const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
 
-  const groupedTasks = quickTasks.reduce<Record<string, Task[]>>((groups, task) => {
+  const groupedTasks = moduleTasks.reduce<Record<string, Task[]>>((groups, task) => {
     const client = task.mainClient || "Sin Cliente";
     if (!groups[client]) groups[client] = [];
     groups[client].push(task);
@@ -143,9 +157,9 @@ export function QuickInventoryEntry({
   }, {});
 
   const clients = Object.keys(groupedTasks);
-  const totalQuickTasks = quickTasks.length;
+  const totalModuleTasks = moduleTasks.length;
 
-  let displayedTasks = quickTasks;
+  let displayedTasks = moduleTasks;
   if (clientFilter !== "Todos" && clients.includes(clientFilter)) {
     displayedTasks = groupedTasks[clientFilter];
   }
@@ -203,7 +217,9 @@ export function QuickInventoryEntry({
     let rowsToUse = taskRows;
     let modeToUse = taskWeightMode;
     if (typeof window !== "undefined") {
-      const rawDraft = window.localStorage.getItem(quickDraftKey(task.id));
+      const rawDraft = window.localStorage.getItem(
+        inventoryDraftKey(task.id, moduleType),
+      );
       if (rawDraft) {
         try {
           const parsed = JSON.parse(rawDraft) as QuickDraft;
@@ -252,6 +268,78 @@ export function QuickInventoryEntry({
       },
     ]);
 
+  const onReferenciasExcelSelected: React.ChangeEventHandler<
+    HTMLInputElement
+  > = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setReferenciasImportBusy(true);
+    try {
+      const { rows, sourceColumnLabel, error } =
+        await parseReferenciasFromExcel(file);
+      if (error) {
+        // eslint-disable-next-line no-alert
+        alert(error);
+        return;
+      }
+      if (rows.length === 0) {
+        // eslint-disable-next-line no-alert
+        alert("No hay referencias para importar.");
+        return;
+      }
+      setMeasureRows((prev) => {
+        const existing = new Set(
+          prev
+            .map((r) => String(r.referencia ?? "").trim().toUpperCase())
+            .filter(Boolean),
+        );
+        const additions: MeasureRow[] = [];
+        let skipped = 0;
+        for (const r of rows) {
+          const ref = r.referencia.trim();
+          if (!ref) continue;
+          const k = ref.toUpperCase();
+          if (existing.has(k)) {
+            skipped += 1;
+            continue;
+          }
+          existing.add(k);
+          additions.push({
+            id: generateId(),
+            referencia: ref,
+            bultos: r.bultos !== undefined ? String(r.bultos) : "",
+            l: "",
+            w: "",
+            h: "",
+            weight: "",
+          });
+        }
+        if (additions.length === 0) {
+          // eslint-disable-next-line no-alert
+          alert(
+            skipped > 0
+              ? "Todas las referencias del archivo ya están en la tabla."
+              : "No se añadieron filas nuevas.",
+          );
+          return prev;
+        }
+        // eslint-disable-next-line no-alert
+        alert(
+          `Añadidas ${additions.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
+            (skipped ? ` Omitidas ${skipped} duplicada(s).` : ""),
+        );
+        return [...prev, ...additions];
+      });
+    } catch (err) {
+      console.error(err);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo leer el archivo. Usa formato .xlsx o .xls.");
+    } finally {
+      setReferenciasImportBusy(false);
+    }
+  };
+
   const deleteRow = (idToRemove: string) => {
     setMeasureRows((prev) =>
       prev.length > 1 ? prev.filter((r) => r.id !== idToRemove) : prev,
@@ -274,7 +362,10 @@ export function QuickInventoryEntry({
       rows: JSON.parse(JSON.stringify(rows)) as MeasureRow[],
       weightMode: mode,
     };
-    window.localStorage.setItem(quickDraftKey(taskId), JSON.stringify(draft));
+    window.localStorage.setItem(
+      inventoryDraftKey(taskId, moduleType),
+      JSON.stringify(draft),
+    );
   };
 
   const runAutosave = async (
@@ -304,7 +395,7 @@ export function QuickInventoryEntry({
 
     const persistedRows = hasCapture ? rows : [];
     if (!hasCapture && typeof window !== "undefined") {
-      window.localStorage.removeItem(quickDraftKey(task.id));
+      window.localStorage.removeItem(inventoryDraftKey(task.id, moduleType));
     }
 
     const updatedTask: Task = {
@@ -373,7 +464,7 @@ export function QuickInventoryEntry({
         autosaveTimerRef.current = null;
       }
     };
-  }, [measureRows, weightMode, selectedTask]);
+  }, [measureRows, weightMode, selectedTask, moduleType]);
 
   const saveOrder = () => {
     if (!selectedTask) return;
@@ -388,7 +479,9 @@ export function QuickInventoryEntry({
 
     const persistedRows = hasCapture ? measureRows : [];
     if (!hasCapture && typeof window !== "undefined") {
-      window.localStorage.removeItem(quickDraftKey(selectedTask.id));
+      window.localStorage.removeItem(
+        inventoryDraftKey(selectedTask.id, moduleType),
+      );
     }
 
     const updatedTask: Task = {
@@ -406,7 +499,9 @@ export function QuickInventoryEntry({
 
     onUpdateTask(updatedTask);
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(quickDraftKey(selectedTask.id));
+      window.localStorage.removeItem(
+        inventoryDraftKey(selectedTask.id, moduleType),
+      );
     }
     setAutosaveState("saved");
     clearTask();
@@ -415,13 +510,22 @@ export function QuickInventoryEntry({
   // Lista de órdenes (sin task seleccionado) — encabezado fijo, solo la lista con barra de desplazamiento
   if (!selectedTask) {
     return (
-      <div className="w-full flex-1 min-h-0 flex flex-col">
-        <div className="max-w-4xl mx-auto w-full flex flex-col flex-1 min-h-0">
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
           <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 md:px-0">
               <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
-                <Box className="text-[#16263F] w-5 h-5 md:w-8 md:h-8" /> INGRESO
-                RÁPIDO
+                {moduleType === "airway" ? (
+                  <>
+                    <Plane className="text-orange-500 w-5 h-5 md:w-8 md:h-8" />{" "}
+                    GUÍA AÉREA
+                  </>
+                ) : (
+                  <>
+                    <Box className="text-[#16263F] w-5 h-5 md:w-8 md:h-8" />{" "}
+                    INGRESO RÁPIDO
+                  </>
+                )}
               </h2>
               <button
                 type="button"
@@ -488,7 +592,7 @@ export function QuickInventoryEntry({
                   : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
               }`}
             >
-              TODOS ({totalQuickTasks})
+              TODOS ({totalModuleTasks})
             </button>
             {clients.map((c) => (
               <button
@@ -545,28 +649,57 @@ export function QuickInventoryEntry({
                     </button>
                     {transferOpenId === t.id && (
                       <div className="absolute right-0 top-full mt-1 py-1 bg-white rounded-xl border border-slate-200 shadow-lg z-30 min-w-[180px]">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTransferTask(t, "detailed");
-                            setTransferOpenId(null);
-                          }}
-                          className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
-                        >
-                          → Ingreso Detallado
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTransferTask(t, "airway");
-                            setTransferOpenId(null);
-                          }}
-                          className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
-                        >
-                          → Guía Aérea
-                        </button>
+                        {moduleType === "quick" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "detailed");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              → Ingreso Detallado
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "airway");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              → Guía Aérea
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "quick");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              → Ingreso Rápido
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "detailed");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              → Ingreso Detallado
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -674,8 +807,8 @@ export function QuickInventoryEntry({
   const showReferenceColumn = true;
 
   return (
-    <div className="max-w-[1400px] mx-auto pb-40 animate-fade">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4 md:mb-6 px-2 md:px-0">
+    <div className="flex h-full min-h-0 w-full max-w-[1400px] mx-auto flex-1 flex-col animate-fade">
+      <div className="shrink-0 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-2 md:mb-3 px-2 md:px-0">
         <button
           type="button"
           onClick={clearTask}
@@ -713,7 +846,12 @@ export function QuickInventoryEntry({
           {t && (
             <div className="flex items-center gap-2">
               <span className="bg-white text-[#16263F] border border-slate-200 px-4 py-2.5 rounded-full text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
-                <Box className="w-4 h-4 text-blue-600" /> RA-{t.ra}
+                {moduleType === "airway" ? (
+                  <Plane className="w-4 h-4 text-orange-500" />
+                ) : (
+                  <Box className="w-4 h-4 text-blue-600" />
+                )}{" "}
+                RA-{t.ra}
               </span>
               <span
                 key={autosaveTick}
@@ -741,147 +879,238 @@ export function QuickInventoryEntry({
       </div>
 
       {t && (
-        <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[3rem] border border-slate-100 shadow-sm md:shadow-lg space-y-6 md:space-y-8">
-          <div className="bg-[#F8FAFC] border border-slate-100 rounded-[1.5rem] md:rounded-[2rem] p-6 shadow-sm">
-            <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest mb-4 border-b border-slate-200 pb-3">
-              DATOS ORIGINALES DE CARGA
-            </h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6 pb-4 border-b border-slate-200">
-              <div className="col-span-2 lg:col-span-2">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  PROVEEDOR
-                </p>
-                <p className="text-sm font-black text-[#16263F] uppercase truncate">
-                  {t.provider}
-                </p>
-              </div>
-              <div className="col-span-2 lg:col-span-1">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  MARCA / TRACKING
-                </p>
-                <p className="text-sm font-black text-[#16263F] uppercase truncate">
-                  {t.brand}
-                </p>
-              </div>
-              <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  VOLUMEN EST.
-                </p>
-                <p className="text-sm font-black text-slate-700">
-                  {t.expectedCbm}{" "}
-                  <span className="text-xs font-bold text-slate-500">m³</span>
-                </p>
-              </div>
-              <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                  PESO EST.
-                </p>
-                <p className="text-sm font-black text-slate-700">
-                  {t.expectedWeight}{" "}
-                  <span className="text-xs font-bold text-slate-500">kg</span>
-                </p>
+        <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1 overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-sm sm:p-3 md:rounded-[2rem] md:shadow-lg lg:rounded-[3rem]">
+          <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-3">
+            <div className="relative min-w-0 flex-1 overflow-x-hidden rounded-2xl border-2 border-slate-200/90 bg-white shadow-md ring-1 ring-slate-900/[0.04]">
+              <div
+                className="absolute left-0 top-0 h-full w-1.5 rounded-l-2xl bg-[#16263F]"
+                aria-hidden
+              />
+              <div className="pl-3 pr-3 pb-3 pt-3 sm:pl-5 sm:pr-5 sm:pb-4 sm:pt-4">
+                <div className="mb-3 flex flex-wrap items-center gap-2.5 border-b-2 border-slate-100 pb-3 sm:gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#16263F] text-white shadow-md ring-2 ring-[#16263F]/20">
+                    {moduleType === "airway" ? (
+                      <Plane className="h-5 w-5" aria-hidden />
+                    ) : (
+                      <Box className="h-5 w-5" aria-hidden />
+                    )}
+                  </span>
+                  <h4 className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-[#16263F] sm:text-base">
+                    Datos originales
+                  </h4>
+                  <span className="inline-flex shrink-0 items-center rounded-full border-2 border-blue-200/80 bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-800 shadow-sm sm:text-[11px]">
+                    RA · referencia previa
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+                  <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                      Proveedor / naviera
+                    </p>
+                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                      {t.provider}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                      Marca · tracking
+                    </p>
+                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                      {t.brand}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:grid-cols-2 sm:gap-3">
+                    <div className="rounded-xl border-2 border-sky-200/80 bg-gradient-to-br from-sky-50 to-sky-100/40 px-3 py-2.5 shadow-sm sm:py-3">
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-sky-800 sm:text-[11px]">
+                        Volumen en documento
+                      </p>
+                      <p className="flex flex-wrap items-baseline gap-1 text-lg font-black tabular-nums text-sky-950 sm:text-xl">
+                        {t.expectedCbm}
+                        <M3Unit
+                          size="md"
+                          className="font-black text-sky-800 text-sm sm:text-base"
+                        />
+                      </p>
+                    </div>
+                    <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 shadow-sm sm:py-3">
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-600 sm:text-[11px]">
+                        Peso en documento
+                      </p>
+                      <p className="text-lg font-black tabular-nums text-slate-900 sm:text-xl">
+                        {t.expectedWeight}
+                        <span className="ml-1 text-sm font-bold text-slate-500 sm:text-base">
+                          kg
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-xl border-2 border-dashed border-amber-400/70 bg-gradient-to-br from-amber-50/95 to-orange-50/50 px-3 py-2.5 shadow-sm sm:mt-4 sm:px-4 sm:py-3">
+                  <p className="mb-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-wide text-amber-900 sm:text-[11px]">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-200/60 text-amber-900">
+                      <FileText className="h-4 w-4" aria-hidden />
+                    </span>
+                    Expedidor · notas
+                  </p>
+                  <p className="text-sm font-semibold leading-relaxed text-amber-950/95 sm:text-[15px]">
+                    {t.subClient}
+                    {t.notes ? (
+                      <>
+                        <span className="mx-2 inline font-light text-amber-700/50">
+                          |
+                        </span>
+                        {t.notes}
+                      </>
+                    ) : null}
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="pt-4">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                EXPEDIDOR / NOTAS
-              </p>
-              <p className="text-sm font-medium text-slate-600 italic uppercase">
-                {t.subClient}{" "}
-                {t.notes ? (
-                  <>
-                    <span className="mx-2 font-light text-slate-300">|</span>{" "}
-                    {t.notes}
-                  </>
-                ) : (
-                  ""
-                )}
-              </p>
+
+            <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:w-[min(100%,24.5rem)] lg:border-l lg:border-slate-200 lg:pl-4">
+              <div className="rounded-xl bg-[#16263F] px-3 py-2 shadow-md ring-1 ring-black/10">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/85">
+                  Captura actual
+                </p>
+                <p className="mt-0.5 text-balance text-sm font-black leading-snug text-white sm:text-[0.95rem]">
+                  Documento vs recepción
+                </p>
+              </div>
+              {/* 2 columnas arriba; diferencia y totales a ancho completo para evitar texto cortado */}
+              <div className="grid min-w-0 grid-cols-2 gap-2">
+                <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
+                      <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    </span>
+                    <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-slate-600 sm:text-[11px]">
+                      Declarados
+                    </p>
+                  </div>
+                  <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-[#16263F] sm:text-[1.85rem]">
+                    {originalExpected}
+                  </p>
+                </div>
+                <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-violet-300 bg-gradient-to-b from-violet-50 to-violet-100/40 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
+                      <Boxes className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    </span>
+                    <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-violet-900 sm:text-[11px]">
+                      Físicos
+                    </p>
+                  </div>
+                  <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-violet-950 sm:text-[1.85rem]">
+                    {totals.bultos}
+                  </p>
+                </div>
+                <div
+                  className={`col-span-2 flex min-h-[4.25rem] items-center justify-between gap-3 rounded-xl border-2 px-3 py-2 shadow-sm sm:min-h-[4.5rem] sm:py-2.5 ${
+                    faltantes > 0
+                      ? "border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100/40"
+                      : faltantes < 0
+                        ? "border-red-400 bg-gradient-to-r from-red-50 to-red-100/35"
+                        : "border-emerald-400 bg-gradient-to-r from-emerald-50 to-emerald-100/40"
+                  }`}
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl ${
+                        faltantes > 0
+                          ? "bg-amber-600"
+                          : faltantes < 0
+                            ? "bg-red-600"
+                            : "bg-emerald-600"
+                      }`}
+                    >
+                      <Scale className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-900 sm:text-[11px]">
+                        Diferencia
+                      </p>
+                      <p
+                        className={`text-[9px] font-bold uppercase tracking-wide sm:text-[10px] ${
+                          faltantes === 0
+                            ? "text-emerald-800"
+                            : faltantes > 0
+                              ? "text-amber-900"
+                              : "text-red-800"
+                        }`}
+                      >
+                        {faltantes === 0
+                          ? "Cuadra con declarado"
+                          : faltantes > 0
+                            ? "Faltan por contar"
+                            : "Revisar exceso"}
+                      </p>
+                    </div>
+                  </div>
+                  <p
+                    className={`shrink-0 text-3xl font-black tabular-nums leading-none sm:text-[2.25rem] ${
+                      faltantes > 0
+                        ? "text-amber-800"
+                        : faltantes < 0
+                          ? "text-red-600"
+                          : "text-emerald-800"
+                    }`}
+                  >
+                    {faltantes}
+                  </p>
+                </div>
+                <div className="col-span-2 rounded-xl border-2 border-slate-200 bg-slate-50/90 px-3 py-2 shadow-sm sm:py-2.5">
+                  <p className="mb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 sm:mb-2 sm:text-[10px]">
+                    Totales tabla
+                  </p>
+                  <div className="flex flex-wrap items-end gap-x-8 gap-y-2 sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase text-slate-500">
+                        Volumen
+                      </p>
+                      <p className="flex flex-wrap items-baseline gap-1 text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                        {Number(totals.cbm).toFixed(2)}
+                        <M3Unit size="sm" className="text-xs font-black sm:text-sm" />
+                      </p>
+                    </div>
+                    <div className="min-w-0 text-right sm:text-left">
+                      <p className="text-[10px] font-bold uppercase text-slate-500">
+                        Peso
+                      </p>
+                      <p className="text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                        {totals.weight.toFixed(1)}
+                        <span className="ml-1 text-sm font-bold text-slate-500">
+                          kg
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 pb-4 border-b border-slate-100">
-            <div className="p-4 md:p-6 bg-white rounded-2xl md:rounded-3xl border border-slate-200 flex flex-col justify-center">
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5">
-                BULTOS DECLARADOS
-              </p>
-              <p className="text-3xl md:text-4xl font-black text-[#16263F] leading-none">
-                {originalExpected}
-              </p>
-            </div>
-            <div className="p-4 md:p-6 bg-[#F5F3FF] rounded-2xl md:rounded-3xl border border-[#EDE9FE] flex flex-col justify-center">
-              <p className="text-[9px] font-black text-purple-600 uppercase tracking-widest mb-1.5">
-                BULTOS FÍSICOS
-              </p>
-              <p className="text-3xl md:text-4xl font-black text-purple-700 leading-none">
-                {totals.bultos}
-              </p>
-            </div>
-            <div
-              className={`p-4 md:p-6 rounded-2xl md:rounded-3xl border flex flex-col justify-center ${
-                faltantes > 0
-                  ? "bg-orange-50 border-orange-200"
-                  : faltantes < 0
-                    ? "bg-red-50 border-red-200"
-                    : "bg-[#F0FDF4] border-green-200"
-              }`}
-            >
-              <p
-                className={`text-[9px] font-black uppercase tracking-widest mb-1.5 ${
-                  faltantes > 0
-                    ? "text-orange-600"
-                    : faltantes < 0
-                      ? "text-red-600"
-                      : "text-green-600"
-                }`}
-              >
-                DIFERENCIA BODEGA
-              </p>
-              <p
-                className={`text-3xl md:text-4xl font-black leading-none ${
-                  faltantes > 0
-                    ? "text-orange-600"
-                    : faltantes < 0
-                      ? "text-red-600"
-                      : "text-green-600"
-                }`}
-              >
-                {faltantes}
-              </p>
-            </div>
-            <div className="p-4 md:p-6 text-center lg:text-right flex flex-col justify-center">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                VOLUMEN / PESO TOTAL
-              </p>
-              <p className="text-xl md:text-2xl font-black text-[#16263F] leading-none">
-                {Number(totals.cbm).toFixed(2)}{" "}
-                <span className="text-xs font-bold text-slate-400">m³</span>{" "}
-                <span className="text-slate-300 font-light mx-1">|</span>{" "}
-                {totals.weight.toFixed(1)}{" "}
-                <span className="text-xs font-bold text-slate-400">kg</span>
-              </p>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto w-full hide-scrollbar">
-            <table className="w-full text-sm text-left min-w-[700px] md:min-w-full border-collapse">
-              <thead className="bg-white text-slate-500 font-black uppercase text-[10px] tracking-widest border-b border-slate-200">
+          <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)]">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
+            <table className="w-full min-w-[700px] border-collapse text-left text-sm md:min-w-full">
+              <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                 <tr>
-                  <th className="px-2 py-4 w-10 text-center">#</th>
+                  <th className="w-10 px-2 py-2 text-center">#</th>
                   {showReferenceColumn && (
-                    <th className="px-2 py-4 w-32 text-left">REFERENCIA</th>
+                    <th className="w-32 px-2 py-2 text-left">REFERENCIA</th>
                   )}
-                  <th className="px-2 py-4 w-28 text-center">BULTOS</th>
+                  <th className="w-28 px-2 py-2 text-center">BULTOS</th>
                   {showWeightColumn && (
-                    <th className="px-2 py-4 w-28 text-center">PESO(KG)</th>
+                    <th className="w-28 px-2 py-2 text-center">PESO(KG)</th>
                   )}
-                  <th className="px-2 py-4 w-24 text-center">L (CM)</th>
-                  <th className="px-2 py-4 w-24 text-center">W (CM)</th>
-                  <th className="px-2 py-4 w-24 text-center">H (CM)</th>
-                  <th className="px-2 py-4 bg-slate-50 text-[#16263F] text-center font-black rounded-tr-lg">
+                  <th className="w-24 px-2 py-2 text-center">L (CM)</th>
+                  <th className="w-24 px-2 py-2 text-center">W (CM)</th>
+                  <th className="w-24 px-2 py-2 text-center">H (CM)</th>
+                  <th className="bg-slate-50 px-2 py-2 text-center font-black text-[#16263F]">
                     CBM TOTAL
                   </th>
-                  <th className="px-2 py-4 w-12 text-center" />
+                  <th className="w-12 px-2 py-2 text-center" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -895,14 +1124,14 @@ export function QuickInventoryEntry({
                   return (
                     <tr
                       key={row.id}
-                      className="group hover:bg-slate-50 transition-colors"
+                      className="group transition-colors odd:bg-white even:bg-slate-50/60 hover:bg-sky-50/80"
                     >
-                      <td className="p-2 text-center font-black text-slate-300 text-lg">
+                      <td className="px-2 py-1 text-center text-base font-black text-slate-300 md:text-lg">
                         {idx + 1}
                       </td>
 
                       {showReferenceColumn && (
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="text"
                             onChange={(e) =>
@@ -913,82 +1142,82 @@ export function QuickInventoryEntry({
                               )
                             }
                             value={row.referencia || ""}
-                            className="w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 px-3 text-left font-bold text-[#16263F] outline-none transition-all"
+                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                             placeholder="Referencia"
                           />
                         </td>
                       )}
 
-                      <td className="p-2">
+                      <td className="px-2 py-1">
                         <input
                           type="number"
                           onChange={(e) =>
                             updateRowValue(row.id, "bultos", e.target.value)
                           }
                           value={row.bultos ?? ""}
-                          className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 text-center font-black text-blue-600 outline-none transition-all"
+                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-black text-blue-600 outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500/25"
                           placeholder=""
                         />
                       </td>
 
                       {showWeightColumn && (
-                        <td className="p-2">
+                        <td className="px-2 py-1">
                           <input
                             type="number"
                             onChange={(e) =>
                               updateRowValue(row.id, "weight", e.target.value)
                             }
                             value={row.weight ?? ""}
-                            className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 text-center font-bold text-[#16263F] outline-none transition-all"
+                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                             placeholder=""
                           />
                         </td>
                       )}
 
-                      <td className="p-2">
+                      <td className="px-2 py-1">
                         <input
                           type="number"
                           onChange={(e) =>
                             updateRowValue(row.id, "l", e.target.value)
                           }
                           value={row.l ?? ""}
-                          className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 text-center font-bold text-[#16263F] outline-none transition-all"
+                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder=""
                         />
                       </td>
-                      <td className="p-2">
+                      <td className="px-2 py-1">
                         <input
                           type="number"
                           onChange={(e) =>
                             updateRowValue(row.id, "w", e.target.value)
                           }
                           value={row.w ?? ""}
-                          className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 text-center font-bold text-[#16263F] outline-none transition-all"
+                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder=""
                         />
                       </td>
-                      <td className="p-2">
+                      <td className="px-2 py-1">
                         <input
                           type="number"
                           onChange={(e) =>
                             updateRowValue(row.id, "h", e.target.value)
                           }
                           value={row.h ?? ""}
-                          className="no-spinners w-full bg-white border border-slate-200 focus:border-slate-400 rounded-lg py-2.5 text-center font-bold text-[#16263F] outline-none transition-all"
+                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder=""
                         />
                       </td>
 
-                      <td className="p-2 text-center font-black text-[#16263F] text-lg bg-slate-50 rounded-br-lg">
+                      <td className="bg-slate-50 px-2 py-1 text-center text-base font-black text-[#16263F] md:text-lg">
                         {rowCbm.toFixed(2)}
                       </td>
-                      <td className="p-2 text-center">
+                      <td className="px-2 py-1 text-center">
                         <button
                           type="button"
                           onClick={() => deleteRow(row.id)}
-                          className="w-10 h-10 rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition-all shadow-sm mx-auto flex items-center justify-center"
+                          className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-400 shadow-sm transition-all hover:bg-red-500 hover:text-white"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </td>
                     </tr>
@@ -996,20 +1225,39 @@ export function QuickInventoryEntry({
                 })}
               </tbody>
             </table>
+            </div>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-4 pt-6">
-            <button
-              type="button"
-              onClick={addRow}
-              className="flex-1 py-4 md:py-5 bg-white rounded-full border-2 border-dashed border-slate-300 text-slate-500 font-black hover:bg-slate-50 hover:border-slate-400 hover:text-slate-600 transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-widest"
-            >
-              <Plus className="w-5 h-5" /> AGREGAR LÍNEA ADICIONAL
-            </button>
+          <div className="isolate z-10 mt-1 shrink-0 border-t border-slate-200 bg-white pt-2 shadow-[0_-8px_24px_-10px_rgba(15,23,42,0.1)] md:pt-3">
+            <input
+              ref={referenciasExcelRef}
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={onReferenciasExcelSelected}
+            />
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+              <button
+                type="button"
+                onClick={addRow}
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:border-slate-400 hover:bg-slate-50 hover:text-slate-600 md:rounded-full md:py-4 md:text-sm"
+              >
+                <Plus className="w-5 h-5" /> AGREGAR LÍNEA ADICIONAL
+              </button>
+              <button
+                type="button"
+                disabled={referenciasImportBusy}
+                onClick={() => referenciasExcelRef.current?.click()}
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-emerald-800 transition-all hover:border-emerald-500 hover:bg-emerald-50 disabled:opacity-60 md:rounded-full md:py-4 md:text-sm"
+              >
+                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                IMPORTAR REFERENCIAS (EXCEL)
+              </button>
+            </div>
             <button
               type="button"
               onClick={saveOrder}
-              className="flex-1 py-4 md:py-5 bg-[#0f172a] text-white font-black rounded-full shadow-lg hover:bg-black transition-all active:scale-95 text-sm uppercase tracking-widest flex justify-center items-center gap-2"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f172a] py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-all hover:bg-black active:scale-95 md:rounded-full md:py-4 md:text-sm"
             >
               GUARDAR ORDEN <Check className="w-5 h-5" />
             </button>

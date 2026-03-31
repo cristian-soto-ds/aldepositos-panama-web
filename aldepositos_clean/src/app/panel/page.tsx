@@ -19,8 +19,16 @@ import { CompletedReportsModule } from "@/components/control-panel/CompletedRepo
 import { LiveMonitor } from "@/components/control-panel/LiveMonitor";
 import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
 import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
+import { ProductivityInsightsPanel } from "@/components/control-panel/ProductivityInsightsPanel";
+import { UserOptionsPanel } from "@/components/control-panel/UserOptionsPanel";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
+import {
+  DEFAULT_USER_PREFERENCES,
+  sanitizeUserPreferences,
+  userPrefsStorageKey,
+  type UserPreferences,
+} from "@/lib/userPreferences";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -31,7 +39,13 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
 
 export default function PanelPage() {
   const router = useRouter();
+  const showOptionsModule = process.env.NODE_ENV === "development";
+  const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences>(
+    DEFAULT_USER_PREFERENCES,
+  );
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState("dashboard");
   const { tasks, setTasks, reloadTasks, tasksLoading } = useSupabaseTasks({
@@ -63,15 +77,61 @@ export default function PanelPage() {
   useEffect(() => {
     const checkSession = async () => {
       const { data } = await supabase.auth.getUser();
-      if (!data.user?.email) {
+      const user = data.user;
+      if (!user) {
         router.replace("/login");
       } else {
-        setUserEmail(data.user.email);
+        setUserId(user.id);
+        const email = user.email ?? null;
+        setUserEmail(email);
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, username, email")
+          .eq("id", user.id)
+          .single();
+
+        const displayName =
+          profile?.full_name || profile?.username || profile?.email || email;
+        setUserDisplayName(displayName ?? "Operador Aldepósitos");
+
+        if (typeof window !== "undefined") {
+          const raw = window.localStorage.getItem(userPrefsStorageKey(user.id));
+          if (raw) {
+            try {
+              setPreferences(sanitizeUserPreferences(JSON.parse(raw)));
+            } catch {
+              setPreferences(DEFAULT_USER_PREFERENCES);
+            }
+          } else {
+            setPreferences(DEFAULT_USER_PREFERENCES);
+          }
+        }
       }
       setLoading(false);
     };
     checkSession();
   }, [router]);
+
+  useEffect(() => {
+    if (!userId || typeof window === "undefined") return;
+    window.localStorage.setItem(
+      userPrefsStorageKey(userId),
+      JSON.stringify(preferences),
+    );
+  }, [preferences, userId]);
+
+  useEffect(() => {
+    if (!loading && preferences.startView) {
+      setCurrentView(preferences.startView);
+    }
+  }, [preferences.startView, loading]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    root.classList.toggle("panel-dark", preferences.theme === "dark");
+  }, [preferences.theme]);
 
   const handleImport = async (newTasks: Task[]) => {
     const today = new Date().toISOString().split("T")[0]!;
@@ -279,10 +339,16 @@ export default function PanelPage() {
     return null;
   }
 
+  const visibleView =
+    !showOptionsModule && currentView === "options" ? "dashboard" : currentView;
+
   return (
     <ControlPanelLayout
-      currentView={currentView}
+      currentView={visibleView}
       setCurrentView={setCurrentView}
+      userDisplayName={userDisplayName}
+      preferences={preferences}
+      showOptionsModule={showOptionsModule}
     >
       {tasksLoading && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/70 backdrop-blur-sm">
@@ -294,21 +360,23 @@ export default function PanelPage() {
 
       <div
         className={
-          FULL_HEIGHT_INVENTORY_VIEWS.has(currentView)
+          FULL_HEIGHT_INVENTORY_VIEWS.has(visibleView)
             ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-x-hidden overflow-y-hidden"
             : "flex min-h-0 flex-1 flex-col w-full overflow-x-hidden overflow-y-auto"
         }
       >
-        {currentView === "dashboard" && (
+        {visibleView === "dashboard" && (
           <ControlPanelHome
             tasks={tasks}
             onImport={handleImport}
             openManualModal={() => openManualModal("quick")}
+            userDisplayName={userDisplayName}
             userEmail={userEmail}
+            preferences={preferences}
           />
         )}
 
-        {currentView === "quick-entry" && (
+        {visibleView === "quick-entry" && (
           <QuickInventoryEntry
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
@@ -316,10 +384,12 @@ export default function PanelPage() {
             onTransferTask={handleTransferTask}
             openManualModal={() => openManualModal("quick")}
             openEditModal={openEditModal}
+            presenceUserKey={userEmail}
+            presenceUserLabel={userDisplayName}
           />
         )}
 
-        {currentView === "detailed-entry" && (
+        {visibleView === "detailed-entry" && (
           <DetailedInventoryEntry
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
@@ -327,10 +397,12 @@ export default function PanelPage() {
             onTransferTask={handleTransferTask}
             openManualModal={() => openManualModal("detailed")}
             openEditModal={openEditModal}
+            presenceUserKey={userEmail}
+            presenceUserLabel={userDisplayName}
           />
         )}
 
-        {currentView === "airway" && (
+        {visibleView === "airway" && (
           <QuickInventoryEntry
             moduleType="airway"
             tasks={tasks}
@@ -339,10 +411,12 @@ export default function PanelPage() {
             onTransferTask={handleTransferTask}
             openManualModal={() => openManualModal("airway")}
             openEditModal={openEditModal}
+            presenceUserKey={userEmail}
+            presenceUserLabel={userDisplayName}
           />
         )}
 
-        {currentView === "reports" && (
+        {visibleView === "reports" && (
           <CompletedReportsModule
             tasks={tasks}
             onDeleteTask={handleDeleteTask}
@@ -351,7 +425,14 @@ export default function PanelPage() {
           />
         )}
 
-        {currentView === "dispatch" && (
+        {visibleView === "productivity" && (
+          <ProductivityInsightsPanel
+            tasks={tasks}
+            userDisplayName={userDisplayName}
+          />
+        )}
+
+        {visibleView === "dispatch" && (
           <DispatchEntry
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
@@ -361,12 +442,21 @@ export default function PanelPage() {
           />
         )}
 
-        {currentView === "container-reports" && (
+        {visibleView === "container-reports" && (
           <ContainerReportsModule tasks={tasks} onEditContainer={handleEditContainer} />
         )}
 
-        {currentView === "monitor" && (
+        {visibleView === "monitor" && (
           <LiveMonitor tasks={tasks} onDeleteTask={handleDeleteTask} />
+        )}
+
+        {showOptionsModule && visibleView === "options" && (
+          <UserOptionsPanel
+            userDisplayName={userDisplayName}
+            userEmail={userEmail}
+            preferences={preferences}
+            onChangePreferences={setPreferences}
+          />
         )}
       </div>
 

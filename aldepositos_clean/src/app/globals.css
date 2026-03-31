@@ -96,3 +96,12 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* Tema oscuro de panel (preferencias por usuario) */
+:root.panel-dark body {
+  background: #0b1220;
+}
+
+:root.panel-dark .panel-loading-overlay {
+  background: rgba(11, 18, 32, 0.72);
+}

@@ -88,33 +88,66 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
   }, [tasks]);
 
   const hasAnyRowData = (row: Record<string, unknown>) => {
-    const keys = ["referencia", "bultos", "l", "w", "h"];
+    const keys = [
+      "referencia",
+      "bultos",
+      "l",
+      "w",
+      "h",
+      "descripcion",
+      "unidadesPorBulto",
+      "pesoPorBulto",
+      "referenciaContenedora",
+      "reempaque",
+    ];
     return keys.some((key) => {
       const value = row[key];
       if (value == null) return false;
+      if (typeof value === "boolean") return value;
       return String(value).trim() !== "";
     });
   };
 
-  const isRowCompleteForProgress = (row: Record<string, unknown>) => {
-    const referencia = String(row.referencia ?? "").trim();
-    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-    const l = parseFloat(String(row.l ?? 0)) || 0;
-    const w = parseFloat(String(row.w ?? 0)) || 0;
-    const h = parseFloat(String(row.h ?? 0)) || 0;
-    return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  const getRowRequiredChecks = (
+    row: Record<string, unknown>,
+    moduleType: Task["type"],
+  ): boolean[] => {
+    const isReempaque = row.reempaque === true;
+    const hasReferencia = String(row.referencia ?? "").trim().length > 0;
+    const hasBultos = (parseFloat(String(row.bultos ?? 0)) || 0) > 0;
+    const hasL = (parseFloat(String(row.l ?? 0)) || 0) > 0;
+    const hasW = (parseFloat(String(row.w ?? 0)) || 0) > 0;
+    const hasH = (parseFloat(String(row.h ?? 0)) || 0) > 0;
+    const hasRefCont = String(row.referenciaContenedora ?? "").trim().length > 0;
+
+    // Reglas coherentes con inventario rápido/guía aérea
+    if (moduleType === "quick" || moduleType === "airway") {
+      if (isReempaque) {
+        return [hasReferencia, hasRefCont];
+      }
+      return [hasReferencia, hasBultos, hasL, hasW, hasH];
+    }
+
+    // Reglas coherentes con inventario detallado
+    if (moduleType === "detailed") {
+      if (isReempaque) {
+        return [hasReferencia, hasRefCont];
+      }
+      return [hasReferencia, hasBultos, hasL, hasW, hasH];
+    }
+
+    // Fallback para tipos desconocidos
+    return [hasReferencia, hasBultos, hasL, hasW, hasH];
   };
 
-  const getRowPartialProgress = (row: Record<string, unknown>) => {
-    const checks = [
-      String(row.referencia ?? "").trim().length > 0,
-      (parseFloat(String(row.bultos ?? 0)) || 0) > 0,
-      (parseFloat(String(row.l ?? 0)) || 0) > 0,
-      (parseFloat(String(row.w ?? 0)) || 0) > 0,
-      (parseFloat(String(row.h ?? 0)) || 0) > 0,
-    ];
-    const filled = checks.filter(Boolean).length;
-    return Math.round((filled / checks.length) * 100);
+  const getRowProgressByModule = (
+    row: Record<string, unknown>,
+    moduleType: Task["type"],
+  ) => {
+    const checks = getRowRequiredChecks(row, moduleType);
+    if (checks.length === 0) return 0;
+    const ok = checks.filter(Boolean).length;
+    return Math.round((ok / checks.length) * 100);
   };
 
   const getTaskProgressPercent = (task: Task): number => {
@@ -127,23 +160,25 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
       ? (task.measureData as Record<string, unknown>[])
       : [];
     const effectiveRows = rows.filter((row) => hasAnyRowData(row));
-    const dataProgress =
+    const requiredDataProgress =
       effectiveRows.length > 0
         ? Math.round(
             effectiveRows.reduce(
-              (acc, row) => acc + getRowPartialProgress(row),
+              (acc, row) => acc + getRowProgressByModule(row, task.type),
               0,
             ) / effectiveRows.length,
           )
         : 0;
 
-    // Avance parcial real, pero 100% solo si cumple todos los campos obligatorios.
-    const blended = Math.round(bultosProgress * 0.6 + dataProgress * 0.4);
-    const allRowsComplete =
-      effectiveRows.length > 0 &&
-      effectiveRows.every((row) => isRowCompleteForProgress(row));
-    if (!allRowsComplete && blended >= 100) return 99;
-    return Math.min(100, blended);
+    // Lógica coherente: el progreso real no puede superar su parte más débil.
+    // Si faltan bultos o faltan campos obligatorios, el % refleja ese faltante.
+    if (effectiveRows.length === 0) {
+      return Math.min(100, bultosProgress);
+    }
+
+    const strictProgress = Math.min(requiredDataProgress, bultosProgress);
+    if (task.status === "completed") return 100;
+    return Math.max(0, Math.min(100, strictProgress));
   };
 
   return (

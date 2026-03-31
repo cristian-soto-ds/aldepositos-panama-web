@@ -216,6 +216,28 @@ function getDetailedRowsForPrint(tasks: Task[], fallbackDate: string) {
   }[] = [];
 
   tasks.forEach((t) => {
+    if (
+      t.type === "detailed" &&
+      t.status !== "pending" &&
+      Array.isArray(t.measureData) &&
+      t.measureData.length > 0
+    ) {
+      rows.push({
+        id: t.id,
+        ra: t.ra,
+        partial: t.status === "partial" ? "SÍ" : "NO",
+        provider: t.provider || "N/A",
+        subClient: t.subClient || "N/A",
+        brand: t.brand || "N/A",
+        date: t.date || fallbackDate,
+        bultos: t.currentBultos || t.expectedBultos,
+        weight: (parseFloat(String(t.expectedWeight ?? 0)) || 0).toFixed(2),
+        cbm: (parseFloat(String(t.expectedCbm ?? 0)) || 0).toFixed(2),
+        desc: t.notes || "Carga General (Resumida)",
+      });
+      return;
+    }
+
     if (t.measureData && t.measureData.length > 0) {
       t.measureData.forEach((m: any, idx: number) => {
         const bultos = parseFloat(String(m.bultos ?? 0)) || 0;

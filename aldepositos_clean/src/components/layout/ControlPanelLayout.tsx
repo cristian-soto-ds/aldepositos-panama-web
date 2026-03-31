@@ -1,21 +1,28 @@
 "use client";
 
 import React, { ReactNode, useState } from "react";
-import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch } from "lucide-react";
+import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import type { UserPreferences } from "@/lib/userPreferences";
 
 type ControlPanelLayoutProps = {
   children: ReactNode;
   currentView: string;
   setCurrentView: (view: string) => void;
+  userDisplayName?: string | null;
+  preferences?: UserPreferences;
+  showOptionsModule?: boolean;
 };
 
 export function ControlPanelLayout({
   children,
   currentView,
   setCurrentView,
+  userDisplayName,
+  preferences,
+  showOptionsModule = false,
 }: ControlPanelLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
@@ -26,7 +33,9 @@ export function ControlPanelLayout({
   };
 
   return (
-    <div className="h-dvh min-h-screen bg-slate-50 flex flex-col md:flex-row font-sans text-gray-800 overflow-hidden">
+    <div className={`h-dvh min-h-screen flex flex-col md:flex-row font-sans text-gray-800 overflow-hidden ${
+      preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+    }`}>
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -35,7 +44,9 @@ export function ControlPanelLayout({
       )}
 
       <aside
-        className={`fixed md:relative z-50 w-[86vw] max-w-72 md:w-72 bg-[#16263F] h-full min-h-screen flex flex-col shadow-2xl transition-transform duration-300 ${
+        className={`fixed md:relative z-50 w-[86vw] max-w-72 md:w-72 ${
+          preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
+        } h-full min-h-screen flex flex-col shadow-2xl transition-transform duration-300 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
@@ -106,6 +117,15 @@ export function ControlPanelLayout({
               setSidebarOpen(false);
             }}
           />
+          <NavItem
+            icon={<BarChart3 size={20} />}
+            text="Productividad"
+            active={currentView === "productivity"}
+            onClick={() => {
+              setCurrentView("productivity");
+              setSidebarOpen(false);
+            }}
+          />
 
           <div className="my-6 border-b border-white/5" />
 
@@ -139,9 +159,37 @@ export function ControlPanelLayout({
               setSidebarOpen(false);
             }}
           />
+          {showOptionsModule && (
+            <NavItem
+              icon={<Settings size={20} />}
+              text="Opciones (desarrollo)"
+              active={currentView === "options"}
+              onClick={() => {
+                setCurrentView("options");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
         </nav>
 
         <div className="p-4 md:p-6 border-t border-white/5 bg-black/20 text-center">
+          <div className="mb-3 flex items-center gap-2 justify-center">
+            <div className="w-7 h-7 rounded-full overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+              {preferences?.avatarDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={preferences.avatarDataUrl}
+                  alt="Avatar"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <UserRound size={14} className="text-slate-300" />
+              )}
+            </div>
+          </div>
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">
+            {userDisplayName || "Operador"}
+          </p>
           <button
             onClick={handleLogout}
             className="w-full py-3 md:py-0 text-red-400 font-black text-xs uppercase tracking-[0.2em] hover:text-white transition-colors flex items-center justify-center gap-2"
@@ -151,8 +199,12 @@ export function ControlPanelLayout({
         </div>
       </aside>
 
-      <div className="flex-1 min-h-0 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
-        <header className="md:hidden bg-[#16263F] text-white p-4 flex justify-between items-center shadow-md z-30 shrink-0">
+      <div className={`flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden ${
+        preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+      }`}>
+        <header className={`md:hidden text-white p-4 flex justify-between items-center shadow-md z-30 shrink-0 ${
+          preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
+        }`}>
           <div className="flex items-center gap-3 min-w-0">
             <BrandLogoMark variant="headerCompact" />
             <span className="font-black tracking-tighter uppercase text-lg">

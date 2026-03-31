@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
+import { publishWorkPresence, clearWorkPresence } from "@/lib/panelPresence";
 import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 
 type MeasureRow = {
@@ -29,6 +30,10 @@ type MeasureRow = {
   l?: string | number;
   w?: string | number;
   h?: string | number;
+  reempaque?: boolean;
+  bultoContenedor?: string;
+  referenciasContenedor?: string;
+  referenciaContenedora?: string;
 };
 
 type Task = {
@@ -58,6 +63,8 @@ type DetailedInventoryEntryProps = {
   onTransferTask: (task: any, newType: "quick" | "detailed" | "airway") => void;
   openManualModal: () => void;
   openEditModal: (task: any) => void;
+  presenceUserKey?: string | null;
+  presenceUserLabel?: string | null;
 };
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
@@ -75,9 +82,14 @@ function hasDetailedRequiredData(rows: MeasureRow[]): boolean {
   return rows.every((row) => {
     const referencia = String(row.referencia ?? "").trim();
     const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const esReempaque = row.reempaque === true;
+    const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
+    if (esReempaque) {
+      return referencia.length > 0 && referenciaContenedora.length > 0;
+    }
     return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
   });
 }
@@ -92,6 +104,9 @@ function detailedRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
+    const bultoContenedor = String(row.bultoContenedor ?? "").trim();
+    const referenciasContenedor = String(row.referenciasContenedor ?? "").trim();
+    const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     return (
       referencia.length > 0 ||
       descripcion.length > 0 ||
@@ -100,7 +115,11 @@ function detailedRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
       peso > 0 ||
       l > 0 ||
       w > 0 ||
-      h > 0
+      h > 0 ||
+      row.reempaque === true ||
+      bultoContenedor.length > 0 ||
+      referenciasContenedor.length > 0 ||
+      referenciaContenedora.length > 0
     );
   });
 }
@@ -112,6 +131,8 @@ export function DetailedInventoryEntry({
   onTransferTask,
   openManualModal,
   openEditModal,
+  presenceUserKey = null,
+  presenceUserLabel = null,
 }: DetailedInventoryEntryProps) {
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority"
@@ -129,7 +150,8 @@ export function DetailedInventoryEntry({
   const detailedTasks = tasks.filter((t) => {
     if (t.type !== "detailed") return false;
     if (viewMode === "completed") {
-      return t.status === "completed" || t.status === "partial";
+      // Solo completados reales. "partial" es en curso/captura.
+      return t.status === "completed";
     }
     if (viewMode === "priority") {
       return (
@@ -149,6 +171,9 @@ export function DetailedInventoryEntry({
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [autosaveTick, setAutosaveTick] = useState(0);
+  const [detailedMode, setDetailedMode] = useState<"normal" | "reempaque">(
+    "normal",
+  );
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingRef = useRef(false);
@@ -160,6 +185,35 @@ export function DetailedInventoryEntry({
   const latestTaskRef = useRef<Task | null>(null);
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
+  const presenceTabIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `tab-${Math.random().toString(36).slice(2, 11)}`,
+  );
+
+  useEffect(() => {
+    const key = (presenceUserKey ?? "").trim();
+    if (!key || !selectedTask) {
+      clearWorkPresence(presenceTabIdRef.current);
+      return;
+    }
+    const label = (presenceUserLabel ?? key).trim() || "Operador";
+    const send = () => {
+      publishWorkPresence({
+        tabId: presenceTabIdRef.current,
+        userKey: key,
+        userLabel: label,
+        ra: String(selectedTask.ra ?? "").trim(),
+        module: "detailed",
+      });
+    };
+    send();
+    const interval = window.setInterval(send, 12000);
+    return () => {
+      window.clearInterval(interval);
+      clearWorkPresence(presenceTabIdRef.current);
+    };
+  }, [selectedTask, presenceUserKey, presenceUserLabel]);
 
   const groupedTasks = detailedTasks.reduce<Record<string, Task[]>>(
     (groups, task) => {
@@ -209,11 +263,13 @@ export function DetailedInventoryEntry({
       const l = parseFloat(String(row.l ?? 0)) || 0;
       const w = parseFloat(String(row.w ?? 0)) || 0;
       const h = parseFloat(String(row.h ?? 0)) || 0;
+      const isReempaque = row.reempaque === true;
+      const countedBultos = isReempaque ? 0 : rowBultos;
 
-      bultos += rowBultos;
-      weight += rowBultos * rowPesoPorBulto;
-      unidades += rowBultos * rowUnidadesPorBulto;
-      cbm += ((l * w * h) / 1_000_000) * rowBultos;
+      bultos += countedBultos;
+      weight += countedBultos * rowPesoPorBulto;
+      unidades += countedBultos * rowUnidadesPorBulto;
+      cbm += isReempaque ? 0 : ((l * w * h) / 1_000_000) * countedBultos;
     });
 
     return {
@@ -242,6 +298,10 @@ export function DetailedInventoryEntry({
               l: "",
               w: "",
               h: "",
+              reempaque: false,
+              bultoContenedor: "",
+              referenciasContenedor: "",
+              referenciaContenedora: "",
             },
           ];
 
@@ -261,6 +321,8 @@ export function DetailedInventoryEntry({
     }
 
     setMeasureRows(rowsToUse);
+    const hasReempaqueRows = rowsToUse.some((row) => row.reempaque === true);
+    setDetailedMode(hasReempaqueRows ? "reempaque" : "normal");
     latestRowsRef.current = rowsToUse;
     latestTaskRef.current = task;
     lastSavedHashRef.current = JSON.stringify({ rows: rowsToUse });
@@ -290,6 +352,10 @@ export function DetailedInventoryEntry({
         l: "",
         w: "",
         h: "",
+        reempaque: false,
+        bultoContenedor: "",
+        referenciasContenedor: "",
+        referenciaContenedora: "",
       },
     ]);
   };
@@ -341,6 +407,10 @@ export function DetailedInventoryEntry({
             l: "",
             w: "",
             h: "",
+            reempaque: false,
+            bultoContenedor: "",
+            referenciasContenedor: "",
+            referenciaContenedora: "",
           });
         }
         if (additions.length === 0) {
@@ -374,9 +444,33 @@ export function DetailedInventoryEntry({
     );
   };
 
-  const updateRowValue = (id: string, field: keyof MeasureRow, value: string) => {
+  const updateRowValue = (
+    id: string,
+    field: keyof MeasureRow,
+    value: string | boolean | string[],
+  ) => {
     setMeasureRows((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+    );
+  };
+
+  const toggleReempaque = (rowId: string, enabled: boolean) => {
+    setMeasureRows((prev) =>
+      prev.map((row) =>
+        row.id !== rowId
+          ? row
+          : {
+              ...row,
+              reempaque: enabled,
+              l: enabled ? "" : row.l,
+              w: enabled ? "" : row.w,
+              h: enabled ? "" : row.h,
+              bultos: enabled ? "0" : row.bultos,
+              bultoContenedor: enabled ? row.bultoContenedor ?? "" : "",
+              referenciasContenedor: enabled ? row.referenciasContenedor ?? "" : "",
+              referenciaContenedora: enabled ? row.referenciaContenedora ?? "" : "",
+            },
+      ),
     );
   };
 
@@ -407,9 +501,11 @@ export function DetailedInventoryEntry({
       const l = parseFloat(String(row.l ?? 0)) || 0;
       const w = parseFloat(String(row.w ?? 0)) || 0;
       const h = parseFloat(String(row.h ?? 0)) || 0;
-      bultos += rowBultos;
-      weight += rowBultos * rowPesoPorBulto;
-      cbm += ((l * w * h) / 1_000_000) * rowBultos;
+      const isReempaque = row.reempaque === true;
+      const countedBultos = isReempaque ? 0 : rowBultos;
+      bultos += countedBultos;
+      weight += countedBultos * rowPesoPorBulto;
+      cbm += isReempaque ? 0 : ((l * w * h) / 1_000_000) * countedBultos;
     });
 
     const hasCapture = detailedRowsHaveAnyCapture(rows);
@@ -789,7 +885,34 @@ export function DetailedInventoryEntry({
             <ArrowLeft className="w-4 h-4" />{" "}
             <span className="hidden md:inline">Volver al listado</span>
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex items-center gap-2">
+              <div className="rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setDetailedMode("normal")}
+                  className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    detailedMode === "normal"
+                      ? "bg-[#16263F] text-white"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailedMode("reempaque")}
+                  className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    detailedMode === "reempaque"
+                      ? "bg-amber-500 text-white"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  Con Reempaque
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
             <span className="bg-white text-[#16263F] border border-slate-200 px-6 py-3 rounded-xl text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
               <ClipboardCheck className="w-5 h-5 text-blue-600" /> RA-{t.ra}
             </span>
@@ -813,6 +936,7 @@ export function DetailedInventoryEntry({
                     ? "Error al guardar"
                     : "Listo"}
             </span>
+            </div>
           </div>
         </div>
 
@@ -1034,7 +1158,7 @@ export function DetailedInventoryEntry({
 
             <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)]">
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
-              <table className="w-full min-w-[1300px] border-collapse text-left text-sm">
+              <table className={`w-full border-collapse text-left text-sm ${detailedMode === "reempaque" ? "min-w-[1500px]" : "min-w-[1240px]"}`}>
                 <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                   <tr>
                     <th className="w-10 px-2 py-2 text-center">#</th>
@@ -1051,6 +1175,12 @@ export function DetailedInventoryEntry({
                     <th className="w-20 bg-slate-50 px-2 py-2 text-center">
                       PESO TOT
                     </th>
+                    {detailedMode === "reempaque" && (
+                      <th className="w-24 px-2 py-2 text-center">REEMPAQUE</th>
+                    )}
+                    {detailedMode === "reempaque" && (
+                      <th className="w-28 px-2 py-2 text-center">REF CONT.</th>
+                    )}
                     <th className="w-20 px-2 py-2 text-center">L (CM)</th>
                     <th className="w-20 px-2 py-2 text-center">W (CM)</th>
                     <th className="w-20 px-2 py-2 text-center">H (CM)</th>
@@ -1077,9 +1207,16 @@ export function DetailedInventoryEntry({
                     const l = parseFloat(String(row.l ?? 0)) || 0;
                     const w = parseFloat(String(row.w ?? 0)) || 0;
                     const h = parseFloat(String(row.h ?? 0)) || 0;
-                    const cbmPorBulto = (l * w * h) / 1_000_000;
+                    const isReempaque =
+                      detailedMode === "reempaque" && row.reempaque === true;
+                    const cbmPorBulto = isReempaque ? 0 : (l * w * h) / 1_000_000;
                     const cubicajeTotal = cbmPorBulto * bultos;
-
+                    const containerRefOptions = measureRows
+                      .filter((candidate) => candidate.id !== row.id && candidate.reempaque !== true)
+                      .filter((candidate) => (parseFloat(String(candidate.bultos ?? 0)) || 0) > 0)
+                      .map((candidate) => String(candidate.referencia ?? "").trim())
+                      .filter((ref) => ref.length > 0);
+                    const uniqueContainerRefOptions = Array.from(new Set(containerRefOptions));
                     return (
                       <tr
                         key={row.id}
@@ -1115,12 +1252,13 @@ export function DetailedInventoryEntry({
                         <td className="bg-purple-50/50 px-2 py-1">
                           <input
                             type="number"
+                            disabled={isReempaque}
                             onChange={(e) =>
                               updateRowValue(row.id, "bultos", e.target.value)
                             }
                             value={row.bultos ?? ""}
                             className="no-spinners w-full rounded-lg border border-purple-200 bg-white py-1 text-center text-sm font-black text-purple-700 outline-none transition-all focus:border-purple-400"
-                            placeholder="0"
+                            placeholder={isReempaque ? "--" : "0"}
                           />
                         </td>
 
@@ -1164,38 +1302,81 @@ export function DetailedInventoryEntry({
                         <td className="bg-slate-50 px-2 py-1 text-center text-sm font-black text-[#16263F]">
                           {pesoTotal.toFixed(2)}
                         </td>
-
+                        {detailedMode === "reempaque" && (
+                          <td className="px-2 py-1 text-center">
+                            <button
+                              type="button"
+                              onClick={() => toggleReempaque(row.id, !isReempaque)}
+                              className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wider ${
+                                isReempaque
+                                  ? "bg-amber-500 text-white"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              {isReempaque ? "Si" : "No"}
+                            </button>
+                          </td>
+                        )}
+                        {detailedMode === "reempaque" && (
+                          <td className="px-2 py-1">
+                            {isReempaque ? (
+                            <select
+                              value={row.referenciaContenedora || ""}
+                              onChange={(e) =>
+                                updateRowValue(
+                                  row.id,
+                                  "referenciaContenedora",
+                                  e.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-black text-amber-900 outline-none transition-all focus:border-amber-500"
+                            >
+                              <option value="">Selecciona referencia</option>
+                              {uniqueContainerRefOptions.map((ref) => (
+                                <option key={`${row.id}-host-${ref}`} value={ref}>
+                                  {ref}
+                                </option>
+                              ))}
+                            </select>
+                            ) : (
+                              <span className="text-[10px] font-bold text-slate-400">N/A</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-2 py-1">
                           <input
                             type="number"
+                            disabled={isReempaque}
                             onChange={(e) =>
                               updateRowValue(row.id, "l", e.target.value)
                             }
                             value={row.l ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
-                            placeholder="0"
+                            placeholder={isReempaque ? "--" : "0"}
                           />
                         </td>
                         <td className="px-2 py-1">
                           <input
                             type="number"
+                            disabled={isReempaque}
                             onChange={(e) =>
                               updateRowValue(row.id, "w", e.target.value)
                             }
                             value={row.w ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
-                            placeholder="0"
+                            placeholder={isReempaque ? "--" : "0"}
                           />
                         </td>
                         <td className="px-2 py-1">
                           <input
                             type="number"
+                            disabled={isReempaque}
                             onChange={(e) =>
                               updateRowValue(row.id, "h", e.target.value)
                             }
                             value={row.h ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-slate-400"
-                            placeholder="0"
+                            placeholder={isReempaque ? "--" : "0"}
                           />
                         </td>
 

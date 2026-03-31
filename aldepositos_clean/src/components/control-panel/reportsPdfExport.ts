@@ -93,20 +93,12 @@ export async function capturePdfExportRoot(el: HTMLElement): Promise<HTMLCanvasE
   return canvas;
 }
 
-/**
- * Carta vertical: el bitmap se escala al máximo que cabe en el rectángulo
- * útil (márgenes ~12 mm), manteniendo proporción y centrado.
- */
-export function savePdfSinglePageLetter(
+function addCanvasAsLetterPage(
+  pdf: jsPDF,
   canvas: HTMLCanvasElement,
-  filename: string,
+  pageIndex: number,
+  totalPages: number,
 ): void {
-  const pdf = new jsPDF({
-    orientation: "portrait",
-    unit: "mm",
-    format: "letter",
-  });
-
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
   const margin = 12;
@@ -129,6 +121,34 @@ export function savePdfSinglePageLetter(
   const y = margin + (maxH - hMm) / 2;
 
   pdf.addImage(canvas, "PNG", x, y, wMm, hMm);
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFontSize(8);
+  pdf.text(`Pagina ${pageIndex + 1} de ${totalPages}`, pageW - margin, pageH - 5, {
+    align: "right",
+  });
+}
+
+/**
+ * Carta vertical multipagina: agrega una pagina PDF por cada hoja renderizada.
+ */
+export async function savePdfLetterFromPages(
+  pageElements: HTMLElement[],
+  filename: string,
+): Promise<void> {
+  if (pageElements.length === 0) {
+    throw new Error("[Reports PDF] No hay paginas para exportar.");
+  }
+
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "letter",
+  });
+  for (let i = 0; i < pageElements.length; i += 1) {
+    const canvas = await capturePdfExportRoot(pageElements[i]);
+    if (i > 0) pdf.addPage("letter", "portrait");
+    addCanvasAsLetterPage(pdf, canvas, i, pageElements.length);
+  }
   pdf.save(filename);
 }
 
@@ -143,6 +163,12 @@ export async function exportReportPdfFromExportRoot(
     throw new Error("[Reports PDF] Contenedor no está en el DOM.");
   }
 
-  const canvas = await capturePdfExportRoot(root);
-  savePdfSinglePageLetter(canvas, filename);
+  const pageElements = Array.from(
+    root.querySelectorAll<HTMLElement>("[data-report-export-page]"),
+  );
+  if (pageElements.length > 0) {
+    await savePdfLetterFromPages(pageElements, filename);
+    return;
+  }
+  await savePdfLetterFromPages([root], filename);
 }

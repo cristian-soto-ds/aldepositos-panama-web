@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
+import { publishWorkPresence, clearWorkPresence } from "@/lib/panelPresence";
 import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
@@ -32,6 +33,9 @@ type QuickInventoryEntryProps = {
   onTransferTask: (task: Task, newType: "quick" | "detailed" | "airway") => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
+  /** Si se envía, el panel principal puede mostrar quién tiene un RA abierto (pestañas mismo equipo). */
+  presenceUserKey?: string | null;
+  presenceUserLabel?: string | null;
 };
 
 type MeasureRow = {
@@ -42,6 +46,11 @@ type MeasureRow = {
   w?: string | number;
   h?: string | number;
   weight?: string | number;
+  reempaque?: boolean;
+  bultoContenedor?: string;
+  referenciasContenedor?: string;
+  reempaqueRefs?: string[];
+  referenciaContenedora?: string;
 };
 
 type WeightMode = "no_weight" | "per_bundle" | "by_reference" | "excel_fixed";
@@ -51,6 +60,7 @@ type QuickDraft = {
   updatedAt: number;
   rows: MeasureRow[];
   weightMode: WeightMode;
+  quickMode?: "normal" | "reempaque";
 };
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -58,14 +68,22 @@ const QUICK_AUTOSAVE_MS = 700;
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
   `${kind}_inventory_draft_v1_${taskId}`;
 
-function hasQuickRequiredData(rows: MeasureRow[]): boolean {
+function hasQuickRequiredData(
+  rows: MeasureRow[],
+  quickMode: "normal" | "reempaque",
+): boolean {
   if (rows.length === 0) return false;
   return rows.every((row) => {
     const referencia = String(row.referencia ?? "").trim();
     const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const esReempaque = quickMode === "reempaque" && row.reempaque === true;
+    const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
+    if (esReempaque) {
+      return referencia.length > 0 && referenciaContenedora.length > 0;
+    }
     return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
   });
 }
@@ -79,13 +97,24 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
     const weight = parseFloat(String(row.weight ?? 0)) || 0;
+    const bultoContenedor = String(row.bultoContenedor ?? "").trim();
+    const referenciasContenedor = String(row.referenciasContenedor ?? "").trim();
+    const reempaqueRefsCount = Array.isArray(row.reempaqueRefs)
+      ? row.reempaqueRefs.length
+      : 0;
+    const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     return (
       referencia.length > 0 ||
       bultos > 0 ||
       l > 0 ||
       w > 0 ||
       h > 0 ||
-      weight > 0
+      weight > 0 ||
+      row.reempaque === true ||
+      bultoContenedor.length > 0 ||
+      referenciasContenedor.length > 0 ||
+      reempaqueRefsCount > 0 ||
+      referenciaContenedora.length > 0
     );
   });
 }
@@ -98,6 +127,8 @@ export function QuickInventoryEntry({
   onTransferTask,
   openManualModal,
   openEditModal,
+  presenceUserKey = null,
+  presenceUserLabel = null,
 }: QuickInventoryEntryProps) {
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority"
@@ -133,6 +164,7 @@ export function QuickInventoryEntry({
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState<string>("Todos");
   const [weightMode, setWeightMode] = useState<WeightMode>("by_reference");
+  const [quickMode, setQuickMode] = useState<"normal" | "reempaque">("normal");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [autosaveTick, setAutosaveTick] = useState(0);
@@ -145,9 +177,40 @@ export function QuickInventoryEntry({
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestModeRef = useRef<WeightMode>("by_reference");
+  const latestQuickModeRef = useRef<"normal" | "reempaque">("normal");
   const latestTaskRef = useRef<Task | null>(null);
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
+  const presenceTabIdRef = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `tab-${Math.random().toString(36).slice(2, 11)}`,
+  );
+
+  useEffect(() => {
+    const key = (presenceUserKey ?? "").trim();
+    if (!key || !selectedTask) {
+      clearWorkPresence(presenceTabIdRef.current);
+      return;
+    }
+    const label = (presenceUserLabel ?? key).trim() || "Operador";
+    const module = moduleType === "airway" ? ("airway" as const) : ("quick" as const);
+    const send = () => {
+      publishWorkPresence({
+        tabId: presenceTabIdRef.current,
+        userKey: key,
+        userLabel: label,
+        ra: String(selectedTask.ra ?? "").trim(),
+        module,
+      });
+    };
+    send();
+    const interval = window.setInterval(send, 12000);
+    return () => {
+      window.clearInterval(interval);
+      clearWorkPresence(presenceTabIdRef.current);
+    };
+  }, [selectedTask, presenceUserKey, presenceUserLabel, moduleType]);
 
   const groupedTasks = moduleTasks.reduce<Record<string, Task[]>>((groups, task) => {
     const client = task.mainClient || "Sin Cliente";
@@ -167,16 +230,17 @@ export function QuickInventoryEntry({
   const calculateTotals = () => {
     if (!selectedTask) return { bultos: 0, cbm: "0.000", weight: 0 };
 
-    const bultos = measureRows.reduce(
-      (a, b) => a + (parseFloat(String(b.bultos)) || 0),
-      0,
-    );
+    const bultos = measureRows.reduce((a, row) => {
+      const isReempaque = quickMode === "reempaque" && row.reempaque === true;
+      return a + (isReempaque ? 0 : parseFloat(String(row.bultos)) || 0);
+    }, 0);
     const cbmNumber = measureRows.reduce((acc, row) => {
       const l = parseFloat(String(row.l)) || 0;
       const w = parseFloat(String(row.w)) || 0;
       const h = parseFloat(String(row.h)) || 0;
       const b = parseFloat(String(row.bultos)) || 0;
-      return acc + ((l * w * h) / 1_000_000) * b;
+      const isReempaque = quickMode === "reempaque" && row.reempaque === true;
+      return acc + (isReempaque ? 0 : ((l * w * h) / 1_000_000) * b);
     }, 0);
 
     let weight = 0;
@@ -210,12 +274,18 @@ export function QuickInventoryEntry({
               w: "",
               h: "",
               weight: "",
+              reempaque: false,
+              bultoContenedor: "",
+              referenciasContenedor: "",
+              reempaqueRefs: [],
+              referenciaContenedora: "",
             },
           ];
     const taskWeightMode = ((task.weightMode as WeightMode) || "by_reference") as WeightMode;
 
     let rowsToUse = taskRows;
     let modeToUse = taskWeightMode;
+    let quickModeToUse: "normal" | "reempaque" = "normal";
     if (typeof window !== "undefined") {
       const rawDraft = window.localStorage.getItem(
         inventoryDraftKey(task.id, moduleType),
@@ -226,6 +296,9 @@ export function QuickInventoryEntry({
           if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
             rowsToUse = parsed.rows;
             modeToUse = parsed.weightMode || taskWeightMode;
+            if (parsed.quickMode === "reempaque" || parsed.quickMode === "normal") {
+              quickModeToUse = parsed.quickMode;
+            }
           }
         } catch {
           // ignore invalid draft
@@ -235,12 +308,14 @@ export function QuickInventoryEntry({
 
     setMeasureRows(rowsToUse);
     setWeightMode(modeToUse);
+    setQuickMode(quickModeToUse);
     latestRowsRef.current = rowsToUse;
     latestModeRef.current = modeToUse;
     latestTaskRef.current = task;
     lastSavedHashRef.current = JSON.stringify({
       rows: rowsToUse,
       weightMode: modeToUse,
+      quickMode: quickModeToUse,
     });
     setAutosaveState("idle");
   };
@@ -265,6 +340,11 @@ export function QuickInventoryEntry({
         w: "",
         h: "",
         weight: "",
+        reempaque: false,
+        bultoContenedor: "",
+        referenciasContenedor: "",
+        reempaqueRefs: [],
+        referenciaContenedora: "",
       },
     ]);
 
@@ -313,6 +393,11 @@ export function QuickInventoryEntry({
             w: "",
             h: "",
             weight: "",
+            reempaque: false,
+            bultoContenedor: "",
+            referenciasContenedor: "",
+            reempaqueRefs: [],
+            referenciaContenedora: "",
           });
         }
         if (additions.length === 0) {
@@ -346,21 +431,52 @@ export function QuickInventoryEntry({
     );
   };
 
-  const updateRowValue = (id: string, field: keyof MeasureRow, value: string) =>
+  const updateRowValue = (
+    id: string,
+    field: keyof MeasureRow,
+    value: string | boolean | string[],
+  ) =>
     setMeasureRows((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
+
+  const toggleReempaque = (rowId: string, enabled: boolean) => {
+    setMeasureRows((prev) =>
+      prev.map((row) =>
+        row.id !== rowId
+          ? row
+          : {
+              ...row,
+              reempaque: enabled,
+              l: enabled ? "" : row.l,
+              w: enabled ? "" : row.w,
+              h: enabled ? "" : row.h,
+              bultos: enabled ? "0" : row.bultos,
+              bultoContenedor: enabled ? row.bultoContenedor ?? "" : "",
+              referenciasContenedor: enabled ? row.referenciasContenedor ?? "" : "",
+              reempaqueRefs: enabled ? row.reempaqueRefs ?? [] : [],
+              referenciaContenedora: enabled ? row.referenciaContenedora ?? "" : "",
+            },
+      ),
+    );
+  };
 
   const updateWeightMode = (mode: WeightMode) => {
     setWeightMode(mode);
   };
 
-  const persistQuickDraft = (taskId: string, rows: MeasureRow[], mode: WeightMode) => {
+  const persistQuickDraft = (
+    taskId: string,
+    rows: MeasureRow[],
+    mode: WeightMode,
+    qMode: "normal" | "reempaque",
+  ) => {
     if (typeof window === "undefined") return;
     const draft: QuickDraft = {
       updatedAt: Date.now(),
       rows: JSON.parse(JSON.stringify(rows)) as MeasureRow[],
       weightMode: mode,
+      quickMode: qMode,
     };
     window.localStorage.setItem(
       inventoryDraftKey(taskId, moduleType),
@@ -372,6 +488,7 @@ export function QuickInventoryEntry({
     task: Task,
     rows: MeasureRow[],
     mode: WeightMode,
+    qMode: "normal" | "reempaque",
     hash: string,
   ) => {
     if (isSavingRef.current) {
@@ -383,15 +500,15 @@ export function QuickInventoryEntry({
     setAutosaveState("saving");
 
     const hasCapture = quickRowsHaveAnyCapture(rows);
-    const totalsBultos = rows.reduce(
-      (a, b) => a + (parseFloat(String(b.bultos)) || 0),
-      0,
-    );
+    const totalsBultos = rows.reduce((a, row) => {
+      const isReempaque = qMode === "reempaque" && row.reempaque === true;
+      return a + (isReempaque ? 0 : parseFloat(String(row.bultos)) || 0);
+    }, 0);
     const originalExpected = task.originalExpectedBultos || task.expectedBultos;
     const isCompleted =
       hasCapture &&
       totalsBultos >= task.expectedBultos &&
-      hasQuickRequiredData(rows);
+      hasQuickRequiredData(rows, qMode);
 
     const persistedRows = hasCapture ? rows : [];
     if (!hasCapture && typeof window !== "undefined") {
@@ -428,6 +545,7 @@ export function QuickInventoryEntry({
           JSON.stringify({
             rows: latestRowsRef.current,
             weightMode: latestModeRef.current,
+            quickMode: latestQuickModeRef.current,
           });
         queuedHashRef.current = "";
         if (latestTaskRef.current) {
@@ -435,6 +553,7 @@ export function QuickInventoryEntry({
             latestTaskRef.current,
             latestRowsRef.current,
             latestModeRef.current,
+            latestQuickModeRef.current,
             latestHash,
           );
         }
@@ -446,16 +565,17 @@ export function QuickInventoryEntry({
     if (!selectedTask) return;
     latestRowsRef.current = measureRows;
     latestModeRef.current = weightMode;
+    latestQuickModeRef.current = quickMode;
     latestTaskRef.current = selectedTask;
-    const hash = JSON.stringify({ rows: measureRows, weightMode });
-    persistQuickDraft(selectedTask.id, measureRows, weightMode);
+    const hash = JSON.stringify({ rows: measureRows, weightMode, quickMode });
+    persistQuickDraft(selectedTask.id, measureRows, weightMode, quickMode);
     if (hash === lastSavedHashRef.current) return;
 
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
     }
     autosaveTimerRef.current = setTimeout(() => {
-      void runAutosave(selectedTask, measureRows, weightMode, hash);
+      void runAutosave(selectedTask, measureRows, weightMode, quickMode, hash);
     }, QUICK_AUTOSAVE_MS);
 
     return () => {
@@ -464,7 +584,7 @@ export function QuickInventoryEntry({
         autosaveTimerRef.current = null;
       }
     };
-  }, [measureRows, weightMode, selectedTask, moduleType]);
+  }, [measureRows, weightMode, quickMode, selectedTask, moduleType]);
 
   const saveOrder = () => {
     if (!selectedTask) return;
@@ -475,7 +595,7 @@ export function QuickInventoryEntry({
     const isCompleted =
       hasCapture &&
       totals.bultos >= selectedTask.expectedBultos &&
-      hasQuickRequiredData(measureRows);
+      hasQuickRequiredData(measureRows, quickMode);
 
     const persistedRows = hasCapture ? measureRows : [];
     if (!hasCapture && typeof window !== "undefined") {
@@ -818,29 +938,55 @@ export function QuickInventoryEntry({
           <span className="hidden md:inline">Volver al listado</span>
         </button>
         <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch md:items-center gap-2 md:gap-4">
-          <div className="bg-white border border-slate-200 p-1 rounded-full flex text-[10px] md:text-sm font-bold text-slate-500 shadow-sm w-full md:w-auto">
-            <button
-              type="button"
-              onClick={() => updateWeightMode("by_reference")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-full transition-all ${
-                weightMode === "by_reference"
-                  ? "bg-[#16263F] text-white shadow"
-                  : "hover:bg-slate-50"
-              }`}
-            >
-              Por Referencia
-            </button>
-            <button
-              type="button"
-              onClick={() => updateWeightMode("per_bundle")}
-              className={`flex-1 md:flex-none px-4 py-2 rounded-full transition-all ${
-                weightMode === "per_bundle"
-                  ? "bg-[#16263F] text-white shadow"
-                  : "hover:bg-slate-50"
-              }`}
-            >
-              Por Peso
-            </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+            <div className="rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setQuickMode("normal")}
+                className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest ${
+                  quickMode === "normal"
+                    ? "bg-[#16263F] text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                Normal
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuickMode("reempaque")}
+                className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest ${
+                  quickMode === "reempaque"
+                    ? "bg-amber-500 text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                Con Reempaque
+              </button>
+            </div>
+            <div className="bg-white border border-slate-200 p-1 rounded-full flex text-[10px] md:text-sm font-bold text-slate-500 shadow-sm w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => updateWeightMode("by_reference")}
+                className={`flex-1 sm:flex-none px-4 py-2 rounded-full transition-all ${
+                  weightMode === "by_reference"
+                    ? "bg-[#16263F] text-white shadow"
+                    : "hover:bg-slate-50"
+                }`}
+              >
+                Por Referencia
+              </button>
+              <button
+                type="button"
+                onClick={() => updateWeightMode("per_bundle")}
+                className={`flex-1 sm:flex-none px-4 py-2 rounded-full transition-all ${
+                  weightMode === "per_bundle"
+                    ? "bg-[#16263F] text-white shadow"
+                    : "hover:bg-slate-50"
+                }`}
+              >
+                Por Peso
+              </button>
+            </div>
           </div>
 
           {t && (
@@ -1093,7 +1239,11 @@ export function QuickInventoryEntry({
 
           <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)]">
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
-            <table className="w-full min-w-[700px] border-collapse text-left text-sm md:min-w-full">
+            <table
+              className={`w-full border-collapse text-left text-sm md:min-w-full ${
+                quickMode === "reempaque" ? "min-w-[1180px]" : "min-w-[980px]"
+              }`}
+            >
               <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                 <tr>
                   <th className="w-10 px-2 py-2 text-center">#</th>
@@ -1101,6 +1251,12 @@ export function QuickInventoryEntry({
                     <th className="w-32 px-2 py-2 text-left">REFERENCIA</th>
                   )}
                   <th className="w-28 px-2 py-2 text-center">BULTOS</th>
+                  {quickMode === "reempaque" && (
+                    <th className="w-24 px-2 py-2 text-center">REEMPAQUE</th>
+                  )}
+                  {quickMode === "reempaque" && (
+                    <th className="w-28 px-2 py-2 text-center">REF CONT.</th>
+                  )}
                   {showWeightColumn && (
                     <th className="w-28 px-2 py-2 text-center">PESO(KG)</th>
                   )}
@@ -1119,7 +1275,15 @@ export function QuickInventoryEntry({
                   const w = parseFloat(String(row.w)) || 0;
                   const h = parseFloat(String(row.h)) || 0;
                   const b = parseFloat(String(row.bultos)) || 0;
-                  const rowCbm = ((l * w * h) / 1_000_000) * b;
+                  const isReempaque =
+                    quickMode === "reempaque" && row.reempaque === true;
+                  const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+                  const containerRefOptions = measureRows
+                    .filter((candidate) => candidate.id !== row.id && candidate.reempaque !== true)
+                    .filter((candidate) => (parseFloat(String(candidate.bultos ?? 0)) || 0) > 0)
+                    .map((candidate) => String(candidate.referencia ?? "").trim())
+                    .filter((ref) => ref.length > 0);
+                  const uniqueContainerRefOptions = Array.from(new Set(containerRefOptions));
 
                   return (
                     <tr
@@ -1151,14 +1315,59 @@ export function QuickInventoryEntry({
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          disabled={isReempaque}
                           onChange={(e) =>
                             updateRowValue(row.id, "bultos", e.target.value)
                           }
                           value={row.bultos ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-black text-blue-600 outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500/25"
-                          placeholder=""
+                          placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
+
+                      {quickMode === "reempaque" && (
+                        <td className="px-2 py-1 text-center">
+                          <button
+                            type="button"
+                            onClick={() => toggleReempaque(row.id, !isReempaque)}
+                            className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wider ${
+                              isReempaque
+                                ? "bg-amber-500 text-white"
+                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}
+                          >
+                            {isReempaque ? "Sí" : "No"}
+                          </button>
+                        </td>
+                      )}
+                      {quickMode === "reempaque" && (
+                        <td className="px-2 py-1">
+                          {isReempaque ? (
+                            <select
+                              value={row.referenciaContenedora || ""}
+                              onChange={(e) =>
+                                updateRowValue(
+                                  row.id,
+                                  "referenciaContenedora",
+                                  e.target.value,
+                                )
+                              }
+                              className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-black text-amber-900 outline-none transition-all focus:border-amber-500"
+                            >
+                              <option value="">Selecciona referencia</option>
+                              {uniqueContainerRefOptions.map((ref) => (
+                                <option key={`${row.id}-host-${ref}`} value={ref}>
+                                  {ref}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400">
+                              N/A
+                            </span>
+                          )}
+                        </td>
+                      )}
 
                       {showWeightColumn && (
                         <td className="px-2 py-1">
@@ -1177,34 +1386,37 @@ export function QuickInventoryEntry({
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          disabled={isReempaque}
                           onChange={(e) =>
                             updateRowValue(row.id, "l", e.target.value)
                           }
                           value={row.l ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
-                          placeholder=""
+                          placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          disabled={isReempaque}
                           onChange={(e) =>
                             updateRowValue(row.id, "w", e.target.value)
                           }
                           value={row.w ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
-                          placeholder=""
+                          placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
                       <td className="px-2 py-1">
                         <input
                           type="number"
+                          disabled={isReempaque}
                           onChange={(e) =>
                             updateRowValue(row.id, "h", e.target.value)
                           }
                           value={row.h ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
-                          placeholder=""
+                          placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
 

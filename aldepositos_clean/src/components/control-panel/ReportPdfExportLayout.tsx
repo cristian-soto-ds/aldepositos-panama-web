@@ -74,7 +74,8 @@ function computeTotals(task: Task) {
         const w = parseFloat(String(row.w ?? 0)) || 0;
         const h = parseFloat(String(row.h ?? 0)) || 0;
         const b = parseFloat(String(row.bultos ?? 0)) || 0;
-        return acc + ((l * w * h) / 1_000_000) * b;
+        const isReempaque = row.reempaque === true;
+        return acc + (isReempaque ? 0 : ((l * w * h) / 1_000_000) * b);
       }, 0)
       .toFixed(2),
     weight: totalWeight,
@@ -128,27 +129,39 @@ export function ReportPdfExportLayout({
     color: "#ffffff",
   };
 
+  const rowsPerPage = isDetailed ? (compact ? 18 : 14) : compact ? 24 : 18;
+  const rowPages: Record<string, unknown>[][] = [];
+  for (let i = 0; i < measureRows.length; i += rowsPerPage) {
+    rowPages.push(measureRows.slice(i, i + rowsPerPage));
+  }
+  if (rowPages.length === 0) rowPages.push([]);
+
   return (
-    <div
-      style={{
-        width: `${PDF_EXPORT_WIDTH_PX}px`,
-        minHeight: compact ? undefined : LETTER_HEIGHT_PX,
-        boxSizing: "border-box",
-        backgroundColor: "#ffffff",
-        color: TEXT,
-        fontFamily:
-          'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
-        fontSize: fs,
-        lineHeight: 1.45,
-        padding: `${padY}px ${padX}px`,
-        marginBottom: compact ? 20 : 0,
-        border: "none",
-        position: "relative",
-        overflow: "visible",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
+    <>
+      {rowPages.map((pageRows, pageIndex) => (
+        <div
+          key={`${task.id}-page-${pageIndex}`}
+          data-report-export-page
+          style={{
+            width: `${PDF_EXPORT_WIDTH_PX}px`,
+            minHeight: compact ? undefined : LETTER_HEIGHT_PX,
+            boxSizing: "border-box",
+            backgroundColor: "#ffffff",
+            color: TEXT,
+            fontFamily:
+              'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
+            fontSize: fs,
+            lineHeight: 1.45,
+            padding: `${padY}px ${padX}px`,
+            marginBottom: compact ? 20 : 0,
+            border: "none",
+            position: "relative",
+            overflow: "visible",
+            display: "flex",
+            flexDirection: "column",
+            breakAfter: pageIndex < rowPages.length - 1 ? "page" : "auto",
+          }}
+        >
       {/* Encabezado — ancho útil carta */}
       <div
         style={{
@@ -248,6 +261,7 @@ export function ReportPdfExportLayout({
             Reporte de ingreso
             <br />
             {isDetailed ? "detallado" : "rápido"}
+            {rowPages.length > 1 ? ` · pág ${pageIndex + 1}/${rowPages.length}` : ""}
           </div>
           <div
             style={{
@@ -561,6 +575,8 @@ export function ReportPdfExportLayout({
                 "Tot.U",
                 "P/B",
                 "P.Tot",
+                "Reemp.",
+                "Bulto Cont.",
                 "L",
                 "W",
                 "H",
@@ -580,16 +596,17 @@ export function ReportPdfExportLayout({
             </tr>
           </thead>
           <tbody>
-            {measureRows.map((row, idx) => {
+            {pageRows.map((row, idx) => {
               const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
               const undPerBulto = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
               const pesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
               const l = parseFloat(String(row.l ?? 0)) || 0;
               const w = parseFloat(String(row.w ?? 0)) || 0;
               const h = parseFloat(String(row.h ?? 0)) || 0;
+              const isReempaque = row.reempaque === true;
               const totalUnidades = bultos * undPerBulto;
               const pesoTotal = bultos * pesoPorBulto;
-              const cbmPorBulto = (l * w * h) / 1_000_000;
+              const cbmPorBulto = isReempaque ? 0 : (l * w * h) / 1_000_000;
               const cubicajeTotal = cbmPorBulto * bultos;
               const bg = idx % 2 === 0 ? "#ffffff" : CELL_BG;
               return (
@@ -602,7 +619,7 @@ export function ReportPdfExportLayout({
                       fontWeight: 700,
                     }}
                   >
-                    {idx + 1}
+                    {pageIndex * rowsPerPage + idx + 1}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4 }}>
                     {String(row.referencia || "-")}
@@ -624,6 +641,12 @@ export function ReportPdfExportLayout({
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
                     {pesoTotal.toFixed(2)}
+                  </td>
+                  <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
+                    {row.reempaque ? "SI" : "-"}
+                  </td>
+                  <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
+                    {String(row.bultoContenedor || "-")}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
                     {l}
@@ -672,16 +695,19 @@ export function ReportPdfExportLayout({
               <th style={thBase}>L</th>
               <th style={thBase}>W</th>
               <th style={thBase}>H</th>
+              <th style={thBase}>Reempaque</th>
+              <th style={thBase}>Bulto Cont.</th>
               <th style={{ ...thBase, backgroundColor: ACCENT }}>Total CBM</th>
             </tr>
           </thead>
           <tbody>
-            {measureRows.map((row, idx) => {
+            {pageRows.map((row, idx) => {
               const l = parseFloat(String(row.l ?? 0)) || 0;
               const w = parseFloat(String(row.w ?? 0)) || 0;
               const h = parseFloat(String(row.h ?? 0)) || 0;
               const b = parseFloat(String(row.bultos ?? 0)) || 0;
-              const rowCbm = ((l * w * h) / 1_000_000) * b;
+              const isReempaque = row.reempaque === true;
+              const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
               const bg = idx % 2 === 0 ? "#ffffff" : CELL_BG;
               return (
                 <tr key={idx} style={{ backgroundColor: bg }}>
@@ -693,7 +719,7 @@ export function ReportPdfExportLayout({
                       fontWeight: 700,
                     }}
                   >
-                    {idx + 1}
+                    {pageIndex * rowsPerPage + idx + 1}
                   </td>
                   {showReferenceColumn && (
                     <td style={{ border: `1px solid ${BORDER}`, padding: compact ? 6 : 8 }}>
@@ -756,6 +782,24 @@ export function ReportPdfExportLayout({
                       border: `1px solid ${BORDER}`,
                       padding: compact ? 6 : 8,
                       textAlign: "center",
+                    }}
+                  >
+                    {row.reempaque ? "SI" : "-"}
+                  </td>
+                  <td
+                    style={{
+                      border: `1px solid ${BORDER}`,
+                      padding: compact ? 6 : 8,
+                      textAlign: "center",
+                    }}
+                  >
+                    {String(row.bultoContenedor || "-")}
+                  </td>
+                  <td
+                    style={{
+                      border: `1px solid ${BORDER}`,
+                      padding: compact ? 6 : 8,
+                      textAlign: "center",
                       fontWeight: 800,
                       color: "#1e40af",
                     }}
@@ -805,6 +849,8 @@ export function ReportPdfExportLayout({
       >
         Aldepositos · documento generado por Warehouse OS
       </div>
-    </div>
+        </div>
+      ))}
+    </>
   );
 }

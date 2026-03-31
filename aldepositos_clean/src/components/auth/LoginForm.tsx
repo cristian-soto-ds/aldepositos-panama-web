@@ -1,16 +1,16 @@
 "use client";
 
 import React, { useState } from "react";
-import { Mail, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { User, Lock, ArrowRight, Loader2 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
-import { supabase } from "@/lib/supabase";
+import { signInWithUsername } from "@/lib/auth/sign-in-with-username";
 
 type LoginFormProps = {
-  onSuccess: (email: string) => void;
+  onSuccess: () => void;
 };
 
 export function LoginForm({ onSuccess }: LoginFormProps) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,19 +20,18 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     setIsLoading(true);
     setError(null);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
+    try {
+      await signInWithUsername(username, password);
+      onSuccess();
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Usuario o contraseña incorrectos.";
+      setError(message);
       setIsLoading(false);
       return;
     }
-
-    const userEmail = data.user?.email ?? email;
-    onSuccess(userEmail);
     setIsLoading(false);
   };
 
@@ -59,17 +58,17 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       <form onSubmit={handleSubmit} className="relative z-10 space-y-6">
         <div className="space-y-2 text-left">
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">
-            Correo Electrónico
+            Usuario
           </label>
           <div className="relative group">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-[#16263F] transition-colors" />
+            <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-[#16263F] transition-colors" />
             <input
-              type="email"
+              type="text"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               className="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#16263F] focus:border-[#16263F] outline-none transition-all font-medium text-[#16263F]"
-              placeholder="usuario@aldepositos.com"
+              placeholder="Ingresa tu usuario"
             />
           </div>
         </div>
@@ -99,7 +98,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
         <button
           type="submit"
-          disabled={isLoading || !email || !password}
+          disabled={isLoading || !username || !password}
           className="w-full bg-[#16263F] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#16263F]/30 hover:bg-[#0f1b2d] hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed uppercase tracking-widest text-[11px]"
         >
           {isLoading ? (

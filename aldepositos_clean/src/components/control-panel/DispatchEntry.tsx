@@ -205,7 +205,11 @@ export function DispatchEntry({
   }
 
   const getTaskWeight = (t: Task): number => {
-    // Si el inventario tiene peso capturado por el operario, usarlo.
+    // Inventario detallado: un solo total por RA (expectedWeight = lo inventariado).
+    if (t.status !== "pending" && t.type === "detailed") {
+      const fromCapture = parseFloat(String(t.expectedWeight ?? 0)) || 0;
+      if (fromCapture > 0) return fromCapture;
+    }
     if (t.measureData && t.measureData.length > 0 && t.status !== "pending") {
       if (t.type === "detailed") {
         const detailedWeight = t.measureData.reduce((acc: number, row: any) => {
@@ -224,7 +228,6 @@ export function DispatchEntry({
         if (quickWeight > 0) return quickWeight;
       }
     }
-    // Si no hay peso digitado, usar el peso esperado del Excel.
     return parseFloat(String(t.expectedWeight ?? 0)) || 0;
   };
 
@@ -234,13 +237,14 @@ export function DispatchEntry({
   );
 
   const getTaskCbm = (t: Task): number => {
-    // Regla operativa:
-    // - Pendiente => siempre 0.00 CBM.
-    // - Listo/parcial => usar solo cubicaje del inventario (measureData),
-    //   sin fallback al valor de factura.
+    // Pendiente => siempre 0.00 CBM.
     if (t.status === "pending") return 0;
+    // Inventario detallado: cubicaje total por RA (expectedCbm = lo inventariado).
+    if (t.type === "detailed") {
+      const fromCapture = parseFloat(String(t.expectedCbm ?? 0)) || 0;
+      if (fromCapture > 0) return fromCapture;
+    }
     if (!t.measureData || t.measureData.length === 0) return 0;
-
     return t.measureData.reduce((acc: number, row: any) => {
       const l = parseFloat(String(row.l ?? 0)) || 0;
       const w = parseFloat(String(row.w ?? 0)) || 0;
@@ -381,8 +385,34 @@ export function DispatchEntry({
   const getDetailedRows = (): DetailedRow[] => {
     const rows: DetailedRow[] = [];
     loadedTasks.forEach((t) => {
+      const detailedOneRa =
+        t.type === "detailed" &&
+        t.status !== "pending" &&
+        Array.isArray(t.measureData) &&
+        t.measureData.length > 0;
+
+      if (detailedOneRa) {
+        const bultos = t.currentBultos || t.expectedBultos;
+        const tw = getTaskWeight(t);
+        const tc = getTaskCbm(t);
+        rows.push({
+          id: t.id,
+          ra: t.ra,
+          partial: t.status === "partial" ? "SÍ" : "NO",
+          provider: t.provider || "N/A",
+          subClient: t.subClient || "N/A",
+          brand: t.brand || "N/A",
+          date: t.date || containerInfo.date,
+          ref: `RA-${t.ra}`,
+          desc: normalizeDispatchDescription(t.notes),
+          bultos,
+          weight: tw > 0 ? tw.toFixed(2) : "",
+          cbm: tc.toFixed(2),
+        });
+        return;
+      }
+
       if (t.measureData && t.measureData.length > 0 && t.status !== "pending") {
-        // Cálculo de peso por línea según el modo:
         let perRefWeightPerBundle = 0;
         if (t.weightMode === "by_reference") {
           const totalBultos = t.measureData.reduce((acc: number, row: any) => {
@@ -403,11 +433,7 @@ export function DispatchEntry({
           const cbm = ((l * w * h) / 1_000_000) * bultos;
 
           let lineWeight = 0;
-          if (t.type === "detailed") {
-            const pesoPorBulto =
-              parseFloat(String(m.pesoPorBulto ?? 0)) || 0;
-            lineWeight = bultos * pesoPorBulto;
-          } else if (t.weightMode === "per_bundle") {
+          if (t.weightMode === "per_bundle") {
             const rowWeight = parseFloat(String(m.weight ?? 0)) || 0;
             lineWeight = bultos * rowWeight;
           } else if (t.weightMode === "by_reference" && perRefWeightPerBundle > 0) {

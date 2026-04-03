@@ -17,7 +17,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
-import { publishWorkPresence, clearWorkPresence } from "@/lib/panelPresence";
+import {
+  getSharedWorkPresenceTabId,
+  publishWorkPresence,
+  clearWorkPresence,
+} from "@/lib/panelPresence";
 import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 
 type MeasureRow = {
@@ -185,25 +189,20 @@ export function DetailedInventoryEntry({
   const latestTaskRef = useRef<Task | null>(null);
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
-  const presenceTabIdRef = useRef(
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `tab-${Math.random().toString(36).slice(2, 11)}`,
-  );
-
   useEffect(() => {
     const key = (presenceUserKey ?? "").trim();
-    if (!key || !selectedTask) {
-      clearWorkPresence(presenceTabIdRef.current);
+    if (!key) {
+      void clearWorkPresence(getSharedWorkPresenceTabId());
       return;
     }
     const label = (presenceUserLabel ?? key).trim() || "Operador";
+    const tabId = getSharedWorkPresenceTabId();
     const send = () => {
       publishWorkPresence({
-        tabId: presenceTabIdRef.current,
+        tabId,
         userKey: key,
         userLabel: label,
-        ra: String(selectedTask.ra ?? "").trim(),
+        ra: selectedTask ? String(selectedTask.ra ?? "").trim() : "",
         module: "detailed",
       });
     };
@@ -211,7 +210,7 @@ export function DetailedInventoryEntry({
     const interval = window.setInterval(send, 12000);
     return () => {
       window.clearInterval(interval);
-      clearWorkPresence(presenceTabIdRef.current);
+      void clearWorkPresence(tabId);
     };
   }, [selectedTask, presenceUserKey, presenceUserLabel]);
 

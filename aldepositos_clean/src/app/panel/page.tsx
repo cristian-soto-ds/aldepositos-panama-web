@@ -29,6 +29,11 @@ import {
   userPrefsStorageKey,
   type UserPreferences,
 } from "@/lib/userPreferences";
+import {
+  clearWorkPresence,
+  getSharedWorkPresenceTabId,
+  publishWorkPresence,
+} from "@/lib/panelPresence";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -132,6 +137,30 @@ export default function PanelPage() {
     const root = document.documentElement;
     root.classList.toggle("panel-dark", preferences.theme === "dark");
   }, [preferences.theme]);
+
+  /** Presencia en vistas que no son captura (p. ej. panel principal): visible entre equipos vía Realtime. */
+  useEffect(() => {
+    if (loading || !userEmail) return;
+    if (FULL_HEIGHT_INVENTORY_VIEWS.has(currentView)) return;
+
+    const tabId = getSharedWorkPresenceTabId();
+    const label = (userDisplayName ?? userEmail).trim() || "Operador";
+    const pulse = () => {
+      publishWorkPresence({
+        tabId,
+        userKey: userEmail,
+        userLabel: label,
+        ra: "",
+        module: "none",
+      });
+    };
+    pulse();
+    const interval = window.setInterval(pulse, 12000);
+    return () => {
+      window.clearInterval(interval);
+      void clearWorkPresence(tabId);
+    };
+  }, [loading, userEmail, userDisplayName, currentView]);
 
   const handleImport = async (newTasks: Task[]) => {
     const today = new Date().toISOString().split("T")[0]!;

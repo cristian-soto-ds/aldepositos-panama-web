@@ -4,6 +4,7 @@ import React, { ReactNode, useState } from "react";
 import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
+import { clearWorkPresence, getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import { useRouter } from "next/navigation";
 import type { UserPreferences } from "@/lib/userPreferences";
 
@@ -29,6 +30,7 @@ export function ControlPanelLayout({
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    void clearWorkPresence(getSharedWorkPresenceTabId());
     router.push("/login");
   };
 

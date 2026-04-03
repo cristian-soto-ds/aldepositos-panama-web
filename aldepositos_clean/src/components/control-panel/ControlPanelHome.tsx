@@ -61,7 +61,9 @@ function statusLabel(status: string): string {
 function moduleShort(t: WorkPresenceEntry["module"]): string {
   if (t === "quick") return "Rápido";
   if (t === "detailed") return "Detallado";
-  return "Aéreo";
+  if (t === "airway") return "Aéreo";
+  if (t === "none") return "Panel / sin RA";
+  return "—";
 }
 
 function initialsFromLabel(label: string): string {
@@ -764,9 +766,9 @@ export function ControlPanelHome({
               <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-blue-900 leading-relaxed">
                 <span className="font-black">Colaboración:</span> varias personas pueden
-                intervenir el mismo RA (mismo nivel de usuario por ahora). El bloque{" "}
-                <strong>En captura ahora</strong> usa pestañas del mismo navegador; entre
-                equipos distintos se podrá enlazar con Supabase más adelante.
+                intervenir el mismo RA. <strong>Conectados ahora</strong> y{" "}
+                <strong>En captura ahora</strong> se sincronizan por Supabase Realtime
+                entre equipos y navegadores.
               </p>
             </div>
           </section>

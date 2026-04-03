@@ -186,10 +186,10 @@ export function ControlPanelHome({
   }, []);
 
   useEffect(() => {
-    const everyMs = preferences?.showSeconds ? 1000 : 15000;
-    const timer = window.setInterval(() => setNow(new Date()), everyMs);
+    setNow(new Date());
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
-  }, [preferences?.showSeconds]);
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);

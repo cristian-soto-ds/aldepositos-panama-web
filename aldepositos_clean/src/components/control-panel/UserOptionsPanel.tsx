@@ -192,6 +192,7 @@ export function UserOptionsPanel({
             <option value="reports">Reportes</option>
             <option value="productivity">Productividad</option>
             <option value="monitor">Monitoreo live</option>
+            <option value="options">Opciones de usuario</option>
           </select>
           <p className="mt-2 text-xs text-slate-500 font-semibold">
             Define el módulo que abrirá por defecto en tu sesión.

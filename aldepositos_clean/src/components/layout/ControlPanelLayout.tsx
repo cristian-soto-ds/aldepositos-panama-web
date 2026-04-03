@@ -162,7 +162,7 @@ export function ControlPanelLayout({
           {showOptionsModule && (
             <NavItem
               icon={<Settings size={20} />}
-              text="Opciones (desarrollo)"
+              text="Opciones de usuario"
               active={currentView === "options"}
               onClick={() => {
                 setCurrentView("options");

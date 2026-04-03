@@ -39,7 +39,7 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
 
 export default function PanelPage() {
   const router = useRouter();
-  const showOptionsModule = process.env.NODE_ENV === "development";
+  const showOptionsModule = true;
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);

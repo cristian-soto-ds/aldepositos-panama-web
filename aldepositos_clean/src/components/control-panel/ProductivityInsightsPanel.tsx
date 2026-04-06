@@ -52,9 +52,9 @@ function getPerformanceLabel(percent: number): string {
 
 function getPerformanceTone(percent: number): string {
   if (percent >= 85) return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (percent >= 60) return "text-blue-700 bg-blue-50 border-blue-200";
+  if (percent >= 60) return "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/45 border-blue-200";
   if (percent >= 30) return "text-amber-700 bg-amber-50 border-amber-200";
-  return "text-slate-700 bg-slate-50 border-slate-200";
+  return "text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-600";
 }
 
 export function ProductivityInsightsPanel({
@@ -232,7 +232,7 @@ export function ProductivityInsightsPanel({
           title="Bultos capturados"
           value={formatPercent(stats.bultosProgress)}
           helper={`${formatNumber(stats.totalBultosProcesados)} / ${formatNumber(stats.totalBultosDeclarados)}`}
-          icon={<Target className="h-4 w-4 text-blue-600" />}
+          icon={<Target className="h-4 w-4 text-blue-600 dark:text-blue-400" />}
           tone="blue"
         />
         <MetricCard
@@ -245,12 +245,12 @@ export function ProductivityInsightsPanel({
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
           <div className="mb-4 flex items-center justify-between gap-2">
-            <p className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+            <p className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
               Productividad por modulo
             </p>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600">
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
               {formatNumber(stats.total)} RAs
             </span>
           </div>
@@ -260,17 +260,17 @@ export function ProductivityInsightsPanel({
               .map((row) => (
                 <div
                   key={row.moduleKey}
-                  className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3"
+                  className="rounded-2xl border border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-700">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
                       {row.label}
                     </p>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600">
+                    <span className="rounded-full bg-white dark:bg-slate-900 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
                       {formatNumber(row.done)}/{formatNumber(row.total)}
                     </span>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-semibold text-slate-500">
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                     <p>Bultos procesados: {formatNumber(row.processed)}</p>
                     <p className="text-right">
                       Bultos declarados: {formatNumber(row.declared)}
@@ -282,13 +282,13 @@ export function ProductivityInsightsPanel({
                       style={{ width: `${Math.min(row.completionRate, 100)}%` }}
                     />
                   </div>
-                  <p className="mt-1 text-right text-[10px] font-black uppercase tracking-wider text-slate-500">
+                  <p className="mt-1 text-right text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     {formatPercent(row.completionRate)} completado
                   </p>
                 </div>
               ))}
             {stats.byModule.every((row) => row.total === 0) && (
-              <p className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+              <p className="rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
                 Aun no hay inventarios para comparar entre modulos.
               </p>
             )}
@@ -296,22 +296,22 @@ export function ProductivityInsightsPanel({
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <p className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
+            <p className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
               Clientes con mayor carga
             </p>
             <div className="mt-3 space-y-2">
               {stats.byClient.length === 0 ? (
-                <p className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
                   Todavia no hay actividad para mostrar.
                 </p>
               ) : (
                 stats.byClient.map((item, index) => (
                   <div
                     key={item.client}
-                    className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5"
+                    className="flex items-center justify-between rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/70 px-3 py-2.5"
                   >
-                    <p className="truncate pr-3 text-xs font-bold uppercase tracking-wide text-slate-700">
+                    <p className="truncate pr-3 text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">
                       {index + 1}. {item.client}
                     </p>
                     <span className="rounded-full bg-[#16263F] px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">
@@ -323,30 +323,30 @@ export function ProductivityInsightsPanel({
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-            <p className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
+            <p className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
               Actividad reciente
             </p>
             <div className="mt-3 space-y-2">
               {stats.recentActivity.length === 0 ? (
-                <p className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">
+                <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
                   Sin inventarios recientes registrados.
                 </p>
               ) : (
                 stats.recentActivity.map((task) => (
                   <div
                     key={task.id}
-                    className="rounded-xl border border-slate-100 bg-white px-3 py-2.5"
+                    className="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-black uppercase tracking-widest text-slate-700">
+                      <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
                         RA {task.ra}
                       </p>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-300">
                         {MODULE_LABELS[(task.type || "unknown") as ModuleKey]}
                       </span>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                       {toReadableStatus(task.status)} · Bultos{" "}
                       {formatNumber(task.currentBultos || 0)}/
                       {formatNumber(task.expectedBultos || 0)}
@@ -359,8 +359,8 @@ export function ProductivityInsightsPanel({
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-        <p className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+      <section className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
+        <p className="mb-3 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
           <Info className="h-4 w-4 text-blue-500" />
           Guia rapida del panel
         </p>
@@ -410,29 +410,29 @@ function MetricCard({
   const toneStyles: Record<typeof tone, string> = {
     amber: "border-amber-200 bg-amber-50/70",
     green: "border-emerald-200 bg-emerald-50/70",
-    blue: "border-blue-200 bg-blue-50/70",
+    blue: "border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/70",
     violet: "border-violet-200 bg-violet-50/70",
   };
 
   return (
     <div className={`rounded-2xl border p-4 shadow-sm ${toneStyles[tone]}`}>
-      <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600">
+      <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
         {icon}
         {title}
       </p>
-      <p className="mt-1 text-3xl font-black leading-none text-[#16263F]">{value}</p>
-      <p className="mt-2 text-[11px] font-semibold text-slate-500">{helper}</p>
+      <p className="mt-1 text-3xl font-black leading-none text-[#16263F] dark:text-slate-100">{value}</p>
+      <p className="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{helper}</p>
     </div>
   );
 }
 
 function GuideCard({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-      <p className="text-xs font-black uppercase tracking-widest text-slate-700">
+    <div className="rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3">
+      <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
         {title}
       </p>
-      <p className="mt-1 text-xs font-semibold text-slate-500">{text}</p>
+      <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{text}</p>
     </div>
   );
 }

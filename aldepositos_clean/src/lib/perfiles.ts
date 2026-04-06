@@ -173,14 +173,17 @@ export async function fetchPerfilUsuario(
   return fetchPerfilUsuarioWithClient(supabase, userId, authEmail);
 }
 
+export type PerfilUpdateResult =
+  | { ok: true; table: "perfiles" | "profiles" }
+  | { ok: false; message: string };
+
 /**
- * Actualiza columnas de la fila del usuario en `perfiles`.
- * Prueba varias columnas de clave por compatibilidad con distintos esquemas.
+ * Actualiza columnas en `public.perfiles` (id / uuid / user_id) y, si no afecta filas, en `public.profiles` (id).
  */
 export async function updatePerfilByUserId(
   userId: string,
   patch: Record<string, unknown>,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<PerfilUpdateResult> {
   for (const col of ["id", "uuid", "user_id"] as const) {
     const { data, error } = await supabase
       .from(PERFILES_TABLE)
@@ -191,11 +194,23 @@ export async function updatePerfilByUserId(
       console.warn(`[perfiles] update (${col}):`, error.message);
       continue;
     }
-    if (data && data.length > 0) return { ok: true };
+    if (data && data.length > 0) return { ok: true, table: "perfiles" };
   }
+
+  const { data: rowsEn, error: errEn } = await supabase
+    .from(PROFILES_TABLE_EN)
+    .update(patch)
+    .eq("id", userId)
+    .select();
+  if (errEn) {
+    console.warn("[profiles] update:", errEn.message);
+  } else if (rowsEn && rowsEn.length > 0) {
+    return { ok: true, table: "profiles" };
+  }
+
   return {
     ok: false,
     message:
-      "No se actualizó el perfil. Revisa RLS y que exista la fila en public.perfiles.",
+      "No se actualizó el perfil: no hay fila en public.perfiles ni public.profiles para tu usuario, o RLS bloquea UPDATE. Revisa migración 005 (o 003) y políticas.",
   };
 }

@@ -78,22 +78,22 @@ export function UserOptionsPanel({
 
   return (
     <div className="max-w-4xl mx-auto w-full space-y-5 md:space-y-6 animate-fade pb-10">
-      <div className="bg-white rounded-[2rem] border border-slate-200 p-6 md:p-8 shadow-sm">
-        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+      <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 p-6 md:p-8 shadow-sm">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
           Opciones de usuario
         </p>
-        <h2 className="text-2xl md:text-3xl font-black text-[#16263F] mt-1">
+        <h2 className="text-2xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 mt-1">
           Personalización
         </h2>
-        <p className="text-sm text-slate-500 font-semibold mt-2">
+        <p className="text-sm text-slate-500 dark:text-slate-400 font-semibold mt-2">
           Tema y hora son solo en tu dispositivo. La foto de perfil se guarda en la nube y
           la ven otros operadores en presencia en vivo.
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
-        <div className="bg-white rounded-[2rem] border border-slate-200 p-5 md:p-6 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 p-5 md:p-6 shadow-sm">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100 mb-4">
             Tema
           </h3>
           <div className="space-y-3">
@@ -102,15 +102,15 @@ export function UserOptionsPanel({
               onClick={() => handleTheme("light")}
               className={`w-full flex items-center justify-between rounded-2xl border px-4 py-3 transition ${
                 preferences.theme === "light"
-                  ? "border-blue-500 bg-blue-50"
-                  : "border-slate-200 bg-white hover:bg-slate-50"
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45"
+                  : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80"
               }`}
             >
-              <span className="flex items-center gap-2 text-sm font-bold text-[#16263F]">
+              <span className="flex items-center gap-2 text-sm font-bold text-[#16263F] dark:text-slate-100">
                 <Sun className="w-4 h-4 text-amber-500" /> Claro
               </span>
               {preferences.theme === "light" && (
-                <span className="text-[10px] font-black uppercase text-blue-700">
+                <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300">
                   Activo
                 </span>
               )}
@@ -120,15 +120,15 @@ export function UserOptionsPanel({
               onClick={() => handleTheme("dark")}
               className={`w-full flex items-center justify-between rounded-2xl border px-4 py-3 transition ${
                 preferences.theme === "dark"
-                  ? "border-blue-500 bg-blue-50"
-                  : "border-slate-200 bg-white hover:bg-slate-50"
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45"
+                  : "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/80"
               }`}
             >
-              <span className="flex items-center gap-2 text-sm font-bold text-[#16263F]">
+              <span className="flex items-center gap-2 text-sm font-bold text-[#16263F] dark:text-slate-100">
                 <Moon className="w-4 h-4 text-indigo-600" /> Oscuro
               </span>
               {preferences.theme === "dark" && (
-                <span className="text-[10px] font-black uppercase text-blue-700">
+                <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300">
                   Activo
                 </span>
               )}
@@ -136,12 +136,12 @@ export function UserOptionsPanel({
           </div>
         </div>
 
-        <div className="bg-white rounded-[2rem] border border-slate-200 p-5 md:p-6 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 p-5 md:p-6 shadow-sm">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100 mb-4">
             Foto de perfil
           </h3>
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 overflow-hidden flex items-center justify-center">
               {showAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -150,11 +150,11 @@ export function UserOptionsPanel({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <UserRound className="w-7 h-7 text-slate-400" />
+                <UserRound className="w-7 h-7 text-slate-400 dark:text-slate-500" />
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-black text-[#16263F] truncate">
+              <p className="text-sm font-black text-[#16263F] dark:text-slate-100 truncate">
                 {userDisplayName || "Operador"}
               </p>
             </div>
@@ -195,15 +195,15 @@ export function UserOptionsPanel({
           {uploadError && (
             <p className="mt-3 text-xs font-semibold text-red-600">{uploadError}</p>
           )}
-          <p className="mt-3 text-[11px] font-medium text-slate-500 leading-relaxed">
+          <p className="mt-3 text-[11px] font-medium text-slate-500 dark:text-slate-400 leading-relaxed">
             Se guarda en tu perfil (Supabase). Puedes cambiarla cuando quieras. Máx. 2,5 MB.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5">
-        <div className="bg-white rounded-[2rem] border border-slate-200 p-5 md:p-6 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 p-5 md:p-6 shadow-sm">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100 mb-4">
             Vista inicial
           </h3>
           <select
@@ -214,7 +214,7 @@ export function UserOptionsPanel({
                 startView: e.target.value as UserPreferences["startView"],
               })
             }
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-[#16263F] outline-none focus:border-blue-500"
+            className="w-full rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none focus:border-blue-500"
           >
             <option value="dashboard">Panel principal</option>
             <option value="quick-entry">Ingreso rápido</option>
@@ -224,14 +224,14 @@ export function UserOptionsPanel({
             <option value="monitor">Monitoreo live</option>
             <option value="options">Opciones de usuario</option>
           </select>
-          <p className="mt-2 text-xs text-slate-500 font-semibold">
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-semibold">
             Define el módulo que abrirá por defecto en tu sesión.
           </p>
         </div>
 
-        <div className="bg-white rounded-[2rem] border border-slate-200 p-5 md:p-6 shadow-sm">
-          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] mb-4 flex items-center gap-2">
-            <Clock3 className="w-4 h-4 text-blue-600" /> Hora en panel
+        <div className="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 p-5 md:p-6 shadow-sm">
+          <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100 mb-4 flex items-center gap-2">
+            <Clock3 className="w-4 h-4 text-blue-600 dark:text-blue-400" /> Hora en panel
           </h3>
           <div className="space-y-3">
             <div className="flex gap-2">
@@ -242,8 +242,8 @@ export function UserOptionsPanel({
                 }
                 className={`flex-1 rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-widest ${
                   preferences.timeFormat === "24h"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-slate-200 text-slate-600"
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300"
                 }`}
               >
                 24 horas
@@ -255,14 +255,14 @@ export function UserOptionsPanel({
                 }
                 className={`flex-1 rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-widest ${
                   preferences.timeFormat === "12h"
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-slate-200 text-slate-600"
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300"
                 }`}
               >
                 12 horas
               </button>
             </div>
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-3">
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-600 p-3">
               <input
                 type="checkbox"
                 checked={preferences.showSeconds}
@@ -274,7 +274,7 @@ export function UserOptionsPanel({
                 }
                 className="h-4 w-4 accent-blue-600"
               />
-              <span className="text-sm font-semibold text-[#16263F]">
+              <span className="text-sm font-semibold text-[#16263F] dark:text-slate-100">
                 Mostrar segundos
               </span>
             </label>

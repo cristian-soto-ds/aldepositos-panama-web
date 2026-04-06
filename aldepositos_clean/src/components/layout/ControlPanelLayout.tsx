@@ -42,7 +42,7 @@ export function ControlPanelLayout({
   };
 
   return (
-    <div className={`h-dvh min-h-screen flex flex-col md:flex-row font-sans text-gray-800 overflow-hidden ${
+    <div className={`h-dvh min-h-screen flex flex-col md:flex-row font-sans text-gray-800 dark:text-slate-200 overflow-hidden ${
       preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
     }`}>
       {sidebarOpen && (

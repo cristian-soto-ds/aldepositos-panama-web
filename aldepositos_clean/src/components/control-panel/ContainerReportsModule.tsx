@@ -95,11 +95,11 @@ export function ContainerReportsModule({
     <div className="w-full h-full flex flex-col animate-fade relative">
       <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
         <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6 px-2 md:px-0">
-          <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
-            <PackageSearch className="text-blue-600 w-5 h-5 md:w-8 md:h-8" />{" "}
+          <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
+            <PackageSearch className="text-blue-600 dark:text-blue-400 w-5 h-5 md:w-8 md:h-8" />{" "}
             REPORTES DE CONTENEDORES
           </h2>
-          <p className="text-sm font-bold text-slate-500">
+          <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
             Historial de cargas completadas y despachadas desde la bodega.
           </p>
         </div>
@@ -107,7 +107,7 @@ export function ContainerReportsModule({
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-24">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {containersList.length === 0 ? (
-              <div className="col-span-full bg-white p-12 rounded-[2rem] border border-slate-200 text-center font-bold text-slate-400">
+              <div className="col-span-full bg-white dark:bg-slate-900 p-12 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
                 Aún no se han despachado contenedores.
               </div>
             ) : (
@@ -128,46 +128,46 @@ export function ContainerReportsModule({
                 return (
                   <div
                     key={c.id}
-                    className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-lg transition-all flex flex-col justify-between group"
+                    className="bg-white dark:bg-slate-900 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-600 shadow-sm hover:shadow-lg transition-all flex flex-col justify-between group"
                   >
-                    <div className="border-b border-slate-100 pb-4 mb-4">
+                    <div className="border-b border-slate-100 dark:border-slate-700 pb-4 mb-4">
                       <div className="flex justify-between items-start mb-2">
-                        <div className="bg-blue-50 text-blue-600 p-2 rounded-xl">
+                        <div className="bg-blue-50 dark:bg-blue-950/45 text-blue-600 dark:text-blue-400 p-2 rounded-xl">
                           <Truck size={20} />
                         </div>
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                           {new Date(c.info.date).toLocaleDateString("es-PA")}
                         </span>
                       </div>
-                      <h3 className="text-2xl font-black text-[#16263F] uppercase tracking-tighter truncate">
+                      <h3 className="text-2xl font-black text-[#16263F] dark:text-slate-100 uppercase tracking-tighter truncate">
                         {c.info.number || "SIN NÚMERO"}
                       </h3>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+                      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mt-1">
                         RESP: {c.info.responsible || "N/A"}
                       </p>
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-4">
-                      <div className="bg-slate-50 p-2 rounded-xl text-center">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                      <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl text-center">
+                        <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                           RAs
                         </p>
-                        <p className="text-sm font-black text-[#16263F]">
+                        <p className="text-sm font-black text-[#16263F] dark:text-slate-100">
                           {c.tasks.length}
                         </p>
                       </div>
-                      <div className="bg-slate-50 p-2 rounded-xl text-center">
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                      <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl text-center">
+                        <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                           Bultos
                         </p>
-                        <p className="text-sm font-black text-[#16263F]">
+                        <p className="text-sm font-black text-[#16263F] dark:text-slate-100">
                           {totalBultos}
                         </p>
                       </div>
-                      <div className="bg-blue-50 p-2 rounded-xl text-center">
+                      <div className="bg-blue-50 dark:bg-blue-950/45 p-2 rounded-xl text-center">
                         <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-0.5">
                           CBM
                         </p>
-                        <p className="text-sm font-black text-blue-700">
+                        <p className="text-sm font-black text-blue-700 dark:text-blue-300">
                           {totalCbm.toFixed(1)}
                         </p>
                       </div>
@@ -177,7 +177,7 @@ export function ContainerReportsModule({
                       <button
                         type="button"
                         onClick={() => setSelectedContainer(c)}
-                        className="flex-1 bg-slate-50 hover:bg-[#16263F] text-slate-600 hover:text-white py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
+                        className="flex-1 bg-slate-50 dark:bg-slate-800/60 hover:bg-[#16263F] text-slate-600 dark:text-slate-300 hover:text-white py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2"
                       >
                         Ver PDF <ArrowLeft size={14} className="rotate-180" />
                       </button>
@@ -301,17 +301,17 @@ function ContainerManifestPrintView({
 
   return (
     <div className="w-full min-h-screen bg-slate-100 flex flex-col items-center p-4 md:p-8 animate-fade print-wrapper">
-      <div className="w-full max-w-[297mm] flex justify-between items-center mb-6 no-print bg-white p-4 rounded-xl shadow-sm">
+      <div className="w-full max-w-[297mm] flex justify-between items-center mb-6 no-print bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm">
         <button
           type="button"
           onClick={onBack}
-          className="text-slate-500 font-bold flex items-center gap-2 hover:text-[#16263F]"
+          className="text-slate-500 dark:text-slate-400 font-bold flex items-center gap-2 hover:text-[#16263F] dark:text-slate-100"
         >
           <ArrowLeft size={16} />
           Volver
         </button>
         <div className="flex gap-4 items-center">
-          <span className="text-xs font-bold text-slate-400 flex items-center">
+          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center">
             Asegúrate de imprimir en formato Horizontal (Landscape)
           </span>
           <button
@@ -325,17 +325,17 @@ function ContainerManifestPrintView({
         </div>
       </div>
 
-      <div className="bg-white w-full max-w-[297mm] min-h-[210mm] p-[10mm] md:p-[15mm] shadow-2xl print-container">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-[297mm] min-h-[210mm] p-[10mm] md:p-[15mm] shadow-2xl print-container">
         <div className="border-b-2 border-[#16263F] pb-4 mb-6 flex justify-between items-end">
           <div className="flex items-center gap-3">
             <div className="bg-[#16263F] p-3 rounded-xl">
               <Truck className="text-white w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-[#16263F] tracking-tighter leading-none">
+              <h1 className="text-2xl font-black text-[#16263F] dark:text-slate-100 tracking-tighter leading-none">
                 ALDEPOSITOS
               </h1>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mt-1">
                 Logística y Distribución
               </p>
             </div>
@@ -344,62 +344,62 @@ function ContainerManifestPrintView({
             <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">
               Relación de Carga en Contenedor
             </h2>
-            <p className="text-xs font-bold text-slate-500 mt-1">
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">
               FECHA LLEGADA:{" "}
               {new Date(containerInfo.date).toLocaleDateString("es-PA")}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-3 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+        <div className="grid grid-cols-5 gap-3 mb-6 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200 dark:border-slate-600">
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Nº Consignación
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.consignment || "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Contenedor
             </p>
-            <p className="font-black text-[#16263F] text-sm uppercase">
+            <p className="font-black text-[#16263F] dark:text-slate-100 text-sm uppercase">
               {containerInfo.number || "POR ASIGNAR"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               B/L
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.bl || "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Sellos (1 y 2)
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.seal1 || "-"} / {containerInfo.seal2 || "-"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Cliente Principal
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase truncate">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase truncate">
               {loadedTasks[0]?.mainClient || "VARIOS"}
             </p>
           </div>
         </div>
 
-        <h3 className="text-[10px] font-black text-[#16263F] uppercase tracking-widest mb-2 border-b border-[#16263F] inline-block pb-1">
+        <h3 className="text-[10px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest mb-2 border-b border-[#16263F] inline-block pb-1">
           Detalle de la Carga
         </h3>
 
         <table
-          className="w-full text-left border-collapse border border-slate-200 mb-6"
+          className="w-full text-left border-collapse border border-slate-200 dark:border-slate-600 mb-6"
           style={{ fontSize: "8px" }}
         >
           <thead className="bg-[#1E293B] text-white">
@@ -443,39 +443,39 @@ function ContainerManifestPrintView({
             {detailedRows.map((row, i) => (
               <tr
                 key={row.id}
-                className="even:bg-slate-50 border-b border-slate-200"
+                className="even:bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-600"
               >
-                <td className="px-2 py-1.5 text-center font-bold text-slate-500">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-500 dark:text-slate-400">
                   {i + 1}
                 </td>
-                <td className="px-2 py-1.5 font-black text-center text-[#16263F]">
+                <td className="px-2 py-1.5 font-black text-center text-[#16263F] dark:text-slate-100">
                   {row.ra}
                 </td>
-                <td className="px-2 py-1.5 text-center font-bold text-slate-600">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-600 dark:text-slate-300">
                   {row.partial}
                 </td>
                 <td className="px-2 py-1.5 font-bold uppercase truncate">
                   {row.provider}
                 </td>
-                <td className="px-2 py-1.5 font-bold uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 font-bold uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.subClient}
                 </td>
                 <td className="px-2 py-1.5 text-center font-black bg-purple-50 text-purple-900">
                   {row.bultos}
                 </td>
-                <td className="px-2 py-1.5 uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.brand}
                 </td>
-                <td className="px-2 py-1.5 text-center text-slate-600">
+                <td className="px-2 py-1.5 text-center text-slate-600 dark:text-slate-300">
                   {row.date}
                 </td>
-                <td className="px-2 py-1.5 text-center font-black text-blue-800 bg-blue-50">
+                <td className="px-2 py-1.5 text-center font-black text-blue-800 bg-blue-50 dark:bg-blue-950/45">
                   {row.cbm}
                 </td>
-                <td className="px-2 py-1.5 text-center font-bold text-slate-600">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-600 dark:text-slate-300">
                   {row.weight}
                 </td>
-                <td className="px-2 py-1.5 uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.desc}
                 </td>
               </tr>
@@ -488,40 +488,40 @@ function ContainerManifestPrintView({
             <div className="bg-[#16263F] text-white text-[9px] font-black uppercase tracking-widest text-center py-2">
               Resumen Final
             </div>
-            <div className="p-3 bg-slate-50 space-y-2">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 space-y-2">
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Total Bultos
                 </span>
-                <span className="font-black text-[#16263F]">
+                <span className="font-black text-[#16263F] dark:text-slate-100">
                   {currentBultos}
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Total CBM
                 </span>
-                <span className="font-black text-blue-600">
+                <span className="font-black text-blue-600 dark:text-blue-400">
                   {currentCbm.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Peso Neto
                 </span>
-                <span className="font-black text-[#16263F]">
+                <span className="font-black text-[#16263F] dark:text-slate-100">
                   {currentWeight.toFixed(2)} kg
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Tara
                 </span>
-                <span className="font-black text-slate-400">
+                <span className="font-black text-slate-400 dark:text-slate-500">
                   {tare} kg
                 </span>
               </div>
-              <div className="border-t border-slate-300 my-1 pt-2 flex justify-between text-xs">
+              <div className="border-t border-slate-300 dark:border-slate-600 my-1 pt-2 flex justify-between text-xs">
                 <span className="font-black text-green-700 uppercase">
                   Peso Total
                 </span>
@@ -536,20 +536,20 @@ function ContainerManifestPrintView({
         <div className="mt-12 grid grid-cols-2 gap-8 text-center">
           <div>
             <div className="border-t border-slate-400 w-48 mx-auto pt-2">
-              <p className="text-[9px] font-black text-[#16263F] uppercase tracking-widest">
+              <p className="text-[9px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
                 Responsable de Cargue
               </p>
-              <p className="text-[10px] text-slate-500 uppercase mt-1">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase mt-1">
                 {containerInfo.responsible || "Firma Autorizada"}
               </p>
             </div>
           </div>
           <div>
             <div className="border-t border-slate-400 w-48 mx-auto pt-2">
-              <p className="text-[9px] font-black text-[#16263F] uppercase tracking-widest">
+              <p className="text-[9px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
                 Aprobado / Despachado
               </p>
-              <p className="text-[10px] text-slate-500 uppercase mt-1">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase mt-1">
                 Operaciones Aldepositos
               </p>
             </div>

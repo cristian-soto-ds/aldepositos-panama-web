@@ -58,8 +58,9 @@ Las fotos se guardan en **Storage** (`bucket` `avatars`, ruta `{user_uuid}/avata
 
 1. Si usas la tabla en español: ejecuta `supabase/migrations/005_perfiles_avatar_url.sql` (columna + política `UPDATE`). Si tu proyecto sigue usando `public.profiles` en inglés, usa `003_profiles_avatar_url.sql` en su lugar.
 2. Ejecuta `supabase/migrations/004_storage_avatars_bucket.sql` (bucket público + políticas de lectura/escritura solo en la carpeta del usuario).
+3. Si la foto **sí sube** a Storage pero el panel dice que la base **rechazó guardar `avatar_url` (RLS)**, ejecuta **`supabase/migrations/006_perfiles_update_avatar_rls_fix.sql`**. Ajusta la política `UPDATE` para que coincida con la columna que enlaza tu fila con `auth.users` (`id`, `uuid` o ambas).
 
-Si la política `UPDATE` en `perfiles` choca con las tuyas, ajusta o elimina la duplicada. Si la clave que enlaza con `auth.users` se llama `uuid` y no `id`, edita la política en `005_perfiles_avatar_url.sql` como indica el comentario del archivo.
+Si la política `UPDATE` en `perfiles` choca con las tuyas, ajusta o elimina la duplicada.
 
 ## Nota: borrador de despacho en el navegador
 

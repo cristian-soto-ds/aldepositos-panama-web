@@ -185,55 +185,55 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
     <div className="w-full h-full min-h-0 flex flex-col animate-fade">
       <div className="max-w-6xl mx-auto w-full h-full min-h-0 flex flex-col">
         <div className="shrink-0 space-y-6 md:space-y-8">
-          <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3 px-2 md:px-0">
+          <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3 px-2 md:px-0">
             <Activity className="text-red-500 w-5 h-5 md:w-8 md:h-8 animate-pulse" />{" "}
             MONITOREO DE ÓRDENES
           </h2>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 px-2 md:px-0">
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-4 shadow-sm">
+              <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                 Activas
               </p>
-              <p className="text-2xl font-black text-[#16263F] mt-1">
+              <p className="text-2xl font-black text-[#16263F] dark:text-slate-100 mt-1">
                 {totals.active}
               </p>
             </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-4 shadow-sm">
+              <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                 Completadas
               </p>
               <p className="text-2xl font-black text-green-700 mt-1">
                 {totals.completed}
               </p>
             </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-4 shadow-sm">
+              <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                 En Contenedor
               </p>
               <p className="text-2xl font-black text-amber-700 mt-1">
                 {totals.priority}
               </p>
             </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-4 shadow-sm">
+              <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                 Despachadas
               </p>
-              <p className="text-2xl font-black text-blue-700 mt-1">
+              <p className="text-2xl font-black text-blue-700 dark:text-blue-300 mt-1">
                 {totals.dispatched}
               </p>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-3 md:p-4 shadow-sm mx-2 md:mx-0">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-3 md:p-4 shadow-sm mx-2 md:mx-0">
             <div className="flex flex-col lg:flex-row gap-3 md:gap-4">
               <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Buscar por RA, proveedor, marca o cliente"
-                  className="w-full h-10 pl-10 pr-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none text-sm font-bold text-[#16263F]"
+                  className="w-full h-10 pl-10 pr-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 focus:bg-white dark:bg-slate-900 focus:border-blue-500 outline-none text-sm font-bold text-[#16263F] dark:text-slate-100"
                 />
               </div>
               <div className="flex flex-wrap gap-2">
@@ -260,7 +260,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                     className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-colors ${
                       statusFilter === item.id
                         ? "bg-[#16263F] text-white border-[#16263F]"
-                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                        : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
                     }`}
                   >
                     {item.label}
@@ -281,7 +281,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                 className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
                   clientFilter === "Todos"
                     ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                    : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                    : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
                 }`}
               >
                 TODOS ({totalTasks})
@@ -294,7 +294,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                   className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
                     clientFilter === c
                       ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                      : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
                   }`}
                 >
                   {c} ({groupedAllTasks[c].length})
@@ -305,31 +305,31 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1 pb-24 mt-4 md:mt-6">
           {displayedTasks.length === 0 ? (
-            <div className="bg-white p-8 md:p-12 rounded-3xl border-4 border-dashed border-slate-200 text-center font-bold text-slate-400 text-sm md:text-base">
+            <div className="bg-white dark:bg-slate-900 p-8 md:p-12 rounded-3xl border-4 border-dashed border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500 text-sm md:text-base">
               Sin datos registrados
             </div>
           ) : (
-            <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] shadow-sm md:shadow-lg overflow-hidden mb-6 md:mb-8 border-l-4 border-l-blue-600 border border-slate-200">
-              <div className="p-4 md:p-6 bg-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200">
+            <div className="bg-white dark:bg-slate-900 rounded-[1.5rem] md:rounded-[2rem] shadow-sm md:shadow-lg overflow-hidden mb-6 md:mb-8 border-l-4 border-l-blue-600 border border-slate-200 dark:border-slate-600">
+              <div className="p-4 md:p-6 bg-slate-50 dark:bg-slate-800/60 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 dark:border-slate-600">
                 <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto">
                   <div className="bg-[#16263F] p-2 md:p-2.5 rounded-lg md:rounded-xl text-white shadow-sm">
                     <FolderOpen className="w-4 h-4 md:w-5 md:h-5 text-blue-400" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base md:text-xl font-black text-[#16263F] uppercase truncate">
+                    <h3 className="text-base md:text-xl font-black text-[#16263F] dark:text-slate-100 uppercase truncate">
                       {clientFilter === "Todos" ? "TODOS LOS CLIENTES" : clientFilter}
                     </h3>
-                    <p className="text-[9px] md:text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    <p className="text-[9px] md:text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                       {displayedTasks.length} órdenes
                     </p>
                   </div>
                 </div>
-                <div className="w-full md:w-64 bg-white md:bg-transparent p-3 md:p-0 rounded-lg md:rounded-none border md:border-none border-slate-100">
+                <div className="w-full md:w-64 bg-white dark:bg-slate-900 md:bg-transparent p-3 md:p-0 rounded-lg md:rounded-none border md:border-none border-slate-100 dark:border-slate-700">
                   <div className="flex justify-between items-center mb-1 md:mb-2">
-                    <span className="text-[9px] md:text-[10px] font-black text-[#16263F] uppercase tracking-widest">
+                    <span className="text-[9px] md:text-[10px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
                       Avance Total
                     </span>
-                    <span className="text-xs font-black text-[#16263F]">
+                    <span className="text-xs font-black text-[#16263F] dark:text-slate-100">
                       {(() => {
                         if (displayedTasks.length === 0) return 0;
                         const sum = displayedTasks.reduce(
@@ -358,9 +358,9 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                 </div>
               </div>
 
-              <div className="overflow-x-auto border-t border-slate-100">
+              <div className="overflow-x-auto border-t border-slate-100 dark:border-slate-700">
                 <table className="w-full text-sm text-left min-w-[980px] md:min-w-full">
-                  <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm text-slate-500 uppercase text-[9px] md:text-[10px] font-black tracking-widest border-b border-slate-200 shadow-[0_1px_0_0_rgba(226,232,240,0.8)]">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-sm text-slate-500 dark:text-slate-400 uppercase text-[9px] md:text-[10px] font-black tracking-widest border-b border-slate-200 dark:border-slate-600 shadow-[0_1px_0_0_rgba(226,232,240,0.8)]">
                     <tr>
                       <th className="px-4 md:px-6 py-3 md:py-4">Módulo</th>
                       <th className="px-4 md:px-6 py-3 md:py-4">RA #</th>
@@ -381,7 +381,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {displayedTasks.map((t) => {
                       const taskPercent = getTaskProgressPercent(t);
                       const moduleName =
@@ -402,42 +402,42 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                               : "En proceso";
                       const statusClass =
                         t.dispatched === true
-                          ? "bg-blue-100 text-blue-700"
+                          ? "bg-blue-100 text-blue-700 dark:text-blue-300"
                           : t.status === "completed"
                             ? "bg-green-100 text-green-700"
                             : t.status === "in_progress" || t.status === "partial"
                               ? "bg-indigo-100 text-indigo-700"
                             : t.containerDraft === true
                               ? "bg-amber-100 text-amber-700"
-                              : "bg-slate-100 text-slate-700";
+                              : "bg-slate-100 text-slate-700 dark:text-slate-200";
                       return (
                         <tr
                           key={t.id}
-                          className="hover:bg-blue-50/30 transition-colors"
+                          className="hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
                         >
-                          <td className="px-4 md:px-6 py-3 md:py-5 font-black text-slate-400 text-[9px] uppercase tracking-widest">
+                          <td className="px-4 md:px-6 py-3 md:py-5 font-black text-slate-400 dark:text-slate-500 text-[9px] uppercase tracking-widest">
                             {moduleName}
                           </td>
-                          <td className="px-4 md:px-6 py-3 md:py-5 font-black text-[#16263F] text-sm md:text-base">
+                          <td className="px-4 md:px-6 py-3 md:py-5 font-black text-[#16263F] dark:text-slate-100 text-sm md:text-base">
                             {t.ra}
                           </td>
                           <td className="px-4 md:px-6 py-3 md:py-5">
-                            <p className="font-black text-[10px] md:text-xs text-[#16263F] uppercase whitespace-normal break-words leading-tight">
+                            <p className="font-black text-[10px] md:text-xs text-[#16263F] dark:text-slate-100 uppercase whitespace-normal break-words leading-tight">
                               {t.mainClient || "Sin cliente"}
                             </p>
-                            <p className="text-[8px] md:text-[9px] text-slate-400 font-bold uppercase">
+                            <p className="text-[8px] md:text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase">
                               {t.subClient || "N/A"}
                             </p>
                           </td>
                           <td className="px-4 md:px-6 py-3 md:py-5">
                             <p
-                              className="font-bold text-slate-700 text-[10px] md:text-xs uppercase whitespace-normal break-words leading-tight"
+                              className="font-bold text-slate-700 dark:text-slate-200 text-[10px] md:text-xs uppercase whitespace-normal break-words leading-tight"
                               title={t.provider}
                             >
                               {t.provider}
                             </p>
                             <p
-                              className="text-[8px] md:text-[9px] text-slate-400 font-bold uppercase tracking-tighter whitespace-normal break-words leading-tight mt-0.5"
+                              className="text-[8px] md:text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-tighter whitespace-normal break-words leading-tight mt-0.5"
                               title={t.brand}
                             >
                               {t.brand}
@@ -451,7 +451,7 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                                   style={{ width: `${taskPercent}%` }}
                                 />
                               </div>
-                              <span className="text-[9px] md:text-[10px] font-black w-8 md:w-10 text-right text-[#16263F]">
+                              <span className="text-[9px] md:text-[10px] font-black w-8 md:w-10 text-right text-[#16263F] dark:text-slate-100">
                                 {taskPercent}%
                               </span>
                             </div>

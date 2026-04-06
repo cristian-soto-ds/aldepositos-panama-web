@@ -705,7 +705,7 @@ export function QuickInventoryEntry({
         <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
           <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 md:px-0">
-              <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
+              <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
                 {moduleType === "airway" ? (
                   <>
                     <Plane className="text-orange-500 w-5 h-5 md:w-8 md:h-8" />{" "}
@@ -713,7 +713,7 @@ export function QuickInventoryEntry({
                   </>
                 ) : (
                   <>
-                    <Box className="text-[#16263F] w-5 h-5 md:w-8 md:h-8" />{" "}
+                    <Box className="text-[#16263F] dark:text-slate-100 w-5 h-5 md:w-8 md:h-8" />{" "}
                     INGRESO RÁPIDO
                   </>
                 )}
@@ -721,13 +721,13 @@ export function QuickInventoryEntry({
               <button
                 type="button"
                 onClick={openManualModal}
-                className="bg-white hover:bg-slate-50 text-[#16263F] border border-slate-200 px-4 py-2 md:px-5 md:py-2.5 rounded-xl font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2 active:scale-95 text-[10px] md:text-xs uppercase tracking-widest w-full sm:w-auto"
+                className="bg-white dark:bg-slate-900 hover:bg-slate-50 dark:bg-slate-800/60 text-[#16263F] dark:text-slate-100 border border-slate-200 dark:border-slate-600 px-4 py-2 md:px-5 md:py-2.5 rounded-xl font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-2 active:scale-95 text-[10px] md:text-xs uppercase tracking-widest w-full sm:w-auto"
               >
                 <Plus size={16} /> Crear RA Manual
               </button>
             </div>
 
-            <div className="flex flex-wrap bg-slate-200/50 p-1 rounded-xl w-full border border-slate-200 mx-2 md:mx-0">
+            <div className="flex flex-wrap bg-slate-200/50 p-1 rounded-xl w-full border border-slate-200 dark:border-slate-600 mx-2 md:mx-0">
               <button
                 type="button"
                 onClick={() => {
@@ -736,8 +736,8 @@ export function QuickInventoryEntry({
                 }}
                 className={`flex-1 min-w-[100px] px-4 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${
                   viewMode === "pending"
-                    ? "bg-white shadow-sm text-blue-600"
-                    : "text-slate-500 hover:text-slate-700"
+                    ? "bg-white dark:bg-slate-900 shadow-sm text-blue-600 dark:text-blue-400"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
                 }`}
               >
                 Pendientes
@@ -764,8 +764,8 @@ export function QuickInventoryEntry({
                 }}
                 className={`flex-1 min-w-[100px] px-4 py-2 rounded-lg text-[10px] md:text-xs font-black uppercase tracking-widest transition-all ${
                   viewMode === "completed"
-                    ? "bg-white shadow-sm text-green-600"
-                    : "text-slate-500 hover:text-slate-700"
+                    ? "bg-white dark:bg-slate-900 shadow-sm text-green-600"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-200"
                 }`}
               >
                 Completados
@@ -780,7 +780,7 @@ export function QuickInventoryEntry({
               className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
                 clientFilter === "Todos"
                   ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                  : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                  : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
               }`}
             >
               TODOS ({totalModuleTasks})
@@ -793,7 +793,7 @@ export function QuickInventoryEntry({
                 className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
                   clientFilter === c
                     ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                    : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                    : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
                 }`}
               >
                 {c} ({groupedTasks[c].length})
@@ -806,7 +806,7 @@ export function QuickInventoryEntry({
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pr-2 pb-20">
             <div className="grid grid-cols-1 gap-3 md:gap-4 px-2 md:px-0">
               {displayedTasks.length === 0 ? (
-                <div className="bg-white p-8 md:p-16 rounded-[2rem] border border-slate-200 text-center font-bold text-slate-400">
+                <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
                   No hay órdenes{" "}
                   {viewMode === "completed"
                     ? "completadas"
@@ -822,7 +822,7 @@ export function QuickInventoryEntry({
                 className={`p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between group relative gap-4 ${
                   viewMode === "priority"
                     ? "bg-red-50 border-red-200"
-                    : "bg-white border-slate-100"
+                    : "bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-700"
                 }`}
               >
                 <div className="absolute top-4 right-4 z-20 flex gap-2 items-center">
@@ -833,13 +833,13 @@ export function QuickInventoryEntry({
                         e.stopPropagation();
                         setTransferOpenId((prev) => (prev === t.id ? null : t.id));
                       }}
-                      className="text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 p-2 rounded-xl transition-colors"
+                      className="text-slate-400 dark:text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 p-2 rounded-xl transition-colors"
                       title="Transferir a otro módulo"
                     >
                       <ArrowRightLeft size={16} />
                     </button>
                     {transferOpenId === t.id && (
-                      <div className="absolute right-0 top-full mt-1 py-1 bg-white rounded-xl border border-slate-200 shadow-lg z-30 min-w-[180px]">
+                      <div className="absolute right-0 top-full mt-1 py-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-600 shadow-lg z-30 min-w-[180px]">
                         {moduleType === "quick" ? (
                           <>
                             <button
@@ -849,7 +849,7 @@ export function QuickInventoryEntry({
                                 onTransferTask(t, "detailed");
                                 setTransferOpenId(null);
                               }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
                             >
                               → Ingreso Detallado
                             </button>
@@ -860,7 +860,7 @@ export function QuickInventoryEntry({
                                 onTransferTask(t, "airway");
                                 setTransferOpenId(null);
                               }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
                             >
                               → Guía Aérea
                             </button>
@@ -874,7 +874,7 @@ export function QuickInventoryEntry({
                                 onTransferTask(t, "quick");
                                 setTransferOpenId(null);
                               }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
                             >
                               → Ingreso Rápido
                             </button>
@@ -885,7 +885,7 @@ export function QuickInventoryEntry({
                                 onTransferTask(t, "detailed");
                                 setTransferOpenId(null);
                               }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50"
+                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
                             >
                               → Ingreso Detallado
                             </button>
@@ -900,7 +900,7 @@ export function QuickInventoryEntry({
                       e.stopPropagation();
                       openEditModal(t);
                     }}
-                    className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-2 rounded-xl transition-colors"
+                    className="text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:bg-blue-950/45 p-2 rounded-xl transition-colors"
                   >
                     <Edit size={16} />
                   </button>
@@ -910,7 +910,7 @@ export function QuickInventoryEntry({
                       e.stopPropagation();
                       onDeleteTask(t.id);
                     }}
-                    className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
+                    className="text-slate-400 dark:text-slate-500 hover:text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -926,7 +926,7 @@ export function QuickInventoryEntry({
                         className={`text-3xl md:text-4xl font-black tracking-tight truncate leading-none ${
                           viewMode === "priority"
                             ? "text-red-700"
-                            : "text-[#16263F]"
+                            : "text-[#16263F] dark:text-slate-100"
                         }`}
                       >
                         RA: {t.ra}
@@ -952,26 +952,26 @@ export function QuickInventoryEntry({
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 mt-2">
+                  <div className="grid grid-cols-2 gap-4 border-t border-slate-100 dark:border-slate-700 pt-4 mt-2">
                     <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                      <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                         PROVEEDOR
                       </p>
-                      <p className="text-xs md:text-sm font-bold text-[#16263F] truncate uppercase">
+                      <p className="text-xs md:text-sm font-bold text-[#16263F] dark:text-slate-100 truncate uppercase">
                         {t.provider}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                      <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                         MARCA / TRACKING
                       </p>
-                      <p className="text-xs md:text-sm font-bold text-[#16263F] truncate uppercase">
+                      <p className="text-xs md:text-sm font-bold text-[#16263F] dark:text-slate-100 truncate uppercase">
                         {t.brand}
                       </p>
                     </div>
                   </div>
                 </div>
-                <div className="w-full md:w-14 h-12 md:h-14 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-slate-100 group-hover:text-[#16263F] transition-all shrink-0 hidden sm:flex">
+                <div className="w-full md:w-14 h-12 md:h-14 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover:bg-slate-100 group-hover:text-[#16263F] dark:text-slate-100 transition-all shrink-0 hidden sm:flex">
                   <ArrowRight className="w-5 h-5" />
                 </div>
               </div>
@@ -1003,21 +1003,21 @@ export function QuickInventoryEntry({
         <button
           type="button"
           onClick={clearTask}
-          className="text-slate-500 bg-white md:bg-transparent px-4 py-2 md:px-0 md:py-0 rounded-lg md:rounded-none shadow-sm md:shadow-none font-bold hover:text-[#16263F] flex items-center gap-2 uppercase text-[10px] tracking-widest"
+          className="text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 md:bg-transparent px-4 py-2 md:px-0 md:py-0 rounded-lg md:rounded-none shadow-sm md:shadow-none font-bold hover:text-[#16263F] dark:text-slate-100 flex items-center gap-2 uppercase text-[10px] tracking-widest"
         >
           <ArrowLeft className="w-4 h-4" />{" "}
           <span className="hidden md:inline">Volver al listado</span>
         </button>
         <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch md:items-center gap-2 md:gap-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
-            <div className="rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+            <div className="rounded-full border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-1 shadow-sm">
               <button
                 type="button"
                 onClick={() => setQuickMode("normal")}
                 className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest ${
                   quickMode === "normal"
                     ? "bg-[#16263F] text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100"
                 }`}
               >
                 Normal
@@ -1028,20 +1028,20 @@ export function QuickInventoryEntry({
                 className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest ${
                   quickMode === "reempaque"
                     ? "bg-amber-500 text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-100"
                 }`}
               >
                 Con Reempaque
               </button>
             </div>
-            <div className="bg-white border border-slate-200 p-1 rounded-full flex text-[10px] md:text-sm font-bold text-slate-500 shadow-sm w-full sm:w-auto">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 p-1 rounded-full flex text-[10px] md:text-sm font-bold text-slate-500 dark:text-slate-400 shadow-sm w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => updateWeightMode("by_reference")}
                 className={`flex-1 sm:flex-none px-4 py-2 rounded-full transition-all ${
                   weightMode === "by_reference"
                     ? "bg-[#16263F] text-white shadow"
-                    : "hover:bg-slate-50"
+                    : "hover:bg-slate-50 dark:bg-slate-800/60"
                 }`}
               >
                 Por Referencia
@@ -1052,7 +1052,7 @@ export function QuickInventoryEntry({
                 className={`flex-1 sm:flex-none px-4 py-2 rounded-full transition-all ${
                   weightMode === "per_bundle"
                     ? "bg-[#16263F] text-white shadow"
-                    : "hover:bg-slate-50"
+                    : "hover:bg-slate-50 dark:bg-slate-800/60"
                 }`}
               >
                 Por Peso
@@ -1062,11 +1062,11 @@ export function QuickInventoryEntry({
 
           {t && (
             <div className="flex items-center gap-2">
-              <span className="bg-white text-[#16263F] border border-slate-200 px-4 py-2.5 rounded-full text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
+              <span className="bg-white dark:bg-slate-900 text-[#16263F] dark:text-slate-100 border border-slate-200 dark:border-slate-600 px-4 py-2.5 rounded-full text-[10px] md:text-sm font-black shadow-sm text-center uppercase tracking-widest flex items-center justify-center gap-2 shrink-0">
                 {moduleType === "airway" ? (
                   <Plane className="w-4 h-4 text-orange-500" />
                 ) : (
-                  <Box className="w-4 h-4 text-blue-600" />
+                  <Box className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                 )}{" "}
                 RA-{t.ra}
               </span>
@@ -1079,7 +1079,7 @@ export function QuickInventoryEntry({
                       ? "bg-green-50 text-green-700 border-green-200"
                       : autosaveState === "error"
                         ? "bg-red-50 text-red-700 border-red-200"
-                        : "bg-slate-50 text-slate-600 border-slate-200"
+                        : "bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600"
                 }`}
               >
                 {autosaveState === "saving"
@@ -1096,15 +1096,15 @@ export function QuickInventoryEntry({
       </div>
 
       {t && (
-        <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1 overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-sm sm:p-3 md:rounded-[2rem] md:shadow-lg lg:rounded-[3rem]">
+        <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1 overflow-hidden rounded-2xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-2 shadow-sm sm:p-3 md:rounded-[2rem] md:shadow-lg lg:rounded-[3rem]">
           <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-3">
-            <div className="relative min-w-0 flex-1 overflow-x-hidden rounded-2xl border-2 border-slate-200/90 bg-white shadow-md ring-1 ring-slate-900/[0.04]">
+            <div className="relative min-w-0 flex-1 overflow-x-hidden rounded-2xl border-2 border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 shadow-md ring-1 ring-slate-900/[0.04]">
               <div
                 className="absolute left-0 top-0 h-full w-1.5 rounded-l-2xl bg-[#16263F]"
                 aria-hidden
               />
               <div className="pl-3 pr-3 pb-3 pt-3 sm:pl-5 sm:pr-5 sm:pb-4 sm:pt-4">
-                <div className="mb-3 flex flex-wrap items-center gap-2.5 border-b-2 border-slate-100 pb-3 sm:gap-3">
+                <div className="mb-3 flex flex-wrap items-center gap-2.5 border-b-2 border-slate-100 dark:border-slate-700 pb-3 sm:gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#16263F] text-white shadow-md ring-2 ring-[#16263F]/20">
                     {moduleType === "airway" ? (
                       <Plane className="h-5 w-5" aria-hidden />
@@ -1112,28 +1112,28 @@ export function QuickInventoryEntry({
                       <Box className="h-5 w-5" aria-hidden />
                     )}
                   </span>
-                  <h4 className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-[#16263F] sm:text-base">
+                  <h4 className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-[#16263F] dark:text-slate-100 sm:text-base">
                     Datos originales
                   </h4>
-                  <span className="inline-flex shrink-0 items-center rounded-full border-2 border-blue-200/80 bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-800 shadow-sm sm:text-[11px]">
+                  <span className="inline-flex shrink-0 items-center rounded-full border-2 border-blue-200/80 bg-blue-50 dark:bg-blue-950/45 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-800 shadow-sm sm:text-[11px]">
                     RA · referencia previa
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-                  <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
-                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                  <div className="rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-800/95 px-3 py-2.5 shadow-sm sm:py-3">
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:text-[11px]">
                       Proveedor / naviera
                     </p>
-                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] dark:text-slate-100 sm:text-base">
                       {t.provider}
                     </p>
                   </div>
-                  <div className="rounded-xl border-2 border-slate-100 bg-slate-50/95 px-3 py-2.5 shadow-sm sm:py-3">
-                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 sm:text-[11px]">
+                  <div className="rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-800/95 px-3 py-2.5 shadow-sm sm:py-3">
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:text-[11px]">
                       Marca · tracking
                     </p>
-                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] sm:text-base">
+                    <p className="break-words text-sm font-bold leading-snug text-[#16263F] dark:text-slate-100 sm:text-base">
                       {t.brand}
                     </p>
                   </div>
@@ -1150,13 +1150,13 @@ export function QuickInventoryEntry({
                         />
                       </p>
                     </div>
-                    <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 shadow-sm sm:py-3">
-                      <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-600 sm:text-[11px]">
+                    <div className="rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 shadow-sm sm:py-3">
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 sm:text-[11px]">
                         Peso en documento
                       </p>
-                      <p className="text-lg font-black tabular-nums text-slate-900 sm:text-xl">
+                      <p className="text-lg font-black tabular-nums text-slate-900 dark:text-slate-100 sm:text-xl">
                         {t.expectedWeight}
-                        <span className="ml-1 text-sm font-bold text-slate-500 sm:text-base">
+                        <span className="ml-1 text-sm font-bold text-slate-500 dark:text-slate-400 sm:text-base">
                           kg
                         </span>
                       </p>
@@ -1186,7 +1186,7 @@ export function QuickInventoryEntry({
               </div>
             </div>
 
-            <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:w-[min(100%,24.5rem)] lg:border-l lg:border-slate-200 lg:pl-4">
+            <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:w-[min(100%,24.5rem)] lg:border-l lg:border-slate-200 dark:border-slate-600 lg:pl-4">
               <div className="rounded-xl bg-[#16263F] px-3 py-2 shadow-md ring-1 ring-black/10">
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/85">
                   Captura actual
@@ -1197,16 +1197,16 @@ export function QuickInventoryEntry({
               </div>
               {/* 2 columnas arriba; diferencia y totales a ancho completo para evitar texto cortado */}
               <div className="grid min-w-0 grid-cols-2 gap-2">
-                <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
+                <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-gradient-to-b from-white to-slate-50/90 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
                       <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
                     </span>
-                    <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-slate-600 sm:text-[11px]">
+                    <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-slate-600 dark:text-slate-300 sm:text-[11px]">
                       Declarados
                     </p>
                   </div>
-                  <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-[#16263F] sm:text-[1.85rem]">
+                  <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-[#16263F] dark:text-slate-100 sm:text-[1.85rem]">
                     {originalExpected}
                   </p>
                 </div>
@@ -1245,7 +1245,7 @@ export function QuickInventoryEntry({
                       <Scale className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-900 sm:text-[11px]">
+                      <p className="text-[10px] font-black uppercase tracking-wide text-slate-900 dark:text-slate-100 sm:text-[11px]">
                         Diferencia
                       </p>
                       <p
@@ -1277,27 +1277,27 @@ export function QuickInventoryEntry({
                     {faltantes}
                   </p>
                 </div>
-                <div className="col-span-2 rounded-xl border-2 border-slate-200 bg-slate-50/90 px-3 py-2 shadow-sm sm:py-2.5">
-                  <p className="mb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 sm:mb-2 sm:text-[10px]">
+                <div className="col-span-2 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50/90 dark:bg-slate-800/90 px-3 py-2 shadow-sm sm:py-2.5">
+                  <p className="mb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:mb-2 sm:text-[10px]">
                     Totales tabla
                   </p>
                   <div className="flex flex-wrap items-end gap-x-8 gap-y-2 sm:justify-between">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase text-slate-500">
+                      <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
                         Volumen
                       </p>
-                      <p className="flex flex-wrap items-baseline gap-1 text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                      <p className="flex flex-wrap items-baseline gap-1 text-base font-black tabular-nums text-[#16263F] dark:text-slate-100 sm:text-lg">
                         {Number(totals.cbm).toFixed(2)}
                         <M3Unit size="sm" className="text-xs font-black sm:text-sm" />
                       </p>
                     </div>
                     <div className="min-w-0 text-right sm:text-left">
-                      <p className="text-[10px] font-bold uppercase text-slate-500">
+                      <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
                         Peso
                       </p>
-                      <p className="text-base font-black tabular-nums text-[#16263F] sm:text-lg">
+                      <p className="text-base font-black tabular-nums text-[#16263F] dark:text-slate-100 sm:text-lg">
                         {totals.weight.toFixed(1)}
-                        <span className="ml-1 text-sm font-bold text-slate-500">
+                        <span className="ml-1 text-sm font-bold text-slate-500 dark:text-slate-400">
                           kg
                         </span>
                       </p>
@@ -1308,14 +1308,14 @@ export function QuickInventoryEntry({
             </div>
           </div>
 
-          <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)]">
+          <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-[inset_0_0_0_1px_rgb(241,245,249)] dark:shadow-[inset_0_0_0_1px_rgb(30,41,59)]">
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
             <table
               className={`w-full border-collapse text-left text-sm md:min-w-full ${
                 quickMode === "reempaque" ? "min-w-[1180px]" : "min-w-[980px]"
               }`}
             >
-              <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
+              <thead className="sticky top-0 z-20 border-b border-slate-200 dark:border-slate-600 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                 <tr>
                   <th className="w-10 px-2 py-2 text-center">#</th>
                   {showReferenceColumn && (
@@ -1334,13 +1334,13 @@ export function QuickInventoryEntry({
                   <th className="w-24 px-2 py-2 text-center">L (CM)</th>
                   <th className="w-24 px-2 py-2 text-center">W (CM)</th>
                   <th className="w-24 px-2 py-2 text-center">H (CM)</th>
-                  <th className="bg-slate-50 px-2 py-2 text-center font-black text-[#16263F]">
+                  <th className="bg-slate-50 dark:bg-slate-800/60 px-2 py-2 text-center font-black text-[#16263F] dark:text-slate-100">
                     CBM TOTAL
                   </th>
                   <th className="w-12 px-2 py-2 text-center" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {measureRows.map((row, idx) => {
                   const l = parseFloat(String(row.l)) || 0;
                   const w = parseFloat(String(row.w)) || 0;
@@ -1359,7 +1359,7 @@ export function QuickInventoryEntry({
                   return (
                     <tr
                       key={row.id}
-                      className="group transition-colors odd:bg-white even:bg-slate-50/60 hover:bg-sky-50/80"
+                      className="group transition-colors odd:bg-white dark:bg-slate-900 even:bg-slate-50/60 dark:bg-slate-800/60 hover:bg-sky-50/80"
                     >
                       <td className="px-2 py-1 text-center text-base font-black text-slate-300 md:text-lg">
                         {idx + 1}
@@ -1383,7 +1383,7 @@ export function QuickInventoryEntry({
                               void runCatalogLookup(row.id, e.target.value);
                             }}
                             value={row.referencia || ""}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1.5 text-left text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                             placeholder="Referencia"
                           />
                         </td>
@@ -1397,7 +1397,7 @@ export function QuickInventoryEntry({
                             updateRowValue(row.id, "bultos", e.target.value)
                           }
                           value={row.bultos ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-black text-blue-600 outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500/25"
+                          className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 text-center text-sm font-black text-blue-600 dark:text-blue-400 outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500/25"
                           placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
@@ -1410,7 +1410,7 @@ export function QuickInventoryEntry({
                             className={`rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wider ${
                               isReempaque
                                 ? "bg-amber-500 text-white"
-                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                : "bg-slate-100 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
                             }`}
                           >
                             {isReempaque ? "Sí" : "No"}
@@ -1439,7 +1439,7 @@ export function QuickInventoryEntry({
                               ))}
                             </select>
                           ) : (
-                            <span className="text-[10px] font-bold text-slate-400">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
                               N/A
                             </span>
                           )}
@@ -1454,7 +1454,7 @@ export function QuickInventoryEntry({
                               updateRowValue(row.id, "weight", e.target.value)
                             }
                             value={row.weight ?? ""}
-                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
+                            className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                             placeholder=""
                           />
                         </td>
@@ -1468,7 +1468,7 @@ export function QuickInventoryEntry({
                             updateRowValue(row.id, "l", e.target.value)
                           }
                           value={row.l ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
+                          className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
@@ -1480,7 +1480,7 @@ export function QuickInventoryEntry({
                             updateRowValue(row.id, "w", e.target.value)
                           }
                           value={row.w ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
+                          className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
@@ -1492,12 +1492,12 @@ export function QuickInventoryEntry({
                             updateRowValue(row.id, "h", e.target.value)
                           }
                           value={row.h ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-1.5 text-center text-sm font-bold text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
+                          className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                           placeholder={isReempaque ? "--" : ""}
                         />
                       </td>
 
-                      <td className="bg-slate-50 px-2 py-1 text-center text-base font-black text-[#16263F] md:text-lg">
+                      <td className="bg-slate-50 dark:bg-slate-800/60 px-2 py-1 text-center text-base font-black text-[#16263F] dark:text-slate-100 md:text-lg">
                         {rowCbm.toFixed(2)}
                       </td>
                       <td className="px-2 py-1 text-center">
@@ -1517,7 +1517,7 @@ export function QuickInventoryEntry({
             </div>
           </div>
 
-          <div className="isolate z-10 mt-1 shrink-0 border-t border-slate-200 bg-white pt-2 shadow-[0_-8px_24px_-10px_rgba(15,23,42,0.1)] md:pt-3">
+          <div className="isolate z-10 mt-1 shrink-0 border-t border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 pt-2 shadow-[0_-8px_24px_-10px_rgba(15,23,42,0.1)] md:pt-3">
             <input
               ref={referenciasExcelRef}
               type="file"
@@ -1529,7 +1529,7 @@ export function QuickInventoryEntry({
               <button
                 type="button"
                 onClick={addRow}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:border-slate-400 hover:bg-slate-50 hover:text-slate-600 md:rounded-full md:py-4 md:text-sm"
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-3 text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-all hover:border-slate-400 hover:bg-slate-50 dark:bg-slate-800/60 hover:text-slate-600 dark:text-slate-300 md:rounded-full md:py-4 md:text-sm"
               >
                 <Plus className="w-5 h-5" /> AGREGAR LÍNEA ADICIONAL
               </button>
@@ -1537,7 +1537,7 @@ export function QuickInventoryEntry({
                 type="button"
                 disabled={referenciasImportBusy}
                 onClick={() => referenciasExcelRef.current?.click()}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-300 bg-white py-3 text-xs font-black uppercase tracking-widest text-emerald-800 transition-all hover:border-emerald-500 hover:bg-emerald-50 disabled:opacity-60 md:rounded-full md:py-4 md:text-sm"
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-300 bg-white dark:bg-slate-900 py-3 text-xs font-black uppercase tracking-widest text-emerald-800 transition-all hover:border-emerald-500 hover:bg-emerald-50 disabled:opacity-60 md:rounded-full md:py-4 md:text-sm"
               >
                 <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                 IMPORTAR REFERENCIAS (EXCEL)

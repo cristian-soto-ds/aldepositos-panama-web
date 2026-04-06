@@ -184,6 +184,9 @@ export default function PanelPage() {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     root.classList.toggle("panel-dark", preferences.theme === "dark");
+    return () => {
+      root.classList.remove("panel-dark");
+    };
   }, [preferences.theme]);
 
   const sidebarAvatarUrl =

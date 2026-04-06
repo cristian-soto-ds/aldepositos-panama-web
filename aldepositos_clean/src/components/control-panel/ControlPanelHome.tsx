@@ -499,7 +499,7 @@ export function ControlPanelHome({
   return (
     <div className="max-w-[1600px] mx-auto animate-fade pb-10 px-0">
       {/* Fondo suave tipo dashboard */}
-      <div className="rounded-[2rem] bg-slate-100/70 border border-slate-200/80 p-4 md:p-6 shadow-sm">
+      <div className="rounded-[2rem] bg-slate-100/70 border border-slate-200 dark:border-slate-600/80 p-4 md:p-6 shadow-sm">
         {/* Barra superior: título + búsqueda / filtro + acciones */}
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
           <div className="flex items-start gap-4 min-w-0">
@@ -522,46 +522,46 @@ export function ControlPanelHome({
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
                 {currentDate}
               </p>
-              <h1 className="text-2xl md:text-3xl font-black text-[#16263F] tracking-tight leading-tight">
+              <h1 className="text-2xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 tracking-tight leading-tight">
                 Panel principal
               </h1>
-              <p className="text-sm font-semibold text-slate-600 mt-0.5 truncate">
+              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300 mt-0.5 truncate">
                 {getGreeting()},{" "}
-                <span className="text-[#16263F]">{greetingName}</span>
+                <span className="text-[#16263F] dark:text-slate-100">{greetingName}</span>
               </p>
-              <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+              <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 shadow-sm">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[#16263F] text-white">
                   <Clock3 className="w-3.5 h-3.5" />
                 </span>
                 <div className="leading-tight">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
                     Hora en vivo
                   </p>
-                  <p className="text-xs font-black text-[#16263F] tabular-nums">{currentTime}</p>
+                  <p className="text-xs font-black text-[#16263F] dark:text-slate-100 tabular-nums">{currentTime}</p>
                 </div>
               </div>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto lg:max-w-2xl">
-            <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full border border-slate-200/90 bg-white/90 backdrop-blur-sm px-4 py-2.5 shadow-sm">
-              <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white/90 backdrop-blur-sm px-4 py-2.5 shadow-sm">
+              <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar RA, cliente o proveedor…"
-                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] placeholder:text-slate-400 outline-none"
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] dark:text-slate-100 placeholder:text-slate-400 dark:text-slate-500 outline-none"
               />
               <select
                 value={filterStatus}
                 onChange={(e) =>
                   setFilterStatus(e.target.value as "all" | "in_progress" | "pending")
                 }
-                className="shrink-0 rounded-full border border-slate-200 bg-slate-50 py-1.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider text-[#16263F] outline-none cursor-pointer"
+                className="shrink-0 rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 py-1.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider text-[#16263F] dark:text-slate-100 outline-none cursor-pointer"
                 aria-label="Filtrar por estado"
               >
                 <option value="all">Todos</option>
@@ -634,22 +634,22 @@ export function ControlPanelHome({
           </div>
 
           <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/50 flex flex-row items-center gap-5">
+            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/50 dark:shadow-black/30 flex flex-row items-center gap-5">
               <DonutRing percent={completionDonutPct} />
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
                   Cierre de inventario
                 </p>
-                <p className="mt-1 text-2xl font-black text-[#16263F]">
+                <p className="mt-1 text-2xl font-black text-[#16263F] dark:text-slate-100">
                   {formatNumber(dashboard.completed)}
-                  <span className="text-slate-400 text-lg font-bold"> / {formatNumber(dashboard.total)}</span>
+                  <span className="text-slate-400 dark:text-slate-500 text-lg font-bold"> / {formatNumber(dashboard.total)}</span>
                 </p>
-                <p className="text-xs font-semibold text-slate-500 mt-1">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">
                   RAs completados en el sistema
                 </p>
               </div>
             </div>
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-4 shadow-md shadow-slate-200/50 grid grid-cols-2 gap-3">
+            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-4 shadow-md shadow-slate-200/50 dark:shadow-black/30 grid grid-cols-2 gap-3">
               <MiniStat icon={<Truck className="h-3.5 w-3.5" />} label="Despachados" value={dashboard.dispatched} />
               <MiniStat icon={<AlertCircle className="h-3.5 w-3.5 text-red-500" />} label="Prioridad" value={dashboard.priority} />
               <MiniStat icon={<Package className="h-3.5 w-3.5" />} label="Progreso real" value={`${overallProgressPct}%`} />
@@ -660,21 +660,21 @@ export function ControlPanelHome({
 
         {/* Contenido principal: lista + lateral */}
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <section className="xl:col-span-8 rounded-[2rem] border border-slate-200/90 bg-white p-5 md:p-6 shadow-md shadow-slate-200/40">
+          <section className="xl:col-span-8 rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-md shadow-slate-200/40 dark:shadow-black/25">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
               <div className="flex items-center gap-2">
-                <Activity className="h-5 w-5 text-[#16263F]" />
-                <h2 className="text-sm font-black uppercase tracking-widest text-[#16263F]">
+                <Activity className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
+                <h2 className="text-sm font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Actividad en depósito
                 </h2>
               </div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                 Quién trabaja qué · colaboración en el mismo RA
               </p>
             </div>
 
             {presenceGrouped.length > 0 && (
-              <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-3">
+              <div className="mb-5 rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-950/50 p-3">
                 <p className="text-[10px] font-black uppercase tracking-wider text-blue-800 mb-2">
                   En captura ahora (esta sesión)
                 </p>
@@ -692,13 +692,13 @@ export function ControlPanelHome({
             )}
 
             {filteredHighlight.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 py-12 text-center px-4">
-                <p className="text-sm font-semibold text-slate-600">
+              <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/80 py-12 text-center px-4">
+                <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
                   No hay órdenes que coincidan con el filtro o la búsqueda.
                 </p>
               </div>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredHighlight.map((t) => {
                   const taskProgress = getTaskProgressPercent(t);
                   const raK = String(t.ra || "").trim().toUpperCase();
@@ -738,8 +738,8 @@ export function ControlPanelHome({
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-base font-black text-[#16263F]">RA {t.ra}</span>
-                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-600">
+                            <span className="text-base font-black text-[#16263F] dark:text-slate-100">RA {t.ra}</span>
+                            <span className="rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
                               {moduleLabel(t.type)}
                             </span>
                             <span
@@ -757,10 +757,10 @@ export function ControlPanelHome({
                               </span>
                             ) : null}
                           </div>
-                          <p className="mt-1 text-xs font-semibold text-slate-500 truncate">
+                          <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400 truncate">
                             {t.mainClient || "Sin cliente"} · {t.provider || "—"}
                           </p>
-                          <p className="mt-1 text-[11px] font-semibold text-slate-500 truncate">
+                          <p className="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">
                             {liveLabels.length > 0
                               ? `En vivo: ${liveLabels.join(" · ")}`
                               : "En vivo: sin captura activa"}
@@ -769,7 +769,7 @@ export function ControlPanelHome({
                       </div>
                       <div className="flex items-center gap-4 shrink-0 md:min-w-[200px]">
                         <div className="flex-1 md:flex-none md:w-36">
-                          <div className="flex justify-between text-[9px] font-black uppercase text-slate-400 mb-1">
+                          <div className="flex justify-between text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 mb-1">
                             <span>Progreso</span>
                             <span>{taskProgress}%</span>
                           </div>
@@ -780,7 +780,7 @@ export function ControlPanelHome({
                             />
                           </div>
                         </div>
-                        <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 border border-slate-100 text-slate-400">
+                        <div className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700 text-slate-400 dark:text-slate-500">
                           <Package className="h-5 w-5" aria-hidden />
                         </div>
                       </div>
@@ -790,8 +790,8 @@ export function ControlPanelHome({
               </ul>
             )}
 
-            <div className="mt-5 flex flex-wrap items-start gap-2 rounded-2xl border border-blue-100 bg-blue-50/60 p-3 md:p-4">
-              <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+            <div className="mt-5 flex flex-wrap items-start gap-2 rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-950/60 p-3 md:p-4">
+              <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-blue-900 leading-relaxed">
                 <span className="font-black">Colaboración:</span> varias personas pueden
                 intervenir el mismo RA. <strong>Conectados ahora</strong> y{" "}
@@ -802,10 +802,10 @@ export function ControlPanelHome({
           </section>
 
           <aside className="xl:col-span-4 space-y-4">
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/40">
+            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
               <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="h-5 w-5 text-[#16263F]" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+                <BarChart3 className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
+                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Por módulo
                 </h3>
               </div>
@@ -831,10 +831,10 @@ export function ControlPanelHome({
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/40">
+            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
               <div className="flex items-center gap-2 mb-3">
-                <Layers className="h-5 w-5 text-[#16263F]" />
-                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+                <Layers className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
+                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Progreso general
                 </h3>
               </div>
@@ -844,14 +844,14 @@ export function ControlPanelHome({
                   style={{ width: `${overallProgressPct}%` }}
                 />
               </div>
-              <p className="mt-2 text-[11px] font-semibold text-slate-500">
+              <p className="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                 {overallProgressPct}% promedio según avance real por RA.
               </p>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/40">
+            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
               <div className="flex items-center justify-between gap-2 mb-3">
-                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F]">
+                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Conectados ahora
                 </h3>
                 <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
@@ -859,7 +859,7 @@ export function ControlPanelHome({
                 </span>
               </div>
               {connectedUsers.length === 0 ? (
-                <p className="text-xs font-semibold text-slate-500">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                   No hay usuarios activos en captura.
                 </p>
               ) : (
@@ -880,7 +880,7 @@ export function ControlPanelHome({
                     return (
                       <div
                         key={u.userKey}
-                        className="flex items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/80 px-2.5 py-2"
+                        className="flex items-center gap-2.5 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 px-2.5 py-2"
                       >
                         <div
                           className={`h-9 w-9 rounded-full overflow-hidden border border-white shadow-sm flex items-center justify-center ${paletteForKey(
@@ -901,7 +901,7 @@ export function ControlPanelHome({
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-black text-[#16263F] truncate">
+                          <p className="text-xs font-black text-[#16263F] dark:text-slate-100 truncate">
                             {u.userLabel}
                           </p>
                           <p className="text-[10px] font-semibold text-emerald-700">
@@ -915,14 +915,14 @@ export function ControlPanelHome({
               )}
             </div>
 
-            <div className="rounded-[2rem] border border-dashed border-slate-300 bg-slate-50/80 p-4">
-              <div className="flex items-center gap-2 text-[#16263F] mb-2">
+            <div className="rounded-[2rem] border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/80 p-4">
+              <div className="flex items-center gap-2 text-[#16263F] dark:text-slate-100 mb-2">
                 <User className="h-4 w-4" />
                 <span className="text-[10px] font-black uppercase tracking-wider">
                   Tip
                 </span>
               </div>
-              <p className="text-xs font-semibold text-slate-600 leading-relaxed">
+              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 leading-relaxed">
                 Usa la búsqueda y el filtro para enfocar pendientes o lo que está en
                 proceso. Los avatares apilados indican más de un operador con foco en
                 el mismo RA.
@@ -934,7 +934,7 @@ export function ControlPanelHome({
 
       {showImportModal && (
         <div className="fixed inset-0 bg-[#16263F]/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade">
-          <div className="bg-white w-full max-w-lg rounded-3xl md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="bg-[#16263F] p-5 md:p-8 text-white shrink-0">
               <h3 className="text-lg md:text-2xl font-black tracking-tight flex items-center gap-2 md:gap-3">
                 <FileSpreadsheet className="text-[#FFC400] w-5 h-5 md:w-6 md:h-6" />{" "}
@@ -947,24 +947,24 @@ export function ControlPanelHome({
             <div className="p-5 md:p-8 space-y-5 md:space-y-6 overflow-y-auto">
               {isProcessing ? (
                 <div className="text-center py-8">
-                  <Loader2 className="w-12 h-12 mx-auto text-[#16263F] animate-spin mb-4" />
-                  <h3 className="text-lg font-bold text-[#16263F]">
+                  <Loader2 className="w-12 h-12 mx-auto text-[#16263F] dark:text-slate-100 animate-spin mb-4" />
+                  <h3 className="text-lg font-bold text-[#16263F] dark:text-slate-100">
                     Procesando Excel...
                   </h3>
                 </div>
               ) : (
                 <>
-                  <div className="bg-[#F8FAFC] border border-slate-200 p-4 md:p-6 rounded-2xl md:rounded-3xl flex items-start gap-4 md:gap-5 shadow-sm">
+                  <div className="bg-[#F8FAFC] border border-slate-200 dark:border-slate-600 p-4 md:p-6 rounded-2xl md:rounded-3xl flex items-start gap-4 md:gap-5 shadow-sm">
                     <div className="bg-blue-100 p-3 rounded-xl">
-                      <Users className="text-blue-600 w-5 h-5 md:w-6 md:h-6" />
+                      <Users className="text-blue-600 dark:text-blue-400 w-5 h-5 md:w-6 md:h-6" />
                     </div>
                     <div>
-                      <p className="text-[#16263F] font-black text-sm md:text-lg uppercase tracking-tight">
+                      <p className="text-[#16263F] dark:text-slate-100 font-black text-sm md:text-lg uppercase tracking-tight">
                         {extractedClient}
                       </p>
-                      <p className="text-slate-500 text-[10px] md:text-xs font-bold mt-1 uppercase tracking-widest">
+                      <p className="text-slate-500 dark:text-slate-400 text-[10px] md:text-xs font-bold mt-1 uppercase tracking-widest">
                         Se detectaron{" "}
-                        <span className="text-blue-600">
+                        <span className="text-blue-600 dark:text-blue-400">
                           {parsedData.length} RA&apos;s
                         </span>{" "}
                         listos.
@@ -972,7 +972,7 @@ export function ControlPanelHome({
                     </div>
                   </div>
 
-                  <p className="font-black text-[#16263F] text-center uppercase text-[10px] md:text-xs tracking-[0.2em]">
+                  <p className="font-black text-[#16263F] dark:text-slate-100 text-center uppercase text-[10px] md:text-xs tracking-[0.2em]">
                     Asignar órdenes a módulo:
                   </p>
 
@@ -980,10 +980,10 @@ export function ControlPanelHome({
                     <button
                       type="button"
                       onClick={() => confirmImport("quick")}
-                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 rounded-2xl md:rounded-[2rem] hover:border-blue-500 hover:bg-blue-50 transition-all group shadow-sm"
+                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-blue-500 hover:bg-blue-50 dark:bg-blue-950/45 transition-all group shadow-sm"
                     >
                       <Box className="text-blue-500 sm:mb-3 group-hover:rotate-12 transition-transform w-6 h-6 md:w-8 md:h-8 shrink-0" />
-                      <span className="font-black text-[#16263F] uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
+                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
                         Captura de
                         <br className="hidden sm:block" />
                         Medidas
@@ -992,10 +992,10 @@ export function ControlPanelHome({
                     <button
                       type="button"
                       onClick={() => confirmImport("detailed")}
-                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 rounded-2xl md:rounded-[2rem] hover:border-purple-500 hover:bg-purple-50 transition-all group shadow-sm"
+                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-purple-500 hover:bg-purple-50 transition-all group shadow-sm"
                     >
                       <FileText className="text-purple-600 sm:mb-3 group-hover:rotate-12 transition-transform w-6 h-6 md:w-8 md:h-8 shrink-0" />
-                      <span className="font-black text-[#16263F] uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
+                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
                         Validación
                         <br className="hidden sm:block" />
                         Detallada
@@ -1004,10 +1004,10 @@ export function ControlPanelHome({
                     <button
                       type="button"
                       onClick={() => confirmImport("airway")}
-                      className="col-span-1 sm:col-span-2 flex flex-row items-center justify-center gap-3 p-4 md:p-6 border-2 border-slate-100 rounded-2xl md:rounded-[2rem] hover:border-orange-500 hover:bg-orange-50 transition-all group shadow-sm"
+                      className="col-span-1 sm:col-span-2 flex flex-row items-center justify-center gap-3 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-orange-500 hover:bg-orange-50 transition-all group shadow-sm"
                     >
                       <Plane className="text-orange-500 group-hover:rotate-12 transition-transform w-6 h-6 shrink-0" />
-                      <span className="font-black text-[#16263F] uppercase text-[10px] md:text-xs tracking-widest leading-tight">
+                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest leading-tight">
                         Guía Aérea
                       </span>
                     </button>
@@ -1065,8 +1065,8 @@ function DonutRing({ percent }: { percent: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <Package className="h-6 w-6 text-[#16263F] opacity-80" aria-hidden />
-        <span className="text-sm font-black text-[#16263F]">{percent}%</span>
+        <Package className="h-6 w-6 text-[#16263F] dark:text-slate-100 opacity-80" aria-hidden />
+        <span className="text-sm font-black text-[#16263F] dark:text-slate-100">{percent}%</span>
       </div>
     </div>
   );
@@ -1082,12 +1082,12 @@ function MiniStat({
   value: string | number;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-xl border border-slate-100 bg-slate-50/90 p-2.5">
-      <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-slate-500">
+    <div className="flex flex-col gap-0.5 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-800/90 p-2.5">
+      <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
         {icon}
         {label}
       </div>
-      <p className="text-lg font-black tabular-nums text-[#16263F] leading-none">{value}</p>
+      <p className="text-lg font-black tabular-nums text-[#16263F] dark:text-slate-100 leading-none">{value}</p>
     </div>
   );
 }
@@ -1159,15 +1159,15 @@ function ActivityPresenceRow({
     <div className="flex items-center gap-3 rounded-xl border border-blue-100/80 bg-white/90 px-3 py-2.5 shadow-sm">
       <AvatarStack items={stackItems} />
       <div className="min-w-0 flex-1">
-        <p className="font-black text-[#16263F]">RA {raKey}</p>
-        <p className="text-[10px] font-semibold text-slate-500 truncate">{summary}</p>
+        <p className="font-black text-[#16263F] dark:text-slate-100">RA {raKey}</p>
+        <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate">{summary}</p>
       </div>
       {operatorCount > 1 ? (
         <span className="shrink-0 rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-amber-900">
           {operatorCount} ops
         </span>
       ) : (
-        <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-600">
+        <span className="shrink-0 rounded-full border border-slate-200 dark:border-slate-600 bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-600 dark:text-slate-300">
           1 op
         </span>
       )}
@@ -1189,11 +1189,11 @@ function SidebarBar({
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
     <div>
-      <div className="mb-1 flex justify-between text-[10px] font-black uppercase text-slate-600">
+      <div className="mb-1 flex justify-between text-[10px] font-black uppercase text-slate-600 dark:text-slate-300">
         <span>{label}</span>
         <span>
           {formatNumber(count)}{" "}
-          <span className="font-bold text-slate-400">({pct}%)</span>
+          <span className="font-bold text-slate-400 dark:text-slate-500">({pct}%)</span>
         </span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-slate-100">

@@ -602,49 +602,49 @@ export function DispatchEntry({
             <button
               type="button"
               onClick={() => setShowLoadPlanner(true)}
-              className="xl:col-span-2 text-left bg-white hover:bg-slate-50 border border-slate-200 rounded-[1.7rem] p-6 transition-all shadow-sm hover:shadow-md group"
+              className="xl:col-span-2 text-left bg-white dark:bg-slate-900 hover:bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-[1.7rem] p-6 transition-all shadow-sm hover:shadow-md group"
             >
-              <p className="text-xs font-black text-blue-700 uppercase tracking-widest mb-2">
+              <p className="text-xs font-black text-blue-700 dark:text-blue-300 uppercase tracking-widest mb-2">
                 Opción principal
               </p>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-lg md:text-2xl font-black text-[#16263F]">
+                  <p className="text-lg md:text-2xl font-black text-[#16263F] dark:text-slate-100">
                     Iniciar / Cargar contenedor
                   </p>
-                  <p className="text-xs md:text-sm font-bold text-slate-500 mt-2 max-w-2xl">
+                  <p className="text-xs md:text-sm font-bold text-slate-500 dark:text-slate-400 mt-2 max-w-2xl">
                     Planifica la relación de carga, revisa capacidad, imprime
                     relación y confirma salida sin perder información del
                     despacho.
                   </p>
                 </div>
-                <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-blue-100 text-blue-700 dark:text-blue-300 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
                   <ArrowRight className="w-5 h-5" />
                 </div>
               </div>
             </button>
 
-            <div className="bg-white border border-slate-200 rounded-[1.7rem] p-5 shadow-sm">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-[1.7rem] p-5 shadow-sm">
+              <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                 Resumen rápido
               </p>
-              <div className="mt-4 space-y-3 text-sm font-bold text-[#16263F]">
+              <div className="mt-4 space-y-3 text-sm font-bold text-[#16263F] dark:text-slate-100">
                 <p className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Contenedor</span>
+                  <span className="text-slate-500 dark:text-slate-400">Contenedor</span>
                   <span>{(containerInfo.number || "Sin asignar").toUpperCase()}</span>
                 </p>
                 <p className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Responsable</span>
+                  <span className="text-slate-500 dark:text-slate-400">Responsable</span>
                   <span className="truncate text-right">
                     {containerInfo.responsible || "Sin asignar"}
                   </span>
                 </p>
                 <p className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Fecha</span>
+                  <span className="text-slate-500 dark:text-slate-400">Fecha</span>
                   <span>{containerInfo.date}</span>
                 </p>
                 <p className="flex items-center justify-between gap-2">
-                  <span className="text-slate-500">Tipo equipo</span>
+                  <span className="text-slate-500 dark:text-slate-400">Tipo equipo</span>
                   <span>{capacityMap[containerInfo.type]?.name || "N/A"}</span>
                 </p>
               </div>
@@ -659,29 +659,29 @@ export function DispatchEntry({
     <div className="w-full h-full flex flex-col overflow-hidden pr-2 animate-fade">
       <div className="max-w-[1600px] mx-auto flex flex-col space-y-4 md:space-y-6 pb-6 w-full h-full">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 px-2 md:px-0">
-          <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
-            <Truck className="text-blue-600 w-5 h-5 md:w-8 md:h-8" />{" "}
+          <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
+            <Truck className="text-blue-600 dark:text-blue-400 w-5 h-5 md:w-8 md:h-8" />{" "}
             PLANIFICADOR DE DESPACHO
           </h2>
           <button
             type="button"
             onClick={() => setShowLoadPlanner(false)}
-            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-200 px-3 py-2 rounded-lg font-black text-[10px] uppercase tracking-widest"
           >
             Volver a opciones
           </button>
         </div>
 
-        <div className="bg-white p-5 md:p-6 rounded-[2rem] border border-slate-200 shadow-sm flex flex-col xl:flex-row gap-6">
+        <div className="bg-white dark:bg-slate-900 p-5 md:p-6 rounded-[2rem] border border-slate-200 dark:border-slate-600 shadow-sm flex flex-col xl:flex-row gap-6">
           <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="space-y-1 col-span-2 md:col-span-4 lg:col-span-2 border-b border-slate-100 pb-4 mb-2">
-              <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest ml-1">
+            <div className="space-y-1 col-span-2 md:col-span-4 lg:col-span-2 border-b border-slate-100 dark:border-slate-700 pb-4 mb-2">
+              <label className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest ml-1">
                 Filtrar Bodega por Cliente
               </label>
               <select
                 value={selectedClientFilter}
                 onChange={(e) => setSelectedClientFilter(e.target.value)}
-                className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl font-bold text-blue-900 focus:border-blue-500 outline-none text-sm cursor-pointer shadow-sm"
+                className="w-full p-3 bg-blue-50 dark:bg-blue-950/45 border border-blue-200 rounded-xl font-bold text-blue-900 focus:border-blue-500 outline-none text-sm cursor-pointer shadow-sm"
               >
                 <option value="Todos">TODOS LOS CLIENTES</option>
                 {uniqueClients.map((c) => (
@@ -691,10 +691,10 @@ export function DispatchEntry({
                 ))}
               </select>
             </div>
-            <div className="col-span-2 hidden lg:block border-b border-slate-100 pb-4 mb-2" />
+            <div className="col-span-2 hidden lg:block border-b border-slate-100 dark:border-slate-700 pb-4 mb-2" />
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Tipo Equipo
               </label>
               <select
@@ -710,7 +710,7 @@ export function DispatchEntry({
                           capacityMap["40"].tare,
                   }))
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               >
                 {Object.keys(capacityMap).map((k) => (
                   <option key={k} value={k}>
@@ -720,7 +720,7 @@ export function DispatchEntry({
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Nº Consignación
               </label>
               <input
@@ -733,11 +733,11 @@ export function DispatchEntry({
                     consignment: e.target.value,
                   })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold uppercase text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold uppercase text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Contenedor
               </label>
               <input
@@ -750,11 +750,11 @@ export function DispatchEntry({
                     number: e.target.value,
                   })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold uppercase text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold uppercase text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Seguimiento
               </label>
               <input
@@ -764,11 +764,11 @@ export function DispatchEntry({
                 onChange={(e) =>
                   setContainerInfo({ ...containerInfo, bl: e.target.value })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold uppercase text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold uppercase text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Sello 1
               </label>
               <input
@@ -778,11 +778,11 @@ export function DispatchEntry({
                 onChange={(e) =>
                   setContainerInfo({ ...containerInfo, seal1: e.target.value })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Sello 2
               </label>
               <input
@@ -792,11 +792,11 @@ export function DispatchEntry({
                 onChange={(e) =>
                   setContainerInfo({ ...containerInfo, seal2: e.target.value })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Tara (kg)
               </label>
               <input
@@ -809,11 +809,11 @@ export function DispatchEntry({
                     tare: Number(e.target.value) || 0,
                   })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest ml-1">
                 Fecha Llegada
               </label>
               <input
@@ -822,15 +822,15 @@ export function DispatchEntry({
                 onChange={(e) =>
                   setContainerInfo({ ...containerInfo, date: e.target.value })
                 }
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[#16263F] focus:border-blue-500 outline-none text-xs"
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-[#16263F] dark:text-slate-100 focus:border-blue-500 outline-none text-xs"
               />
             </div>
           </div>
 
-          <div className="w-full xl:w-80 bg-slate-50 rounded-2xl border border-slate-200 p-5 flex flex-col justify-center shadow-sm relative overflow-hidden">
+          <div className="w-full xl:w-80 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-600 p-5 flex flex-col justify-center shadow-sm relative overflow-hidden">
             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl" />
             <div className="flex justify-between items-end mb-2 relative z-10">
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              <p className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                 Capacidad CBM
               </p>
               <p
@@ -844,10 +844,10 @@ export function DispatchEntry({
               </p>
             </div>
             <div className="flex items-baseline gap-1 mb-3 relative z-10">
-              <span className="text-4xl font-black text-[#16263F] leading-none">
+              <span className="text-4xl font-black text-[#16263F] dark:text-slate-100 leading-none">
                 {currentCbm.toFixed(2)}
               </span>
-              <span className="text-sm font-bold text-slate-400">
+              <span className="text-sm font-bold text-slate-400 dark:text-slate-500">
                 / {maxCbm} CBM
               </span>
             </div>
@@ -857,13 +857,13 @@ export function DispatchEntry({
                 style={{ width: `${Math.min(percentFilled, 100)}%` }}
               />
             </div>
-            <div className="flex justify-between mt-4 text-[10px] font-black text-[#16263F] uppercase tracking-widest border-t border-slate-200 pt-3 relative z-10">
+            <div className="flex justify-between mt-4 text-[10px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest border-t border-slate-200 dark:border-slate-600 pt-3 relative z-10">
               <span className="flex flex-col">
-                <span className="text-slate-400 text-[8px] mb-0.5">BULTOS</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[8px] mb-0.5">BULTOS</span>
                 {currentBultos} BLT
               </span>
               <span className="flex flex-col text-right">
-                <span className="text-slate-400 text-[8px] mb-0.5">
+                <span className="text-slate-400 dark:text-slate-500 text-[8px] mb-0.5">
                   PESO NETO
                 </span>
                 {currentWeight.toFixed(2)} KG
@@ -873,20 +873,20 @@ export function DispatchEntry({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
-          <div className="lg:col-span-3 bg-white rounded-[2rem] border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-xs font-black text-[#16263F] uppercase tracking-widest flex items-center gap-2">
+          <div className="lg:col-span-3 bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-600 shadow-sm flex flex-col h-full overflow-hidden">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
+              <h3 className="text-xs font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest flex items-center gap-2">
                 <Box className="w-4 h-4 text-blue-500" /> Bodega (
                 {pendingTasksList.length})
               </h3>
-              <p className="text-[9px] text-slate-500 font-bold uppercase mt-1 leading-tight">
+              <p className="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase mt-1 leading-tight">
                 Mueve RAs al plan de carga. Los pendientes se marcarán como
                 Prioridad.
               </p>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar bg-slate-50/30">
+            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar bg-slate-50/30 dark:bg-slate-800/30">
               {pendingTasksList.length === 0 ? (
-                <div className="text-center p-6 text-slate-400 font-bold text-xs border-2 border-dashed border-slate-200 rounded-xl">
+                <div className="text-center p-6 text-slate-400 dark:text-slate-500 font-bold text-xs border-2 border-dashed border-slate-200 dark:border-slate-600 rounded-xl">
                   No hay órdenes en bodega para este cliente.
                 </div>
               ) : (
@@ -905,7 +905,7 @@ export function DispatchEntry({
                         isAwaitingEntry(t)
                           ? "bg-red-50 border-red-200 hover:border-red-400"
                           : isInventoryComplete(t)
-                            ? "bg-white border-slate-200 hover:border-blue-400"
+                            ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-600 hover:border-blue-400"
                             : "bg-amber-50 border-amber-200 hover:border-amber-400"
                       }`}
                     >
@@ -923,18 +923,18 @@ export function DispatchEntry({
                               {t.status === "partial" ? "PARCIAL" : "EN CURSO"}
                             </span>
                           )}
-                          <p className="text-base font-black text-[#16263F] leading-none">
+                          <p className="text-base font-black text-[#16263F] dark:text-slate-100 leading-none">
                             RA: {t.ra}
                           </p>
                         </div>
-                        <p className="text-[9px] font-bold text-slate-500 uppercase truncate mt-1">
+                        <p className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase truncate mt-1">
                           {t.mainClient}
                         </p>
-                        <div className="flex gap-2 mt-2 text-[9px] font-black text-[#16263F]">
-                          <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+                        <div className="flex gap-2 mt-2 text-[9px] font-black text-[#16263F] dark:text-slate-100">
+                          <span className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 px-1.5 py-0.5 rounded">
                             {getTaskCbm(t).toFixed(2)} CBM
                           </span>
-                          <span className="bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+                          <span className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 px-1.5 py-0.5 rounded">
                             {isAwaitingEntry(t)
                               ? t.expectedBultos
                               : t.currentBultos ?? t.expectedBultos}{" "}
@@ -948,7 +948,7 @@ export function DispatchEntry({
                           isAwaitingEntry(t)
                             ? "bg-red-100 text-red-500 group-hover:bg-red-600 group-hover:text-white"
                             : isInventoryComplete(t)
-                              ? "bg-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white"
+                              ? "bg-slate-100 text-slate-400 dark:text-slate-500 group-hover:bg-blue-600 group-hover:text-white"
                               : "bg-amber-100 text-amber-600 group-hover:bg-amber-600 group-hover:text-white"
                         }`}
                       >
@@ -960,10 +960,10 @@ export function DispatchEntry({
             </div>
           </div>
 
-          <div className="lg:col-span-9 bg-white rounded-[2rem] border border-blue-200 shadow-lg flex flex-col h-full overflow-hidden relative">
-            <div className="p-4 border-b border-slate-100 bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-20">
+          <div className="lg:col-span-9 bg-white dark:bg-slate-900 rounded-[2rem] border border-blue-200 dark:border-blue-800 shadow-lg dark:shadow-black/40 flex flex-col h-full overflow-hidden relative">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-20">
               <div>
-                <h3 className="text-lg font-black text-[#16263F] uppercase tracking-widest flex items-center gap-2">
+                <h3 className="text-lg font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest flex items-center gap-2">
                   Relación de Carga en Contenedor
                 </h3>
                 <div className="flex items-center gap-2 mt-1">
@@ -1012,11 +1012,11 @@ export function DispatchEntry({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto custom-scrollbar bg-slate-50/50">
+            <div className="flex-1 overflow-auto custom-scrollbar bg-slate-50/50 dark:bg-slate-800/50">
               {loadedTasks.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 p-8 text-center">
                   <Box className="w-16 h-16 mb-4 opacity-30" />
-                  <p className="font-bold text-lg text-slate-500">
+                  <p className="font-bold text-lg text-slate-500 dark:text-slate-400">
                     Relación de carga vacía
                   </p>
                   <p className="text-sm mt-1">
@@ -1025,84 +1025,84 @@ export function DispatchEntry({
                 </div>
               ) : (
                 <table className="w-full text-left border-collapse min-w-[1000px]">
-                  <thead className="bg-white text-slate-500 font-black uppercase text-[9px] tracking-widest sticky top-0 z-10 shadow-sm">
+                  <thead className="bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-black uppercase text-[9px] tracking-widest sticky top-0 z-10 shadow-sm">
                     <tr>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center w-10">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center w-10">
                         #
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600">
                         R/A
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center">
                         Parcial
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600">
                         Compañía (Proveedor)
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600">
                         Cliente (Expedidor)
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center text-purple-600 bg-purple-50/50">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center text-purple-600 bg-purple-50/50">
                         Bultos
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600">
                         Marca
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center">
                         Fecha
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center bg-blue-50/50 text-blue-700">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300">
                         CBM / CUB
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center">
                         Peso(kg)
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 w-48">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 w-48">
                         Descripción
                       </th>
-                      <th className="px-3 py-3 border-b border-slate-200 text-center">
+                      <th className="px-3 py-3 border-b border-slate-200 dark:border-slate-600 text-center">
                         X
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
                     {detailedRows.map((row, i) => (
                       <tr
                         key={row.id}
-                        className="hover:bg-blue-50/50 transition-colors group text-[10px] md:text-xs"
+                        className="hover:bg-blue-50 dark:hover:bg-blue-950/50 transition-colors group text-[10px] md:text-xs"
                       >
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-400">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-400 dark:text-slate-500">
                           {i + 1}
                         </td>
-                        <td className="px-3 py-2.5 font-black text-[#16263F] whitespace-nowrap">
+                        <td className="px-3 py-2.5 font-black text-[#16263F] dark:text-slate-100 whitespace-nowrap">
                           {row.ra}
                         </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-500">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-500 dark:text-slate-400">
                           {row.partial}
                         </td>
                         <td className="px-3 py-2.5 font-bold uppercase truncate max-w-[120px]">
                           {row.provider}
                         </td>
-                        <td className="px-3 py-2.5 font-bold uppercase truncate max-w-[120px] text-slate-600">
+                        <td className="px-3 py-2.5 font-bold uppercase truncate max-w-[120px] text-slate-600 dark:text-slate-300">
                           {row.subClient}
                         </td>
                         <td className="px-3 py-2.5 text-center font-black text-purple-800 bg-purple-50/30 text-sm">
                           {row.bultos}
                         </td>
-                        <td className="px-3 py-2.5 font-bold uppercase text-slate-600 truncate max-w-[100px]">
+                        <td className="px-3 py-2.5 font-bold uppercase text-slate-600 dark:text-slate-300 truncate max-w-[100px]">
                           {row.brand}
                         </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-500">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-500 dark:text-slate-400">
                           {row.date}
                         </td>
-                        <td className="px-3 py-2.5 text-center font-black text-blue-700 bg-blue-50/30">
+                        <td className="px-3 py-2.5 text-center font-black text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/30">
                           {row.cbm}
                         </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-700">
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700 dark:text-slate-200">
                           {row.weight}
                         </td>
                         <td
-                          className="px-3 py-2.5 uppercase text-slate-500 truncate max-w-[180px]"
+                          className="px-3 py-2.5 uppercase text-slate-500 dark:text-slate-400 truncate max-w-[180px]"
                           title={row.desc}
                         >
                           {row.desc.includes("PRIORIDAD") ? (
@@ -1138,7 +1138,7 @@ export function DispatchEntry({
               </div>
               <div className="flex gap-4 md:gap-8 flex-wrap justify-end">
                 <div className="text-right">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                     Total Bultos
                   </p>
                   <p className="text-lg font-black leading-none">
@@ -1146,7 +1146,7 @@ export function DispatchEntry({
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                     Total CBM
                   </p>
                   <p className="text-lg font-black text-blue-400 leading-none">
@@ -1155,7 +1155,7 @@ export function DispatchEntry({
                 </div>
                 <div className="h-8 w-px bg-slate-700 mx-2 hidden md:block" />
                 <div className="text-right">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                     Peso Neto
                   </p>
                   <p className="text-lg font-black leading-none">
@@ -1164,10 +1164,10 @@ export function DispatchEntry({
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                  <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
                     Tara
                   </p>
-                  <p className="text-lg font-black text-slate-400 leading-none">
+                  <p className="text-lg font-black text-slate-400 dark:text-slate-500 leading-none">
                     {(containerInfo.tare ??
                       capacityMap[containerInfo.type].tare).toFixed(2)}{" "}
                     <span className="text-[10px]">kg</span>
@@ -1236,17 +1236,17 @@ function ContainerManifestPrintView({
 
   return (
     <div className="w-full min-h-screen bg-slate-100 flex flex-col items-center p-4 md:p-8 animate-fade print-wrapper">
-      <div className="w-full max-w-[297mm] flex justify-between items-center mb-6 no-print bg-white p-4 rounded-xl shadow-sm">
+      <div className="w-full max-w-[297mm] flex justify-between items-center mb-6 no-print bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm">
         <button
           type="button"
           onClick={onBack}
-          className="text-slate-500 font-bold flex items-center gap-2 hover:text-[#16263F]"
+          className="text-slate-500 dark:text-slate-400 font-bold flex items-center gap-2 hover:text-[#16263F] dark:text-slate-100"
         >
           <ArrowLeft size={16} />
           Volver
         </button>
         <div className="flex gap-4 items-center">
-          <span className="text-xs font-bold text-slate-400 flex items-center">
+          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 flex items-center">
             Asegúrate de imprimir en formato Horizontal (Landscape)
           </span>
           <button
@@ -1260,17 +1260,17 @@ function ContainerManifestPrintView({
         </div>
       </div>
 
-      <div className="bg-white w-full max-w-[297mm] min-h-[210mm] p-[10mm] md:p-[15mm] shadow-2xl print-container">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-[297mm] min-h-[210mm] p-[10mm] md:p-[15mm] shadow-2xl print-container">
         <div className="border-b-2 border-[#16263F] pb-4 mb-6 flex justify-between items-end">
           <div className="flex items-center gap-3">
             <div className="bg-[#16263F] p-3 rounded-xl">
               <Truck className="text-white w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-[#16263F] tracking-tighter leading-none">
+              <h1 className="text-2xl font-black text-[#16263F] dark:text-slate-100 tracking-tighter leading-none">
                 ALDEPOSITOS
               </h1>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mt-1">
+              <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em] mt-1">
                 Logística y Distribución
               </p>
             </div>
@@ -1279,62 +1279,62 @@ function ContainerManifestPrintView({
             <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">
               Relación de Carga en Contenedor
             </h2>
-            <p className="text-xs font-bold text-slate-500 mt-1">
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">
               FECHA LLEGADA:{" "}
               {new Date(containerInfo.date).toLocaleDateString("es-PA")}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-3 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+        <div className="grid grid-cols-5 gap-3 mb-6 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200 dark:border-slate-600">
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Nº Consignación
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.consignment || "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Contenedor
             </p>
-            <p className="font-black text-[#16263F] text-sm uppercase">
+            <p className="font-black text-[#16263F] dark:text-slate-100 text-sm uppercase">
               {containerInfo.number || "POR ASIGNAR"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Seguimiento
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.bl || "N/A"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Sellos (1 y 2)
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase">
               {containerInfo.seal1 || "-"} / {containerInfo.seal2 || "-"}
             </p>
           </div>
           <div>
-            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1">
               Cliente Principal
             </p>
-            <p className="font-bold text-slate-700 text-xs uppercase truncate">
+            <p className="font-bold text-slate-700 dark:text-slate-200 text-xs uppercase truncate">
               {loadedTasks[0]?.mainClient || "VARIOS"}
             </p>
           </div>
         </div>
 
-        <h3 className="text-[10px] font-black text-[#16263F] uppercase tracking-widest mb-2 border-b border-[#16263F] inline-block pb-1">
+        <h3 className="text-[10px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest mb-2 border-b border-[#16263F] inline-block pb-1">
           Detalle de la Carga
         </h3>
 
         <table
-          className="w-full text-left border-collapse border border-slate-200 mb-6"
+          className="w-full text-left border-collapse border border-slate-200 dark:border-slate-600 mb-6"
           style={{ fontSize: "8px" }}
         >
           <thead className="bg-[#1E293B] text-white">
@@ -1378,39 +1378,39 @@ function ContainerManifestPrintView({
             {detailedRows.map((row, i) => (
               <tr
                 key={row.id}
-                className="even:bg-slate-50 border-b border-slate-200"
+                className="even:bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-600"
               >
-                <td className="px-2 py-1.5 text-center font-bold text-slate-500">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-500 dark:text-slate-400">
                   {i + 1}
                 </td>
-                <td className="px-2 py-1.5 font-black text-center text-[#16263F]">
+                <td className="px-2 py-1.5 font-black text-center text-[#16263F] dark:text-slate-100">
                   {row.ra}
                 </td>
-                <td className="px-2 py-1.5 text-center font-bold text-slate-600">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-600 dark:text-slate-300">
                   {row.partial}
                 </td>
                 <td className="px-2 py-1.5 font-bold uppercase truncate">
                   {row.provider}
                 </td>
-                <td className="px-2 py-1.5 font-bold uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 font-bold uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.subClient}
                 </td>
                 <td className="px-2 py-1.5 text-center font-black bg-purple-50 text-purple-900">
                   {row.bultos}
                 </td>
-                <td className="px-2 py-1.5 uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.brand}
                 </td>
-                <td className="px-2 py-1.5 text-center text-slate-600">
+                <td className="px-2 py-1.5 text-center text-slate-600 dark:text-slate-300">
                   {row.date}
                 </td>
-                <td className="px-2 py-1.5 text-center font-black text-blue-800 bg-blue-50">
+                <td className="px-2 py-1.5 text-center font-black text-blue-800 bg-blue-50 dark:bg-blue-950/45">
                   {row.cbm}
                 </td>
-                <td className="px-2 py-1.5 text-center font-bold text-slate-600">
+                <td className="px-2 py-1.5 text-center font-bold text-slate-600 dark:text-slate-300">
                   {row.weight}
                 </td>
-                <td className="px-2 py-1.5 uppercase truncate text-slate-600">
+                <td className="px-2 py-1.5 uppercase truncate text-slate-600 dark:text-slate-300">
                   {row.desc}
                 </td>
               </tr>
@@ -1423,40 +1423,40 @@ function ContainerManifestPrintView({
             <div className="bg-[#16263F] text-white text-[9px] font-black uppercase tracking-widest text-center py-2">
               Resumen Final
             </div>
-            <div className="p-3 bg-slate-50 space-y-2">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 space-y-2">
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Total Bultos
                 </span>
-                <span className="font-black text-[#16263F]">
+                <span className="font-black text-[#16263F] dark:text-slate-100">
                   {currentBultos}
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Total CBM
                 </span>
-                <span className="font-black text-blue-600">
+                <span className="font-black text-blue-600 dark:text-blue-400">
                   {currentCbm.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Peso Neto
                 </span>
-                <span className="font-black text-[#16263F]">
+                <span className="font-black text-[#16263F] dark:text-slate-100">
                   {currentWeight.toFixed(2)} kg
                 </span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="font-bold text-slate-500 uppercase">
+                <span className="font-bold text-slate-500 dark:text-slate-400 uppercase">
                   Tara
                 </span>
-                <span className="font-black text-slate-400">
+                <span className="font-black text-slate-400 dark:text-slate-500">
                   {tare} kg
                 </span>
               </div>
-              <div className="border-t border-slate-300 my-1 pt-2 flex justify-between text-xs">
+              <div className="border-t border-slate-300 dark:border-slate-600 my-1 pt-2 flex justify-between text-xs">
                 <span className="font-black text-green-700 uppercase">
                   Peso Total
                 </span>
@@ -1471,20 +1471,20 @@ function ContainerManifestPrintView({
         <div className="mt-12 grid grid-cols-2 gap-8 text-center">
           <div>
             <div className="border-t border-slate-400 w-48 mx-auto pt-2">
-              <p className="text-[9px] font-black text-[#16263F] uppercase tracking-widest">
+              <p className="text-[9px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
                 Responsable de Cargue
               </p>
-              <p className="text-[10px] text-slate-500 uppercase mt-1">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase mt-1">
                 {containerInfo.responsible || "Firma Autorizada"}
               </p>
             </div>
           </div>
           <div>
             <div className="border-t border-slate-400 w-48 mx-auto pt-2">
-              <p className="text-[9px] font-black text-[#16263F] uppercase tracking-widest">
+              <p className="text-[9px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
                 Aprobado / Despachado
               </p>
-              <p className="text-[10px] text-slate-500 uppercase mt-1">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase mt-1">
                 Operaciones Aldepositos
               </p>
             </div>

@@ -212,13 +212,13 @@ export function CompletedReportsModule({
           </div>
         </div>
 
-        <div className="reports-print-toolbar shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 bg-white shadow-sm z-50 sticky top-0">
+        <div className="reports-print-toolbar shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-sm z-50 sticky top-0">
           <button
             type="button"
             onClick={() => {
               singleViewTask ? setSingleViewTask(null) : setIsViewingReports(false);
             }}
-            className="text-slate-500 hover:text-[#16263F] font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest px-4 py-2 bg-slate-50 rounded-lg transition-colors"
+            className="text-slate-500 dark:text-slate-400 hover:text-[#16263F] dark:text-slate-100 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest px-4 py-2 bg-slate-50 dark:bg-slate-800/60 rounded-lg transition-colors"
           >
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
@@ -404,23 +404,23 @@ export function CompletedReportsModule({
     <div className="w-full h-full flex flex-col animate-fade relative">
       <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
         <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6 px-2 md:px-0">
-          <h2 className="text-xl md:text-3xl font-black text-[#16263F] flex items-center gap-2 md:gap-3">
+          <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
             <FileText className="text-purple-600 w-5 h-5 md:w-8 md:h-8" />{" "}
             REPORTES
           </h2>
 
-          <div className="bg-white p-4 rounded-[1.5rem] border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-[1.5rem] border border-slate-200 dark:border-slate-600 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
             <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
               {clients.length > 0 && (
                 <div className="flex flex-col">
-                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">
+                  <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 ml-1">
                     Filtrar por Cliente
                   </label>
                   <div className="relative">
                     <select
                       value={clientFilter}
                       onChange={(e) => setClientFilter(e.target.value)}
-                      className="appearance-none w-full sm:w-48 bg-slate-50 border border-slate-200 text-[#16263F] font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
+                      className="appearance-none w-full sm:w-48 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 text-[#16263F] dark:text-slate-100 font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
                     >
                       <option value="Todos">TODOS LOS CLIENTES</option>
                       {clients.map((c) => (
@@ -429,13 +429,13 @@ export function CompletedReportsModule({
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                   </div>
                 </div>
               )}
 
               <div className="flex flex-col">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">
+                <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 ml-1">
                   Tipo de Ingreso
                 </label>
                 <div className="relative">
@@ -444,14 +444,14 @@ export function CompletedReportsModule({
                     onChange={(e) =>
                       setTypeFilter(e.target.value as typeof typeFilter)
                     }
-                    className="appearance-none w-full sm:w-48 bg-slate-50 border border-slate-200 text-[#16263F] font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
+                    className="appearance-none w-full sm:w-48 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 text-[#16263F] dark:text-slate-100 font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
                   >
                     <option value="Todos">TODOS LOS MÓDULOS</option>
                     <option value="quick">Ingreso Rápido</option>
                     <option value="detailed">Ingreso Detallado</option>
                     <option value="airway">Guía Aérea</option>
                   </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 </div>
               </div>
             </div>
@@ -460,7 +460,7 @@ export function CompletedReportsModule({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="w-full md:w-auto text-xs font-black text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl uppercase tracking-widest transition-colors shrink-0"
+                className="w-full md:w-auto text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/45 hover:bg-blue-100 px-4 py-2.5 rounded-xl uppercase tracking-widest transition-colors shrink-0"
               >
                 {isAllSelected ? "Desmarcar Resultados" : "Seleccionar Resultados"}
               </button>
@@ -471,7 +471,7 @@ export function CompletedReportsModule({
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-24">
           <div className="grid grid-cols-1 gap-3 md:gap-4 px-2 md:px-0">
             {displayedTasks.length === 0 ? (
-              <div className="bg-white p-8 md:p-16 rounded-[2rem] border border-slate-200 text-center font-bold text-slate-400 flex flex-col items-center">
+              <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500 flex flex-col items-center">
                 <Search className="w-12 h-12 text-slate-300 mb-4" />
                 No se encontraron reportes finalizados con estos filtros.
               </div>
@@ -488,10 +488,10 @@ export function CompletedReportsModule({
                 return (
                   <div
                     key={t.id}
-                    className={`bg-white p-4 md:p-6 rounded-[1.5rem] border transition-all cursor-pointer flex items-center group ${
+                    className={`bg-white dark:bg-slate-900 p-4 md:p-6 rounded-[1.5rem] border transition-all cursor-pointer flex items-center group ${
                       isSelected
-                        ? "border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20"
-                        : "border-slate-200 shadow-sm hover:border-blue-300"
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45 shadow-md ring-2 ring-blue-500/20"
+                        : "border-slate-200 dark:border-slate-600 shadow-sm hover:border-blue-300"
                     }`}
                     onClick={() => setSingleViewTask(t)}
                   >
@@ -511,7 +511,7 @@ export function CompletedReportsModule({
                       className={`w-6 h-6 rounded border flex items-center justify-center shrink-0 mr-4 md:mr-6 transition-colors hover:scale-110 ${
                         isSelected
                           ? "bg-blue-600 border-blue-600 text-white"
-                          : "border-slate-300 bg-white"
+                          : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
                       }`}
                     >
                       {isSelected && <Check size={16} strokeWidth={4} />}
@@ -533,31 +533,31 @@ export function CompletedReportsModule({
                             className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${
                               t.type === "detailed"
                                 ? "bg-purple-100 text-purple-700"
-                                : "bg-slate-100 text-slate-600"
+                                : "bg-slate-100 text-slate-600 dark:text-slate-300"
                             }`}
                           >
                             {moduleName}
                           </span>
                           <span className="text-slate-300 mx-1">|</span>
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate max-w-[120px]">
+                          <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate max-w-[120px]">
                             {t.mainClient}
                           </p>
                         </div>
-                        <h3 className="text-xl md:text-2xl font-black text-[#16263F] leading-tight group-hover:text-blue-600 transition-colors">
+                        <h3 className="text-xl md:text-2xl font-black text-[#16263F] dark:text-slate-100 leading-tight group-hover:text-blue-600 dark:text-blue-400 transition-colors">
                           RA: {t.ra}
                         </h3>
-                        <p className="text-[10px] md:text-xs font-bold text-slate-500 uppercase">
+                        <p className="text-[10px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">
                           {t.provider}
                           {t.brand ? ` — ${t.brand}` : ""}
                         </p>
                       </div>
                       <div className="text-left md:text-right flex items-center gap-4 justify-end mt-2 md:mt-0">
                         <div className="text-right">
-                          <p className="text-sm md:text-lg font-black text-[#16263F] leading-none">
+                          <p className="text-sm md:text-lg font-black text-[#16263F] dark:text-slate-100 leading-none">
                             {t.currentBultos} BULTOS
                           </p>
                         </div>
-                        <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors border border-slate-200">
+                        <div className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 flex items-center justify-center group-hover:bg-blue-100 group-hover:text-blue-600 dark:text-blue-400 transition-colors border border-slate-200 dark:border-slate-600">
                           <Eye size={18} />
                         </div>
                       </div>
@@ -618,7 +618,7 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
 
   return (
     <div className="fixed inset-0 bg-[#16263F]/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade no-print">
-      <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="bg-orange-500 p-5 md:p-6 text-white shrink-0 flex justify-between items-center">
           <div>
             <h3 className="text-lg md:text-xl font-black tracking-tight flex items-center gap-2">
@@ -639,9 +639,9 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
         </div>
 
         <div className="p-5 md:p-8 overflow-y-auto flex-1 custom-scrollbar">
-          <div className="overflow-x-auto hide-scrollbar border border-slate-200 rounded-2xl">
+          <div className="overflow-x-auto hide-scrollbar border border-slate-200 dark:border-slate-600 rounded-2xl">
             <table className="w-full text-sm text-left border-collapse">
-              <thead className="bg-slate-50 text-slate-500 font-black uppercase text-[10px] tracking-widest border-b border-slate-200">
+              <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 font-black uppercase text-[10px] tracking-widest border-b border-slate-200 dark:border-slate-600">
                 <tr>
                   <th className="px-4 py-4 w-10 text-center">#</th>
                   <th className="px-4 py-4">Referencia</th>
@@ -652,7 +652,7 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {(task.measureData || []).map((row: any, idx: number) => {
                   const key = String(row.id ?? idx);
                   const available =
@@ -660,18 +660,18 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
                   return (
                     <tr
                       key={key}
-                      className="hover:bg-slate-50 transition-colors"
+                      className="hover:bg-slate-50 dark:bg-slate-800/60 transition-colors"
                     >
-                      <td className="px-4 py-3 text-center font-bold text-slate-400">
+                      <td className="px-4 py-3 text-center font-bold text-slate-400 dark:text-slate-500">
                         {idx + 1}
                       </td>
-                      <td className="px-4 py-3 font-bold text-[#16263F] uppercase">
+                      <td className="px-4 py-3 font-bold text-[#16263F] dark:text-slate-100 uppercase">
                         {row.referencia || "-"}
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-500 uppercase">
+                      <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 uppercase">
                         {row.descripcion || "-"}
                       </td>
-                      <td className="px-4 py-3 text-center font-black text-lg text-slate-700">
+                      <td className="px-4 py-3 text-center font-black text-lg text-slate-700 dark:text-slate-200">
                         {available}
                       </td>
                       <td className="px-4 py-3 bg-orange-50/30">
@@ -683,7 +683,7 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
                           onChange={(e) =>
                             handleSplitChange(key, e.target.value, available)
                           }
-                          className="w-full bg-white border-2 border-orange-200 focus:border-orange-500 focus:ring-4 focus:ring-orange-500/20 rounded-xl py-2 text-center font-black text-orange-600 text-lg outline-none transition-all"
+                          className="w-full bg-white dark:bg-slate-900 border-2 border-orange-200 focus:border-orange-500 focus:ring-4 focus:ring-orange-500/20 rounded-xl py-2 text-center font-black text-orange-600 text-lg outline-none transition-all"
                           placeholder="0"
                         />
                       </td>
@@ -694,33 +694,33 @@ function SplitOrderModal({ task, onClose, onConfirm }: SplitOrderModalProps) {
             </table>
           </div>
 
-          <div className="mt-6 flex flex-col md:flex-row items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+          <div className="mt-6 flex flex-col md:flex-row items-center gap-4 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-600">
             <div className="flex-1 w-full flex items-center gap-3">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                 Sufijo del Nuevo Parcial:
               </label>
-              <div className="flex items-center text-lg font-black text-[#16263F]">
+              <div className="flex items-center text-lg font-black text-[#16263F] dark:text-slate-100">
                 RA-{task.ra}
                 <input
                   type="text"
                   value={suffix}
                   onChange={(e) => setSuffix(e.target.value)}
-                  className="ml-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5 w-24 focus:border-blue-500 outline-none uppercase text-blue-600"
+                  className="ml-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-1.5 w-24 focus:border-blue-500 outline-none uppercase text-blue-600 dark:text-blue-400"
                 />
               </div>
             </div>
-            <div className="text-[10px] text-slate-400 font-bold uppercase w-full md:w-auto text-right">
+            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase w-full md:w-auto text-right">
               * Se crearán dos inventarios separados y los cálculos de volumen y
               peso se ajustarán automáticamente.
             </div>
           </div>
         </div>
 
-        <div className="flex gap-3 p-5 md:p-6 border-t border-slate-100 bg-white shrink-0">
+        <div className="flex gap-3 p-5 md:p-6 border-t border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-4 bg-white border border-slate-200 text-slate-500 font-bold rounded-xl hover:bg-slate-50 transition-colors uppercase text-xs tracking-widest"
+            className="flex-1 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 font-bold rounded-xl hover:bg-slate-50 dark:bg-slate-800/60 transition-colors uppercase text-xs tracking-widest"
           >
             Cancelar
           </button>

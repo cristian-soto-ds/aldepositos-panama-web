@@ -14,7 +14,7 @@ export function M3Unit({
         : "text-[0.65em]";
   return (
     <span
-      className={`whitespace-nowrap font-bold tracking-tight text-slate-600 ${className}`}
+      className={`whitespace-nowrap font-bold tracking-tight text-slate-600 dark:text-slate-300 ${className}`}
       title="Metros cúbicos (volumen)"
     >
       m<sup className={`${sup} font-extrabold leading-none`}>3</sup>

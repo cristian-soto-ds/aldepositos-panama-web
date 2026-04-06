@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Oscuro del panel: misma clase que pone el panel (`html.panel-dark`), no solo el sistema */
+@custom-variant dark (&:where(.panel-dark, .panel-dark *));
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -104,4 +107,33 @@ input[type="number"] {
 
 :root.panel-dark .panel-loading-overlay {
   background: rgba(11, 18, 32, 0.72);
+}
+
+/* Scrollbars en módulos — contraste cómodo en tema oscuro */
+:root.panel-dark .custom-scrollbar {
+  scrollbar-color: #64748b #1e293b;
+}
+:root.panel-dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+:root.panel-dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-color: #1e293b;
+}
+:root.panel-dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+:root.panel-dark .inventory-measures-scroll {
+  scrollbar-color: #94a3b8 #1e293b;
+}
+:root.panel-dark .inventory-measures-scroll::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+:root.panel-dark .inventory-measures-scroll::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-color: #1e293b;
+}
+:root.panel-dark .inventory-measures-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }

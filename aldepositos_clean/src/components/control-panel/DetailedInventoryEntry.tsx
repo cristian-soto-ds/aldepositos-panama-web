@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -22,7 +22,13 @@ import {
   publishWorkPresence,
   clearWorkPresence,
 } from "@/lib/panelPresence";
+import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
+import {
+  buildMeasurePatchFromCatalog,
+  getReferenceCatalogItem,
+  normalizePartNumber,
+} from "@/lib/referenceCatalog";
 
 type MeasureRow = {
   id: string;
@@ -34,6 +40,8 @@ type MeasureRow = {
   l?: string | number;
   w?: string | number;
   h?: string | number;
+  volumenM3?: string | number;
+  unidad?: string;
   reempaque?: boolean;
   bultoContenedor?: string;
   referenciasContenedor?: string;
@@ -69,9 +77,11 @@ type DetailedInventoryEntryProps = {
   openEditModal: (task: any) => void;
   presenceUserKey?: string | null;
   presenceUserLabel?: string | null;
+  presenceAvatarUrl?: string | null;
 };
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
+const CATALOG_DEBOUNCE_MS = 500;
 const DETAILED_AUTOSAVE_MS = 700;
 const detailedDraftKey = (taskId: string) =>
   `detailed_inventory_draft_v1_${taskId}`;
@@ -137,6 +147,7 @@ export function DetailedInventoryEntry({
   openEditModal,
   presenceUserKey = null,
   presenceUserLabel = null,
+  presenceAvatarUrl = null,
 }: DetailedInventoryEntryProps) {
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority"
@@ -189,19 +200,33 @@ export function DetailedInventoryEntry({
   const latestTaskRef = useRef<Task | null>(null);
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
+  const catalogDebounceRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+  const catalogSeqRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    const debRef = catalogDebounceRef;
+    return () => {
+      Object.values(debRef.current).forEach(clearTimeout);
+      debRef.current = {};
+    };
+  }, []);
+
   useEffect(() => {
     const key = (presenceUserKey ?? "").trim();
     if (!key) {
       void clearWorkPresence(getSharedWorkPresenceTabId());
       return;
     }
-    const label = (presenceUserLabel ?? key).trim() || "Operador";
+    const label = presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
     const tabId = getSharedWorkPresenceTabId();
     const send = () => {
       publishWorkPresence({
         tabId,
         userKey: key,
         userLabel: label,
+        avatarUrl: presenceAvatarUrl?.trim() || null,
         ra: selectedTask ? String(selectedTask.ra ?? "").trim() : "",
         module: "detailed",
       });
@@ -212,7 +237,7 @@ export function DetailedInventoryEntry({
       window.clearInterval(interval);
       void clearWorkPresence(tabId);
     };
-  }, [selectedTask, presenceUserKey, presenceUserLabel]);
+  }, [selectedTask, presenceUserKey, presenceUserLabel, presenceAvatarUrl]);
 
   const groupedTasks = detailedTasks.reduce<Record<string, Task[]>>(
     (groups, task) => {
@@ -438,6 +463,11 @@ export function DetailedInventoryEntry({
   };
 
   const deleteRow = (idToRemove: string) => {
+    const t = catalogDebounceRef.current[idToRemove];
+    if (t) {
+      clearTimeout(t);
+      delete catalogDebounceRef.current[idToRemove];
+    }
     setMeasureRows((prev) =>
       prev.length > 1 ? prev.filter((r) => r.id !== idToRemove) : prev,
     );
@@ -451,6 +481,33 @@ export function DetailedInventoryEntry({
     setMeasureRows((prev) =>
       prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
+  };
+
+  const runCatalogLookup = useCallback(async (rowId: string, rawReferencia: string) => {
+    const key = normalizePartNumber(rawReferencia);
+    if (!key) {
+      return;
+    }
+    const seq = (catalogSeqRef.current[rowId] =
+      (catalogSeqRef.current[rowId] ?? 0) + 1);
+    const item = await getReferenceCatalogItem(key);
+    if (catalogSeqRef.current[rowId] !== seq) return;
+    if (!item) {
+      return;
+    }
+    const patch = buildMeasurePatchFromCatalog("detailed", item);
+    setMeasureRows((prev) =>
+      prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+    );
+  }, []);
+
+  const scheduleCatalogLookup = (rowId: string, raw: string) => {
+    const prevT = catalogDebounceRef.current[rowId];
+    if (prevT) clearTimeout(prevT);
+    catalogDebounceRef.current[rowId] = setTimeout(() => {
+      delete catalogDebounceRef.current[rowId];
+      void runCatalogLookup(rowId, raw);
+    }, CATALOG_DEBOUNCE_MS);
   };
 
   const toggleReempaque = (rowId: string, enabled: boolean) => {
@@ -1225,12 +1282,22 @@ export function DetailedInventoryEntry({
                           {idx + 1}
                         </td>
 
-                        <td className="px-2 py-1">
+                        <td className="px-2 py-1 align-top">
                           <input
                             type="text"
-                            onChange={(e) =>
-                              updateRowValue(row.id, "referencia", e.target.value)
-                            }
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              updateRowValue(row.id, "referencia", v);
+                              scheduleCatalogLookup(row.id, v);
+                            }}
+                            onBlur={(e) => {
+                              const t = catalogDebounceRef.current[row.id];
+                              if (t) {
+                                clearTimeout(t);
+                                delete catalogDebounceRef.current[row.id];
+                              }
+                              void runCatalogLookup(row.id, e.target.value);
+                            }}
                             value={row.referencia || ""}
                             className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-left text-xs font-bold text-[#16263F] outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                             placeholder="Ref..."

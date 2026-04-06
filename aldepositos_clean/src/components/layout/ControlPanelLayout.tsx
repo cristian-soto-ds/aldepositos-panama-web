@@ -1,7 +1,7 @@
 "use client";
 
 import React, { ReactNode, useState } from "react";
-import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound } from "lucide-react";
+import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound, BookMarked } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 import { clearWorkPresence, getSharedWorkPresenceTabId } from "@/lib/panelPresence";
@@ -13,6 +13,8 @@ type ControlPanelLayoutProps = {
   currentView: string;
   setCurrentView: (view: string) => void;
   userDisplayName?: string | null;
+  /** Imagen de perfil (URL pública o data URL local). */
+  userAvatarSrc?: string | null;
   preferences?: UserPreferences;
   showOptionsModule?: boolean;
 };
@@ -22,9 +24,14 @@ export function ControlPanelLayout({
   currentView,
   setCurrentView,
   userDisplayName,
+  userAvatarSrc = null,
   preferences,
   showOptionsModule = false,
 }: ControlPanelLayoutProps) {
+  const avatarSrc =
+    (userAvatarSrc && userAvatarSrc.trim()) ||
+    preferences?.avatarDataUrl ||
+    null;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
 
@@ -111,6 +118,15 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
+            icon={<BookMarked size={20} />}
+            text="Catálogo de referencias"
+            active={currentView === "reference-catalog"}
+            onClick={() => {
+              setCurrentView("reference-catalog");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
             icon={<ClipboardList size={20} />}
             text="Reportes"
             active={currentView === "reports"}
@@ -177,10 +193,10 @@ export function ControlPanelLayout({
         <div className="p-4 md:p-6 border-t border-white/5 bg-black/20 text-center">
           <div className="mb-3 flex items-center gap-2 justify-center">
             <div className="w-7 h-7 rounded-full overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
-              {preferences?.avatarDataUrl ? (
+              {avatarSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={preferences.avatarDataUrl}
+                  src={avatarSrc}
                   alt="Avatar"
                   className="w-full h-full object-cover"
                 />

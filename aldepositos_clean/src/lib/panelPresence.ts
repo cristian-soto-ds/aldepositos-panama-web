@@ -12,6 +12,8 @@ export type WorkPresenceEntry = {
   tabId: string;
   userKey: string;
   userLabel: string;
+  /** URL pública del avatar (http/https); visible para otros en presencia. */
+  avatarUrl?: string | null;
   ra: string;
   module: WorkPresenceModule;
   updatedAt: number;
@@ -69,13 +71,28 @@ function parsePresenceState(
         typeof m.userLabel === "string" && m.userLabel.trim().length > 0
           ? m.userLabel.trim()
           : userKey;
+      let avatarUrl: string | null | undefined;
+      if (typeof m.avatarUrl === "string") {
+        const au = m.avatarUrl.trim();
+        if (au.startsWith("http://") || au.startsWith("https://")) {
+          avatarUrl = au;
+        }
+      }
       const ra = typeof m.ra === "string" ? m.ra.trim() : "";
       const mod = m.module;
       const module: WorkPresenceModule =
         mod === "quick" || mod === "detailed" || mod === "airway" || mod === "none"
           ? mod
           : "none";
-      out.push({ tabId, userKey, userLabel, ra, module, updatedAt: now });
+      out.push({
+        tabId,
+        userKey,
+        userLabel,
+        avatarUrl,
+        ra,
+        module,
+        updatedAt: now,
+      });
     }
   }
   return out;
@@ -141,6 +158,7 @@ async function flushTrackNow(): Promise<void> {
     await ch.track({
       userKey: lastPayload.userKey,
       userLabel: lastPayload.userLabel,
+      avatarUrl: lastPayload.avatarUrl ?? null,
       ra: lastPayload.ra,
       module: lastPayload.module,
       tabId: lastPayload.tabId,
@@ -162,6 +180,7 @@ export function publishWorkPresence(entry: Omit<WorkPresenceEntry, "updatedAt">)
     tabId,
     ra: (entry.ra ?? "").trim(),
     module: entry.module,
+    avatarUrl: entry.avatarUrl?.trim() || null,
   };
   void flushTrackNow();
 }

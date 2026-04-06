@@ -27,8 +27,8 @@ type DispatchEntryProps = {
     containerInfo: ContainerInfo;
   } | null;
   clearEdit: () => void;
-  /** Correo del usuario (fallback “Cargado por” si no hay responsable en el formulario). */
-  userEmail?: string | null;
+  /** Nombre completo del operador (fallback “Cargado por” en exportaciones si no hay responsable). */
+  operatorDisplayName?: string | null;
 };
 
 type ContainerInfo = {
@@ -106,7 +106,7 @@ export function DispatchEntry({
   onUpdateTask,
   containerToEdit,
   clearEdit,
-  userEmail = null,
+  operatorDisplayName = null,
 }: DispatchEntryProps) {
   const availableTasks = useMemo(
     () => tasks.filter((t) => !t.dispatched),
@@ -296,10 +296,10 @@ export function DispatchEntry({
   const excelExportedBy = useMemo(() => {
     const r = (containerInfo.responsible || "").trim();
     if (r) return r;
-    const mail = (userEmail || "").trim();
-    if (mail) return mail.split("@")[0] || mail;
+    const op = (operatorDisplayName || "").trim();
+    if (op && !op.includes("@")) return op;
     return "Operador";
-  }, [containerInfo.responsible, userEmail]);
+  }, [containerInfo.responsible, operatorDisplayName]);
 
   const resolvedTare =
     typeof containerInfo.tare === "number"

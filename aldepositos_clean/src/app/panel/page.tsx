@@ -20,8 +20,10 @@ import { LiveMonitor } from "@/components/control-panel/LiveMonitor";
 import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
 import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
 import { ProductivityInsightsPanel } from "@/components/control-panel/ProductivityInsightsPanel";
+import { ReferenceCatalogModule } from "@/components/control-panel/ReferenceCatalogModule";
 import { UserOptionsPanel } from "@/components/control-panel/UserOptionsPanel";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
+import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   DEFAULT_USER_PREFERENCES,
@@ -34,6 +36,9 @@ import {
   getSharedWorkPresenceTabId,
   publishWorkPresence,
 } from "@/lib/panelPresence";
+import { isPublicAvatarUrl } from "@/lib/profileAvatar";
+import { fetchPerfilUsuario } from "@/lib/perfiles";
+import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -48,6 +53,8 @@ export default function PanelPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
+  /** `perfiles.nombre_completo` en Supabase (ej. "Cristian Soto"); prioridad explícita en el saludo. */
+  const [profileFullName, setProfileFullName] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences>(
     DEFAULT_USER_PREFERENCES,
   );
@@ -78,6 +85,10 @@ export default function PanelPage() {
     editingTask: null,
     defaultModule: "quick",
   });
+  const [deleteRaId, setDeleteRaId] = useState<string | null>(null);
+  const [deleteRaBusy, setDeleteRaBusy] = useState(false);
+  /** URL pública guardada en `perfiles.avatar_url` (Supabase). */
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -90,27 +101,64 @@ export default function PanelPage() {
         const email = user.email ?? null;
         setUserEmail(email);
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name, username, email")
-          .eq("id", user.id)
-          .single();
+        const meta = user.user_metadata as Record<string, unknown> | undefined;
+        const metaRaw = meta?.full_name ?? meta?.name ?? meta?.nombre_completo;
+        const metaFullName =
+          typeof metaRaw === "string" ? metaRaw.trim() : "";
 
-        const displayName =
-          profile?.full_name || profile?.username || profile?.email || email;
-        setUserDisplayName(displayName ?? "Operador Aldepósitos");
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+
+        const perfil = await fetchPerfilUsuario(user.id, email);
+        let fullName = perfil.nombreCompleto || metaFullName;
+        let avatarUrl = perfil.avatarUrl;
+
+        if (accessToken && typeof window !== "undefined") {
+          try {
+            const res = await fetch(
+              `${window.location.origin}/api/me/display-name`,
+              { headers: { Authorization: `Bearer ${accessToken}` } },
+            );
+            if (res.ok) {
+              const payload = (await res.json()) as {
+                fullName?: string | null;
+                avatarUrl?: string | null;
+              };
+              const fromServer = payload.fullName?.trim();
+              if (fromServer) fullName = fullName || fromServer;
+              const av = payload.avatarUrl?.trim();
+              if (av) avatarUrl = avatarUrl || av;
+            }
+          } catch {
+            /* ignorar: sin service role o red */
+          }
+        }
+
+        setProfileFullName(fullName ? fullName : null);
+
+        /** Solo `nombre_completo` (o equivalente en metadata); nunca correo ni `nombre_usuario` suelto. */
+        const humanLabel =
+          (fullName || metaFullName || "Operador Aldepósitos").trim() ||
+          "Operador Aldepósitos";
+        setUserDisplayName(humanLabel);
+
+        setProfileAvatarUrl(avatarUrl);
+        const serverAvatar = avatarUrl;
 
         if (typeof window !== "undefined") {
           const raw = window.localStorage.getItem(userPrefsStorageKey(user.id));
+          let nextPrefs = DEFAULT_USER_PREFERENCES;
           if (raw) {
             try {
-              setPreferences(sanitizeUserPreferences(JSON.parse(raw)));
+              nextPrefs = sanitizeUserPreferences(JSON.parse(raw));
             } catch {
-              setPreferences(DEFAULT_USER_PREFERENCES);
+              nextPrefs = DEFAULT_USER_PREFERENCES;
             }
-          } else {
-            setPreferences(DEFAULT_USER_PREFERENCES);
           }
+          if (serverAvatar) {
+            nextPrefs = { ...nextPrefs, avatarDataUrl: serverAvatar };
+          }
+          setPreferences(nextPrefs);
         }
       }
       setLoading(false);
@@ -138,18 +186,33 @@ export default function PanelPage() {
     root.classList.toggle("panel-dark", preferences.theme === "dark");
   }, [preferences.theme]);
 
+  const sidebarAvatarUrl =
+    (profileAvatarUrl && profileAvatarUrl.trim()) ||
+    (isPublicAvatarUrl(preferences.avatarDataUrl)
+      ? preferences.avatarDataUrl!.trim()
+      : null) ||
+    preferences.avatarDataUrl ||
+    null;
+
+  const presenceBroadcastAvatarUrl =
+    (profileAvatarUrl && profileAvatarUrl.trim()) ||
+    (isPublicAvatarUrl(preferences.avatarDataUrl)
+      ? preferences.avatarDataUrl!.trim()
+      : null);
+
   /** Presencia en vistas que no son captura (p. ej. panel principal): visible entre equipos vía Realtime. */
   useEffect(() => {
     if (loading || !userEmail) return;
     if (FULL_HEIGHT_INVENTORY_VIEWS.has(currentView)) return;
 
     const tabId = getSharedWorkPresenceTabId();
-    const label = (userDisplayName ?? userEmail).trim() || "Operador";
+    const label = presenceVisibleLabel(userDisplayName, userEmail);
     const pulse = () => {
       publishWorkPresence({
         tabId,
         userKey: userEmail,
         userLabel: label,
+        avatarUrl: presenceBroadcastAvatarUrl || null,
         ra: "",
         module: "none",
       });
@@ -160,7 +223,13 @@ export default function PanelPage() {
       window.clearInterval(interval);
       void clearWorkPresence(tabId);
     };
-  }, [loading, userEmail, userDisplayName, currentView]);
+  }, [
+    loading,
+    userEmail,
+    userDisplayName,
+    currentView,
+    presenceBroadcastAvatarUrl,
+  ]);
 
   const handleImport = async (newTasks: Task[]) => {
     const today = new Date().toISOString().split("T")[0]!;
@@ -213,20 +282,33 @@ export default function PanelPage() {
     }
   };
 
-  const handleDeleteTask = async (idToRemove: string) => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm("¿Estás seguro de que deseas eliminar este RA?")) {
-      return;
-    }
+  const handleDeleteTask = (idToRemove: string) => {
+    setDeleteRaId(idToRemove);
+  };
+
+  const closeDeleteRaModal = () => {
+    if (deleteRaBusy) return;
+    setDeleteRaId(null);
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!deleteRaId) return;
+    setDeleteRaBusy(true);
     try {
-      await deleteTaskById(idToRemove);
-      setTasks((prev) => prev.filter((t) => t.id !== idToRemove));
+      await deleteTaskById(deleteRaId);
+      setTasks((prev) => prev.filter((t) => t.id !== deleteRaId));
+      setDeleteRaId(null);
     } catch (e) {
       console.error(e);
       // eslint-disable-next-line no-alert
       alert("No se pudo eliminar en Supabase.");
+    } finally {
+      setDeleteRaBusy(false);
     }
   };
+
+  const taskPendingDelete =
+    deleteRaId != null ? tasks.find((t) => t.id === deleteRaId) : undefined;
 
   const handleTransferTask = async (
     task: Task,
@@ -376,6 +458,7 @@ export default function PanelPage() {
       currentView={visibleView}
       setCurrentView={setCurrentView}
       userDisplayName={userDisplayName}
+      userAvatarSrc={sidebarAvatarUrl}
       preferences={preferences}
       showOptionsModule={showOptionsModule}
     >
@@ -400,7 +483,9 @@ export default function PanelPage() {
             onImport={handleImport}
             openManualModal={() => openManualModal("quick")}
             userDisplayName={userDisplayName}
+            profileFullName={profileFullName}
             userEmail={userEmail}
+            userAvatarSrc={sidebarAvatarUrl}
             preferences={preferences}
           />
         )}
@@ -415,6 +500,7 @@ export default function PanelPage() {
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
+            presenceAvatarUrl={presenceBroadcastAvatarUrl}
           />
         )}
 
@@ -428,6 +514,7 @@ export default function PanelPage() {
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
+            presenceAvatarUrl={presenceBroadcastAvatarUrl}
           />
         )}
 
@@ -442,8 +529,11 @@ export default function PanelPage() {
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
+            presenceAvatarUrl={presenceBroadcastAvatarUrl}
           />
         )}
+
+        {visibleView === "reference-catalog" && <ReferenceCatalogModule />}
 
         {visibleView === "reports" && (
           <CompletedReportsModule
@@ -467,7 +557,7 @@ export default function PanelPage() {
             onUpdateTask={handleUpdateTask}
             containerToEdit={containerToEdit}
             clearEdit={() => setContainerToEdit(null)}
-            userEmail={userEmail}
+            operatorDisplayName={userDisplayName}
           />
         )}
 
@@ -481,10 +571,12 @@ export default function PanelPage() {
 
         {showOptionsModule && visibleView === "options" && (
           <UserOptionsPanel
+            userId={userId}
             userDisplayName={userDisplayName}
-            userEmail={userEmail}
+            avatarPreviewSrc={sidebarAvatarUrl}
             preferences={preferences}
             onChangePreferences={setPreferences}
+            onServerAvatarChange={setProfileAvatarUrl}
           />
         )}
       </div>
@@ -497,6 +589,22 @@ export default function PanelPage() {
           defaultModule={modalState.defaultModule}
         />
       )}
+
+      <DeleteRaConfirmModal
+        open={deleteRaId != null}
+        raLabel={String(taskPendingDelete?.ra ?? "").trim() || "—"}
+        clientHint={
+          taskPendingDelete
+            ? [taskPendingDelete.mainClient, taskPendingDelete.provider]
+                .map((s) => String(s ?? "").trim())
+                .filter(Boolean)
+                .join(" · ") || undefined
+            : undefined
+        }
+        busy={deleteRaBusy}
+        onCancel={closeDeleteRaModal}
+        onConfirm={() => void confirmDeleteTask()}
+      />
     </ControlPanelLayout>
   );
 }

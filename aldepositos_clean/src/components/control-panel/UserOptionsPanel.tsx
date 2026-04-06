@@ -1,57 +1,80 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { Clock3, Moon, Sun, Upload, UserRound, X } from "lucide-react";
+import { Clock3, Loader2, Moon, Sun, Upload, UserRound, X } from "lucide-react";
 import type { UserPreferences } from "@/lib/userPreferences";
+import { removeUserAvatar, uploadUserAvatar } from "@/lib/profileAvatar";
 
 type UserOptionsPanelProps = {
+  userId: string | null;
+  /** `nombre_completo` (sin correo). */
   userDisplayName: string | null;
-  userEmail: string | null;
+  /** URL para previsualizar (servidor + preferencias). */
+  avatarPreviewSrc: string | null;
   preferences: UserPreferences;
   onChangePreferences: (next: UserPreferences) => void;
+  /** Tras subir/quitar foto en Supabase, actualiza la URL en el panel padre. */
+  onServerAvatarChange: (url: string | null) => void;
 };
 
 export function UserOptionsPanel({
+  userId,
   userDisplayName,
-  userEmail,
+  avatarPreviewSrc,
   preferences,
   onChangePreferences,
+  onServerAvatarChange,
 }: UserOptionsPanelProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   const handleTheme = (theme: UserPreferences["theme"]) => {
     onChangePreferences({ ...preferences, theme });
   };
 
-  const onPickImage: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+  const onPickImage: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setUploadError("Selecciona una imagen válida.");
+    if (!userId) {
+      setUploadError("Sesión no lista. Vuelve a entrar al panel.");
       return;
     }
-    if (file.size > 2_500_000) {
-      setUploadError("La imagen debe pesar menos de 2.5 MB.");
+    setUploadError(null);
+    setAvatarBusy(true);
+    const result = await uploadUserAvatar(userId, file);
+    setAvatarBusy(false);
+    if (!result.ok) {
+      setUploadError(result.message);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      if (!result) {
-        setUploadError("No se pudo leer la imagen.");
-        return;
-      }
-      setUploadError(null);
-      onChangePreferences({
-        ...preferences,
-        avatarDataUrl: result,
-      });
-    };
-    reader.onerror = () => setUploadError("Error leyendo archivo.");
-    reader.readAsDataURL(file);
+    onChangePreferences({
+      ...preferences,
+      avatarDataUrl: result.publicUrl,
+    });
+    onServerAvatarChange(result.publicUrl);
   };
+
+  const onRemoveAvatar = async () => {
+    if (!userId) return;
+    setUploadError(null);
+    setAvatarBusy(true);
+    const result = await removeUserAvatar(userId);
+    setAvatarBusy(false);
+    if (!result.ok) {
+      setUploadError(result.message);
+      return;
+    }
+    onChangePreferences({ ...preferences, avatarDataUrl: null });
+    onServerAvatarChange(null);
+  };
+
+  const showAvatar =
+    (avatarPreviewSrc && avatarPreviewSrc.trim()) ||
+    (preferences.avatarDataUrl && preferences.avatarDataUrl.trim()) ||
+    null;
+  const canRemove = Boolean(showAvatar?.trim());
 
   return (
     <div className="max-w-4xl mx-auto w-full space-y-5 md:space-y-6 animate-fade pb-10">
@@ -63,7 +86,8 @@ export function UserOptionsPanel({
           Personalización
         </h2>
         <p className="text-sm text-slate-500 font-semibold mt-2">
-          Estos ajustes solo te afectan a ti. No cambian el panel de otros usuarios.
+          Tema y hora son solo en tu dispositivo. La foto de perfil se guarda en la nube y
+          la ven otros operadores en presencia en vivo.
         </p>
       </div>
 
@@ -114,14 +138,14 @@ export function UserOptionsPanel({
 
         <div className="bg-white rounded-[2rem] border border-slate-200 p-5 md:p-6 shadow-sm">
           <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] mb-4">
-            Perfil
+            Foto de perfil
           </h3>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
-              {preferences.avatarDataUrl ? (
+              {showAvatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={preferences.avatarDataUrl}
+                  src={showAvatar}
                   alt="Avatar de usuario"
                   className="w-full h-full object-cover"
                 />
@@ -133,9 +157,6 @@ export function UserOptionsPanel({
               <p className="text-sm font-black text-[#16263F] truncate">
                 {userDisplayName || "Operador"}
               </p>
-              <p className="text-xs font-semibold text-slate-500 truncate">
-                {userEmail || "Sin correo"}
-              </p>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -145,21 +166,27 @@ export function UserOptionsPanel({
               accept="image/*"
               onChange={onPickImage}
               className="hidden"
+              disabled={avatarBusy}
             />
             <button
               type="button"
+              disabled={avatarBusy || !userId}
               onClick={() => fileRef.current?.click()}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#16263F] text-white px-4 py-2.5 text-[10px] font-black uppercase tracking-widest hover:bg-[#0f1b2e] transition"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#16263F] text-white px-4 py-2.5 text-[10px] font-black uppercase tracking-widest hover:bg-[#0f1b2e] transition disabled:opacity-50"
             >
-              <Upload className="w-4 h-4" /> Subir foto
+              {avatarBusy ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              {canRemove ? "Actualizar foto" : "Subir foto"}
             </button>
-            {preferences.avatarDataUrl && (
+            {canRemove && (
               <button
                 type="button"
-                onClick={() =>
-                  onChangePreferences({ ...preferences, avatarDataUrl: null })
-                }
-                className="inline-flex items-center gap-2 rounded-xl border border-red-200 text-red-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition"
+                disabled={avatarBusy || !userId}
+                onClick={() => void onRemoveAvatar()}
+                className="inline-flex items-center gap-2 rounded-xl border border-red-200 text-red-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest hover:bg-red-50 transition disabled:opacity-50"
               >
                 <X className="w-4 h-4" /> Quitar foto
               </button>
@@ -168,6 +195,9 @@ export function UserOptionsPanel({
           {uploadError && (
             <p className="mt-3 text-xs font-semibold text-red-600">{uploadError}</p>
           )}
+          <p className="mt-3 text-[11px] font-medium text-slate-500 leading-relaxed">
+            Se guarda en tu perfil (Supabase). Puedes cambiarla cuando quieras. Máx. 2,5 MB.
+          </p>
         </div>
       </div>
 

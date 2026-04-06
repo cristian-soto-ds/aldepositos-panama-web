@@ -27,13 +27,21 @@ import {
   subscribeWorkPresence,
   type WorkPresenceEntry,
 } from "@/lib/panelPresence";
+import {
+  avatarInitialsFromName,
+  peerPresenceVisibleName,
+} from "@/lib/viewerIdentity";
 
 type ControlPanelHomeProps = {
   tasks: Task[];
   onImport: (tasks: Task[]) => void;
   openManualModal: () => void;
   userDisplayName: string | null;
+  /** Nombre legible en `perfiles.nombre_completo` (Supabase); si existe, es el que usa el saludo. */
+  profileFullName?: string | null;
   userEmail?: string | null;
+  /** Avatar (URL pública o data URL); prioridad sobre preferences.avatarDataUrl en el saludo. */
+  userAvatarSrc?: string | null;
   preferences?: UserPreferences;
 };
 
@@ -64,22 +72,6 @@ function moduleShort(t: WorkPresenceEntry["module"]): string {
   if (t === "airway") return "Aéreo";
   if (t === "none") return "Panel / sin RA";
   return "—";
-}
-
-function initialsFromLabel(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-  }
-  if (parts.length === 1 && parts[0]!.length >= 2) {
-    return parts[0]!.slice(0, 2).toUpperCase();
-  }
-  return label.slice(0, 2).toUpperCase() || "??";
-}
-
-function initialsFromUser(label: string | null | undefined): string {
-  const value = String(label || "Operador");
-  return initialsFromLabel(value);
 }
 
 const AVATAR_PALETTES = [
@@ -173,9 +165,15 @@ export function ControlPanelHome({
   onImport,
   openManualModal,
   userDisplayName,
+  profileFullName = null,
   userEmail = null,
+  userAvatarSrc = null,
   preferences,
 }: ControlPanelHomeProps) {
+  const headerAvatarSrc =
+    (userAvatarSrc && userAvatarSrc.trim()) ||
+    preferences?.avatarDataUrl ||
+    null;
   const [presenceList, setPresenceList] = useState<WorkPresenceEntry[]>([]);
   const [filterStatus, setFilterStatus] = useState<"all" | "in_progress" | "pending">(
     "all",
@@ -287,15 +285,23 @@ export function ControlPanelHome({
   }, [presenceList]);
 
   const connectedUsers = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<
+      string,
+      { userLabel: string; avatarUrl: string | null | undefined }
+    >();
     for (const entry of presenceList) {
-      if (!map.has(entry.userKey)) {
-        map.set(entry.userKey, entry.userLabel);
-      }
+      const prev = map.get(entry.userKey);
+      const fromEntry = entry.avatarUrl?.trim();
+      const av = fromEntry || prev?.avatarUrl;
+      map.set(entry.userKey, {
+        userLabel: entry.userLabel,
+        avatarUrl: av,
+      });
     }
-    return Array.from(map.entries()).map(([userKey, userLabel]) => ({
+    return Array.from(map.entries()).map(([userKey, v]) => ({
       userKey,
-      userLabel,
+      userLabel: peerPresenceVisibleName(v.userLabel, userKey),
+      avatarUrl: v.avatarUrl ?? null,
       connected: true,
     }));
   }, [presenceList]);
@@ -484,6 +490,12 @@ export function ControlPanelHome({
         )
       : 0;
 
+  const greetingFromProfile = profileFullName?.trim() ?? "";
+  const greetingName =
+    greetingFromProfile ||
+    String(userDisplayName ?? "").trim() ||
+    "Operador";
+
   return (
     <div className="max-w-[1600px] mx-auto animate-fade pb-10 px-0">
       {/* Fondo suave tipo dashboard */}
@@ -492,16 +504,20 @@ export function ControlPanelHome({
         <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
           <div className="flex items-start gap-4 min-w-0">
             <div className="relative flex h-[120px] w-[120px] shrink-0 items-center justify-center rounded-[1.6rem] bg-[#16263F] text-white overflow-hidden border-2 border-white/80 shadow-[0_10px_30px_rgba(15,23,42,0.18)]">
-              {preferences?.avatarDataUrl ? (
+              {headerAvatarSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={preferences.avatarDataUrl}
+                  src={headerAvatarSrc}
                   alt="Foto de perfil"
                   className="h-full w-full object-cover object-center"
                 />
               ) : (
                 <span className="text-base font-black tracking-wide" aria-hidden>
-                  {initialsFromUser(userDisplayName)}
+                  {avatarInitialsFromName(
+                    profileFullName,
+                    userDisplayName,
+                    userEmail,
+                  )}
                 </span>
               )}
             </div>
@@ -514,15 +530,7 @@ export function ControlPanelHome({
               </h1>
               <p className="text-sm font-semibold text-slate-600 mt-0.5 truncate">
                 {getGreeting()},{" "}
-                <span className="text-[#16263F]">
-                  {userDisplayName || "Operador"}
-                </span>
-                {userEmail ? (
-                  <span className="text-slate-400 font-medium hidden sm:inline">
-                    {" "}
-                    · {userEmail}
-                  </span>
-                ) : null}
+                <span className="text-[#16263F]">{greetingName}</span>
               </p>
               <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
                 <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[#16263F] text-white">
@@ -695,9 +703,20 @@ export function ControlPanelHome({
                   const taskProgress = getTaskProgressPercent(t);
                   const raK = String(t.ra || "").trim().toUpperCase();
                   const pres = presenceGrouped.find((p) => p.raKey === raK);
-                  const uniqueLabels = pres
-                    ? Array.from(new Map(pres.entries.map((e) => [e.userKey, e.userLabel])).values())
+                  const stackItems = pres
+                    ? Array.from(
+                        new Map(
+                          pres.entries.map((e) => [
+                            e.userKey,
+                            {
+                              label: peerPresenceVisibleName(e.userLabel, e.userKey),
+                              avatarUrl: e.avatarUrl,
+                            },
+                          ]),
+                        ).values(),
+                      )
                     : [];
+                  const liveLabels = stackItems.map((s) => s.label);
                   return (
                     <li
                       key={t.id}
@@ -705,8 +724,17 @@ export function ControlPanelHome({
                     >
                       <div className="flex items-start gap-3 min-w-0">
                         <AvatarStack
-                          labels={uniqueLabels.length > 0 ? uniqueLabels : [userDisplayName || "Equipo"]}
-                          singleIsUnknown={uniqueLabels.length === 0}
+                          items={
+                            stackItems.length > 0
+                              ? stackItems
+                              : [
+                                  {
+                                    label: userDisplayName || "Equipo",
+                                    avatarUrl: headerAvatarSrc,
+                                  },
+                                ]
+                          }
+                          singleIsUnknown={stackItems.length === 0}
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -733,8 +761,8 @@ export function ControlPanelHome({
                             {t.mainClient || "Sin cliente"} · {t.provider || "—"}
                           </p>
                           <p className="mt-1 text-[11px] font-semibold text-slate-500 truncate">
-                            {uniqueLabels.length > 0
-                              ? `En vivo: ${uniqueLabels.join(" · ")}`
+                            {liveLabels.length > 0
+                              ? `En vivo: ${liveLabels.join(" · ")}`
                               : "En vivo: sin captura activa"}
                           </p>
                         </div>
@@ -837,11 +865,18 @@ export function ControlPanelHome({
               ) : (
                 <div className="space-y-2.5">
                   {connectedUsers.map((u) => {
-                    const isCurrentUser = Boolean(
+                    const fallbackLocal =
                       userEmail &&
-                        preferences?.avatarDataUrl &&
-                        u.userKey.toLowerCase() === userEmail.toLowerCase(),
-                    );
+                      u.userKey.toLowerCase() === userEmail.toLowerCase()
+                        ? preferences?.avatarDataUrl
+                        : null;
+                    const imgSrc =
+                      u.avatarUrl ||
+                      (fallbackLocal &&
+                      (fallbackLocal.startsWith("http") ||
+                        fallbackLocal.startsWith("data:"))
+                        ? fallbackLocal
+                        : null);
                     return (
                       <div
                         key={u.userKey}
@@ -849,19 +884,19 @@ export function ControlPanelHome({
                       >
                         <div
                           className={`h-9 w-9 rounded-full overflow-hidden border border-white shadow-sm flex items-center justify-center ${paletteForKey(
-                            u.userLabel,
+                            u.userKey,
                           )}`}
                         >
-                          {isCurrentUser ? (
+                          {imgSrc ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={preferences?.avatarDataUrl || ""}
+                              src={imgSrc}
                               alt={`Avatar de ${u.userLabel}`}
                               className="h-full w-full object-cover object-center"
                             />
                           ) : (
                             <span className="text-[10px] font-black">
-                              {initialsFromLabel(u.userLabel)}
+                              {avatarInitialsFromName(null, u.userLabel, null)}
                             </span>
                           )}
                         </div>
@@ -1057,24 +1092,37 @@ function MiniStat({
   );
 }
 
+type AvatarStackItem = { label: string; avatarUrl?: string | null };
+
 function AvatarStack({
-  labels,
+  items,
   singleIsUnknown,
 }: {
-  labels: string[];
+  items: AvatarStackItem[];
   singleIsUnknown?: boolean;
 }) {
   const max = 4;
-  const show = labels.slice(0, max);
+  const show = items.slice(0, max);
   return (
     <div className="flex shrink-0 -space-x-2">
-      {show.map((lbl, i) => (
+      {show.map((it, i) => (
         <div
-          key={`${lbl}-${i}`}
-          title={lbl}
-          className={`flex h-10 w-10 items-center justify-center rounded-full border-2 border-white text-[10px] font-black shadow-md ${paletteForKey(lbl)}`}
+          key={`${it.label}-${i}`}
+          title={it.label}
+          className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white text-[10px] font-black shadow-md ${paletteForKey(it.label)}`}
         >
-          {singleIsUnknown && show.length === 1 && i === 0 ? "?" : initialsFromLabel(lbl)}
+          {it.avatarUrl?.trim() ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={it.avatarUrl.trim()}
+              alt=""
+              className="h-full w-full object-cover object-center"
+            />
+          ) : singleIsUnknown && show.length === 1 && i === 0 ? (
+            "?"
+          ) : (
+            avatarInitialsFromName(null, it.label, null)
+          )}
         </div>
       ))}
     </div>
@@ -1091,14 +1139,25 @@ function ActivityPresenceRow({
   operatorCount: number;
 }) {
   const summary = entries
-    .map((e) => `${e.userLabel} (${moduleShort(e.module)})`)
+    .map(
+      (e) =>
+        `${peerPresenceVisibleName(e.userLabel, e.userKey)} (${moduleShort(e.module)})`,
+    )
     .join(" · ");
-  const uniqueLabels = Array.from(
-    new Map(entries.map((e) => [e.userKey, e.userLabel])).values(),
+  const stackItems: AvatarStackItem[] = Array.from(
+    new Map(
+      entries.map((e) => [
+        e.userKey,
+        {
+          label: peerPresenceVisibleName(e.userLabel, e.userKey),
+          avatarUrl: e.avatarUrl,
+        },
+      ]),
+    ).values(),
   );
   return (
     <div className="flex items-center gap-3 rounded-xl border border-blue-100/80 bg-white/90 px-3 py-2.5 shadow-sm">
-      <AvatarStack labels={uniqueLabels} />
+      <AvatarStack items={stackItems} />
       <div className="min-w-0 flex-1">
         <p className="font-black text-[#16263F]">RA {raKey}</p>
         <p className="text-[10px] font-semibold text-slate-500 truncate">{summary}</p>

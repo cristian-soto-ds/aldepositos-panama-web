@@ -28,6 +28,8 @@ export function adaptMeasureDataForModule(
       l: row.l ?? "",
       w: row.w ?? "",
       h: row.h ?? "",
+      volumenM3: row.volumenM3 ?? "",
+      unidad: row.unidad ?? "",
     }));
   }
 
@@ -36,11 +38,14 @@ export function adaptMeasureDataForModule(
     return measureData.map((row) => ({
       id: row.id ?? generateId(),
       referencia: row.referencia ?? "",
+      descripcion: row.descripcion ?? "",
       bultos: row.bultos ?? 0,
       l: row.l ?? "",
       w: row.w ?? "",
       h: row.h ?? "",
       weight: row.pesoPorBulto ?? row.weight ?? "",
+      volumenM3: row.volumenM3 ?? "",
+      unidad: row.unidad ?? "",
     }));
   }
 

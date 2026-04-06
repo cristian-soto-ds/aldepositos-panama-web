@@ -8,6 +8,7 @@ En `.env.local` (y en Vercel → Project → Settings → Environment Variables)
 |----------|-------------|
 | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave anónima (pública) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Solo servidor** (no uses el prefijo `NEXT_PUBLIC_`). Opcional pero recomendada: el panel llama a `/api/me/display-name` para leer `perfiles.nombre_completo` y el avatar aunque RLS no permita `SELECT` al cliente. Obtén la clave en Supabase → Project Settings → API → `service_role`. |
 
 ## Crear la tabla
 
@@ -40,6 +41,25 @@ Para que los cambios se vean en otros dispositivos sin recargar:
 - [ ] Confirmar que **Authentication** está habilitado y los usuarios pueden iniciar sesión.
 - [ ] Si usas políticas distintas (por ejemplo solo ciertos roles), ajusta las políticas RLS en Supabase.
 - [ ] En Vercel, añade las mismas variables `NEXT_PUBLIC_*` y redeploy.
+
+## Tabla `reference_catalog` (catálogo maestro)
+
+La app consulta `public.reference_catalog` para autocompletar medidas y peso al capturar **referencia** en ingreso rápido/detallado. No sustituye a `tasks`.
+
+- El cliente usa la clave `numero_parte_normalizado` (mayúsculas, sin espacios extra).
+- Asegura **RLS** en Supabase: al menos `SELECT` para usuarios **autenticados** (misma sesión que el panel). Si no hay política de lectura, el autocompletado fallará en silencio (`console.warn`).
+- Para el módulo **Catálogo de referencias** (CRUD en el panel), hacen falta también `INSERT`, `UPDATE` y `DELETE` para `authenticated`, o políticas equivalentes. Puedes aplicar `supabase/migrations/002_reference_catalog_rls.sql` (revisa que encaje con tus reglas de negocio).
+
+## Foto de perfil (avatar) visible para el equipo
+
+El panel lee nombres desde **`public.perfiles`**, columna **`nombre_completo`** (no `profiles` / `full_name`).
+
+Las fotos se guardan en **Storage** (`bucket` `avatars`, ruta `{user_uuid}/avatar`) y la URL pública queda en **`perfiles.avatar_url`**.
+
+1. Si usas la tabla en español: ejecuta `supabase/migrations/005_perfiles_avatar_url.sql` (columna + política `UPDATE`). Si tu proyecto sigue usando `public.profiles` en inglés, usa `003_profiles_avatar_url.sql` en su lugar.
+2. Ejecuta `supabase/migrations/004_storage_avatars_bucket.sql` (bucket público + políticas de lectura/escritura solo en la carpeta del usuario).
+
+Si la política `UPDATE` en `perfiles` choca con las tuyas, ajusta o elimina la duplicada. Si la clave que enlaza con `auth.users` se llama `uuid` y no `id`, edita la política en `005_perfiles_avatar_url.sql` como indica el comentario del archivo.
 
 ## Nota: borrador de despacho en el navegador
 

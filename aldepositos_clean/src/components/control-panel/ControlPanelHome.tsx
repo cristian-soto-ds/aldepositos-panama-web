@@ -703,40 +703,22 @@ export function ControlPanelHome({
                   const taskProgress = getTaskProgressPercent(t);
                   const raK = String(t.ra || "").trim().toUpperCase();
                   const pres = presenceGrouped.find((p) => p.raKey === raK);
-                  const stackItems = pres
+                  const liveLabels = pres
                     ? Array.from(
                         new Map(
                           pres.entries.map((e) => [
                             e.userKey,
-                            {
-                              label: peerPresenceVisibleName(e.userLabel, e.userKey),
-                              avatarUrl: e.avatarUrl,
-                            },
+                            peerPresenceVisibleName(e.userLabel, e.userKey),
                           ]),
                         ).values(),
                       )
                     : [];
-                  const liveLabels = stackItems.map((s) => s.label);
                   return (
                     <li
                       key={t.id}
                       className="flex flex-col gap-3 py-4 first:pt-0 md:flex-row md:items-center md:justify-between"
                     >
-                      <div className="flex items-start gap-3 min-w-0">
-                        <AvatarStack
-                          items={
-                            stackItems.length > 0
-                              ? stackItems
-                              : [
-                                  {
-                                    label: userDisplayName || "Equipo",
-                                    avatarUrl: headerAvatarSrc,
-                                  },
-                                ]
-                          }
-                          singleIsUnknown={stackItems.length === 0}
-                        />
-                        <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-black text-[#16263F] dark:text-slate-100">RA {t.ra}</span>
                             <span className="rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
@@ -765,7 +747,6 @@ export function ControlPanelHome({
                               ? `En vivo: ${liveLabels.join(" · ")}`
                               : "En vivo: sin captura activa"}
                           </p>
-                        </div>
                       </div>
                       <div className="flex items-center gap-4 shrink-0 md:min-w-[200px]">
                         <div className="flex-1 md:flex-none md:w-36">
@@ -1092,43 +1073,6 @@ function MiniStat({
   );
 }
 
-type AvatarStackItem = { label: string; avatarUrl?: string | null };
-
-function AvatarStack({
-  items,
-  singleIsUnknown,
-}: {
-  items: AvatarStackItem[];
-  singleIsUnknown?: boolean;
-}) {
-  const max = 4;
-  const show = items.slice(0, max);
-  return (
-    <div className="flex shrink-0 -space-x-2">
-      {show.map((it, i) => (
-        <div
-          key={`${it.label}-${i}`}
-          title={it.label}
-          className={`flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-white text-[10px] font-black shadow-md ${paletteForKey(it.label)}`}
-        >
-          {it.avatarUrl?.trim() ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={it.avatarUrl.trim()}
-              alt=""
-              className="h-full w-full object-cover object-center"
-            />
-          ) : singleIsUnknown && show.length === 1 && i === 0 ? (
-            "?"
-          ) : (
-            avatarInitialsFromName(null, it.label, null)
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ActivityPresenceRow({
   raKey,
   entries,
@@ -1144,20 +1088,11 @@ function ActivityPresenceRow({
         `${peerPresenceVisibleName(e.userLabel, e.userKey)} (${moduleShort(e.module)})`,
     )
     .join(" · ");
-  const stackItems: AvatarStackItem[] = Array.from(
-    new Map(
-      entries.map((e) => [
-        e.userKey,
-        {
-          label: peerPresenceVisibleName(e.userLabel, e.userKey),
-          avatarUrl: e.avatarUrl,
-        },
-      ]),
-    ).values(),
-  );
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-blue-100/80 bg-white/90 px-3 py-2.5 shadow-sm">
-      <AvatarStack items={stackItems} />
+    <div className="flex items-center gap-3 rounded-xl border border-blue-100/80 bg-white/90 dark:bg-slate-800/90 dark:border-blue-900/40 px-3 py-2.5 shadow-sm">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+        <Activity className="h-4 w-4" aria-hidden />
+      </div>
       <div className="min-w-0 flex-1">
         <p className="font-black text-[#16263F] dark:text-slate-100">RA {raKey}</p>
         <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate">{summary}</p>

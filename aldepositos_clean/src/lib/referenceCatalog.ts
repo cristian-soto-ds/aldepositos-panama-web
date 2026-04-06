@@ -409,3 +409,32 @@ export function buildMeasurePatchFromCatalog(
     weight: formatCatalogNumber(item.peso_por_pieza_kg),
   };
 }
+
+/**
+ * Tras importar referencias desde Excel: resuelve cada código en el catálogo
+ * y rellena medidas / descripción como al escribir la referencia a mano.
+ * Conserva `bultos` si el archivo ya los traía en esa fila.
+ */
+export async function mergeCatalogIntoImportedRows<T extends { referencia?: string; bultos?: string | number }>(
+  moduleType: InventoryCatalogModule,
+  rows: T[],
+): Promise<{ rows: T[]; catalogMatched: number }> {
+  let catalogMatched = 0;
+  const out = await Promise.all(
+    rows.map(async (row) => {
+      const ref = String(row.referencia ?? "").trim();
+      if (!ref) return row;
+      const item = await getReferenceCatalogItem(ref);
+      if (!item) return row;
+      catalogMatched += 1;
+      const patch = buildMeasurePatchFromCatalog(moduleType, item);
+      const excelBultos = row.bultos;
+      const merged = { ...row, ...patch } as T;
+      if (excelBultos !== undefined && String(excelBultos).trim() !== "") {
+        merged.bultos = excelBultos;
+      }
+      return merged;
+    }),
+  );
+  return { rows: out, catalogMatched };
+}

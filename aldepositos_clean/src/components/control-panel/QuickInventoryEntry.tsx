@@ -9,6 +9,7 @@ import {
   Boxes,
   Check,
   Edit,
+  Download,
   FileSpreadsheet,
   FileText,
   Package,
@@ -18,6 +19,11 @@ import {
   Trash2,
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
+import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
+import {
+  countInventarioCsvRows,
+  downloadInventarioCsv,
+} from "@/lib/exportInventarioCsv";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
 import {
   getSharedWorkPresenceTabId,
@@ -29,6 +35,7 @@ import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
 import {
   buildMeasurePatchFromCatalog,
   getReferenceCatalogItem,
+  mergeCatalogIntoImportedRows,
   normalizePartNumber,
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
@@ -199,6 +206,7 @@ export function QuickInventoryEntry({
   const latestTaskRef = useRef<Task | null>(null);
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
+  const [csvExportOpen, setCsvExportOpen] = useState(false);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
@@ -402,6 +410,9 @@ export function QuickInventoryEntry({
         alert("No hay referencias para importar.");
         return;
       }
+      const mod: InventoryCatalogModule =
+        moduleType === "airway" ? "airway" : "quick";
+
       setMeasureRows((prev) => {
         const existing = new Set(
           prev
@@ -443,12 +454,42 @@ export function QuickInventoryEntry({
           );
           return prev;
         }
-        // eslint-disable-next-line no-alert
-        alert(
-          `Añadidas ${additions.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
-            (skipped ? ` Omitidas ${skipped} duplicada(s).` : ""),
-        );
-        return [...prev, ...additions];
+
+        const appendDeduped = (p: MeasureRow[], toAppend: MeasureRow[]) => {
+          const ex = new Set(
+            p.map((r) => String(r.referencia ?? "").trim().toUpperCase()).filter(Boolean),
+          );
+          const reallyNew = toAppend.filter((row) => {
+            const key = String(row.referencia ?? "").trim().toUpperCase();
+            return key && !ex.has(key);
+          });
+          if (reallyNew.length === 0) return p;
+          return [...p, ...reallyNew];
+        };
+
+        void mergeCatalogIntoImportedRows(mod, additions)
+          .then(({ rows: enriched, catalogMatched }) => {
+            setMeasureRows((p) => appendDeduped(p, enriched));
+            // eslint-disable-next-line no-alert
+            alert(
+              `Añadidas ${enriched.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
+                (skipped ? ` Omitidas ${skipped} duplicada(s).` : "") +
+                (catalogMatched > 0
+                  ? ` ${catalogMatched} reconocida(s) en el catálogo (medidas y datos rellenados).`
+                  : ""),
+            );
+          })
+          .catch((err) => {
+            console.error(err);
+            setMeasureRows((p) => appendDeduped(p, additions));
+            // eslint-disable-next-line no-alert
+            alert(
+              `Añadidas ${additions.length} fila(s). No se pudo consultar el catálogo; revisa la conexión.` +
+                (skipped ? ` Omitidas ${skipped} duplicada(s).` : ""),
+            );
+          });
+
+        return prev;
       });
     } catch (err) {
       console.error(err);
@@ -998,16 +1039,28 @@ export function QuickInventoryEntry({
   const showReferenceColumn = true;
 
   return (
+    <>
     <div className="flex h-full min-h-0 w-full max-w-[1400px] mx-auto flex-1 flex-col animate-fade">
       <div className="shrink-0 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-2 md:mb-3 px-2 md:px-0">
-        <button
-          type="button"
-          onClick={clearTask}
-          className="text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 md:bg-transparent px-4 py-2 md:px-0 md:py-0 rounded-lg md:rounded-none shadow-sm md:shadow-none font-bold hover:text-[#16263F] dark:text-slate-100 flex items-center gap-2 uppercase text-[10px] tracking-widest"
-        >
-          <ArrowLeft className="w-4 h-4" />{" "}
-          <span className="hidden md:inline">Volver al listado</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={clearTask}
+            className="text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 md:bg-transparent px-4 py-2 md:px-0 md:py-0 rounded-lg md:rounded-none shadow-sm md:shadow-none font-bold hover:text-[#16263F] dark:text-slate-100 flex items-center gap-2 uppercase text-[10px] tracking-widest"
+          >
+            <ArrowLeft className="w-4 h-4" />{" "}
+            <span className="hidden md:inline">Volver al listado</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCsvExportOpen(true)}
+            title="CSV (delimitado por comas), como en Excel"
+            className="flex items-center gap-2 rounded-xl border-2 border-sky-400/80 bg-sky-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-sky-950 shadow-sm transition hover:border-sky-600 hover:bg-sky-100 dark:border-sky-500/50 dark:bg-sky-950/35 dark:text-sky-100 dark:hover:bg-sky-900/45"
+          >
+            <Download className="h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300" />
+            <span className="whitespace-nowrap">Descargar CSV</span>
+          </button>
+        </div>
         <div className="flex flex-col sm:flex-row w-full md:w-auto items-stretch md:items-center gap-2 md:gap-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
             <div className="rounded-full border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-1 shadow-sm">
@@ -1525,7 +1578,7 @@ export function QuickInventoryEntry({
               className="hidden"
               onChange={onReferenciasExcelSelected}
             />
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:gap-3">
               <button
                 type="button"
                 onClick={addRow}
@@ -1554,6 +1607,31 @@ export function QuickInventoryEntry({
         </div>
       )}
     </div>
+    <InventoryCsvExportModal
+      open={csvExportOpen}
+      raLabel={String(t.ra ?? "")}
+      defaultNumero={String(t.ra ?? "").trim()}
+      onCancel={() => setCsvExportOpen(false)}
+      onConfirm={(numeroDocumento) => {
+        const rows = measureRows as unknown as Record<string, unknown>[];
+        if (countInventarioCsvRows(rows) === 0) {
+          // eslint-disable-next-line no-alert
+          alert("No hay líneas con datos para exportar.");
+          setCsvExportOpen(false);
+          return;
+        }
+        const variant = moduleType === "airway" ? "airway" : "quick";
+        const raSafe = String(t.ra ?? "RA").replace(/[/\\?%*:|"<>]/g, "-");
+        downloadInventarioCsv({
+          numeroDocumento,
+          measureRows: rows,
+          variant,
+          filenameBase: `inventario-${variant}-${raSafe}`,
+        });
+        setCsvExportOpen(false);
+      }}
+    />
+    </>
   );
 }
 

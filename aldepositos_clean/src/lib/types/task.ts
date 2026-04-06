@@ -34,4 +34,13 @@ export type Task = {
     date: string;
   };
   date?: string;
+  /** Email (minúsculas) del operador que creó/importó el RA por primera vez. */
+  createdByEmail?: string;
+  createdByName?: string;
+  /** Última intervención por usuario (deduplicado por email). */
+  contributors?: Array<{
+    email: string;
+    displayName?: string;
+    at: string;
+  }>;
 };

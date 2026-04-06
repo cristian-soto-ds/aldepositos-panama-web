@@ -3,18 +3,25 @@
 import React, { useMemo } from "react";
 import {
   CheckCircle2,
-  ClipboardList,
   Clock3,
+  Handshake,
   Info,
-  PackageCheck,
+  Sparkles,
   Target,
   TrendingUp,
   UserCircle2,
 } from "lucide-react";
 import type { Task } from "@/lib/types/task";
+import {
+  lastUserTouchTime,
+  normalizeContributorEmail,
+  userHelpedOnlyOnTask,
+  userParticipatedInTask,
+} from "@/lib/taskContributions";
 
 type ProductivityInsightsPanelProps = {
   tasks: Task[];
+  userEmail?: string | null;
   userDisplayName?: string | null;
 };
 
@@ -59,23 +66,38 @@ function getPerformanceTone(percent: number): string {
 
 export function ProductivityInsightsPanel({
   tasks,
+  userEmail,
   userDisplayName,
 }: ProductivityInsightsPanelProps) {
   const operatorName = userDisplayName || "Operador";
+  const emailKey = normalizeContributorEmail(userEmail);
+
+  const myTasks = useMemo(() => {
+    if (!emailKey) return [];
+    return tasks.filter((t) => userParticipatedInTask(t, emailKey));
+  }, [tasks, emailKey]);
 
   const stats = useMemo(() => {
-    const total = tasks.length;
-    const completed = tasks.filter((t) => t.status === "completed").length;
-    const inProgress = tasks.filter(
+    const scope = myTasks;
+    const total = scope.length;
+    const completed = scope.filter((t) => t.status === "completed").length;
+    const inProgress = scope.filter(
       (t) => t.status === "in_progress" || t.status === "partial",
     ).length;
-    const pending = tasks.filter((t) => t.status === "pending").length;
-    const dispatched = tasks.filter((t) => t.dispatched).length;
-    const totalBultosDeclarados = tasks.reduce(
+    const pending = scope.filter((t) => t.status === "pending").length;
+    const dispatched = scope.filter((t) => t.dispatched).length;
+    const openedByYou = scope.filter(
+      (t) => normalizeContributorEmail(t.createdByEmail) === emailKey,
+    ).length;
+    const helpedOnly = scope.filter((t) =>
+      userHelpedOnlyOnTask(t, emailKey),
+    ).length;
+
+    const totalBultosDeclarados = scope.reduce(
       (acc, task) => acc + (task.expectedBultos || 0),
       0,
     );
-    const totalBultosProcesados = tasks.reduce(
+    const totalBultosProcesados = scope.reduce(
       (acc, task) => acc + (task.currentBultos || 0),
       0,
     );
@@ -86,7 +108,7 @@ export function ProductivityInsightsPanel({
       airway: [],
       unknown: [],
     };
-    tasks.forEach((task) => {
+    scope.forEach((task) => {
       const moduleKey = (task.type || "unknown") as ModuleKey;
       if (!moduleBuckets[moduleKey]) {
         moduleBuckets.unknown.push(task);
@@ -121,7 +143,7 @@ export function ProductivityInsightsPanel({
       .sort((a, b) => b.total - a.total);
 
     const byClient = Object.entries(
-      tasks.reduce<Record<string, number>>((acc, task) => {
+      scope.reduce<Record<string, number>>((acc, task) => {
         const key = task.mainClient?.trim() || "Sin Cliente";
         acc[key] = (acc[key] || 0) + 1;
         return acc;
@@ -131,13 +153,16 @@ export function ProductivityInsightsPanel({
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 6);
 
-    const recentActivity = [...tasks]
+    const recentActivity = [...scope]
       .sort((a, b) => {
-        const dateA = new Date(a.date || 0).getTime();
+        const tb = lastUserTouchTime(b, emailKey);
+        const ta = lastUserTouchTime(a, emailKey);
+        if (tb !== ta) return tb - ta;
         const dateB = new Date(b.date || 0).getTime();
+        const dateA = new Date(a.date || 0).getTime();
         return dateB - dateA;
       })
-      .slice(0, 7);
+      .slice(0, 8);
 
     const globalCompletion = total > 0 ? (completed / total) * 100 : 0;
     const bultosProgress =
@@ -146,11 +171,13 @@ export function ProductivityInsightsPanel({
         : 0;
 
     const focusMessage =
-      pending > inProgress + completed
-        ? "Tienes alta carga pendiente. Prioriza cierres rapidos para liberar flujo."
-        : completed >= pending
-          ? "Buen avance. El volumen completado supera o iguala el pendiente."
-          : "Operacion balanceada. Mantener enfoque en tareas en proceso.";
+      total === 0
+        ? "Aún no hay RAs con tu huella. Crea, importa o guarda cambios para ver tu avance aquí."
+        : pending > inProgress + completed
+          ? "Tienes varios RAs pendientes en tu bandeja personal. Prioriza cierres para liberar flujo."
+          : completed >= pending
+            ? "Buen ritmo: en tus RAs el completado supera o iguala lo pendiente."
+            : "Balance estable entre pendientes y en proceso en tu trabajo.";
 
     return {
       total,
@@ -158,6 +185,8 @@ export function ProductivityInsightsPanel({
       inProgress,
       pending,
       dispatched,
+      openedByYou,
+      helpedOnly,
       totalBultosDeclarados,
       totalBultosProcesados,
       globalCompletion,
@@ -167,35 +196,57 @@ export function ProductivityInsightsPanel({
       recentActivity,
       focusMessage,
     };
-  }, [tasks]);
+  }, [myTasks, emailKey]);
+
+  if (!emailKey) {
+    return (
+      <div className="mx-auto w-full max-w-3xl space-y-4 pb-10 pt-2">
+        <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-8 text-center shadow-sm">
+          <UserCircle2 className="mx-auto h-12 w-12 text-slate-400" />
+          <p className="mt-4 text-lg font-black text-[#16263F] dark:text-slate-100">
+            Productividad personal
+          </p>
+          <p className="mt-2 text-sm font-semibold text-slate-600 dark:text-slate-400">
+            Inicia sesión con tu cuenta para ver tu progreso y las RAs en las que
+            colaboras.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 pb-10">
       <section className="relative overflow-hidden rounded-[2rem] border border-[#1e3a8a]/10 bg-gradient-to-br from-[#16263F] via-[#1D3A62] to-[#2563eb] p-6 text-white shadow-xl md:p-8">
         <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-20 -left-20 h-56 w-56 rounded-full bg-blue-200/20 blur-3xl" />
-        <div className="relative z-10 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="relative z-10 flex flex-col gap-5">
           <div className="flex items-start gap-4">
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-white/25 bg-white/15 backdrop-blur">
               <UserCircle2 className="h-9 w-9" />
             </div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-100">
-                Panel de productividad
+                Tu productividad
               </p>
               <h2 className="mt-1 text-3xl font-black tracking-tight md:text-4xl">
                 {operatorName}
               </h2>
               <p className="mt-2 max-w-2xl text-sm font-semibold text-blue-100/95">
-                Visualizacion clara de rendimiento, carga y avance del inventario
-                en una sola pantalla.
+                Solo ves RAs donde creaste, importaste o guardaste cambios. Si
+                ayudaste en un RA de un compañero, aparece como colaboración.
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <HeroStat label="Inventarios" value={formatNumber(stats.total)} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <HeroStat label="Tus RAs" value={formatNumber(stats.total)} />
+            <HeroStat label="Abriste" value={formatNumber(stats.openedByYou)} />
+            <HeroStat
+              label="Colaboraste"
+              value={formatNumber(stats.helpedOnly)}
+            />
             <HeroStat label="Completados" value={formatNumber(stats.completed)} />
-            <HeroStat label="En Proceso" value={formatNumber(stats.inProgress)} />
+            <HeroStat label="En proceso" value={formatNumber(stats.inProgress)} />
             <HeroStat label="Despachados" value={formatNumber(stats.dispatched)} />
           </div>
         </div>
@@ -217,14 +268,14 @@ export function ProductivityInsightsPanel({
         <MetricCard
           title="Por completar"
           value={formatNumber(stats.pending)}
-          helper="RAs aun sin captura"
+          helper="Tus RAs aun sin captura"
           icon={<Clock3 className="h-4 w-4 text-amber-600" />}
           tone="amber"
         />
         <MetricCard
           title="Cumplimiento"
           value={formatPercent(stats.globalCompletion)}
-          helper="Inventarios cerrados"
+          helper="Tus RAs cerrados"
           icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
           tone="green"
         />
@@ -238,7 +289,7 @@ export function ProductivityInsightsPanel({
         <MetricCard
           title="RAs en curso"
           value={formatNumber(stats.inProgress)}
-          helper="Captura iniciada"
+          helper="Tus RAs con captura iniciada"
           icon={<TrendingUp className="h-4 w-4 text-violet-600" />}
           tone="violet"
         />
@@ -251,7 +302,7 @@ export function ProductivityInsightsPanel({
               Productividad por modulo
             </p>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              {formatNumber(stats.total)} RAs
+              {formatNumber(stats.total)} tus RAs
             </span>
           </div>
           <div className="space-y-3">
@@ -276,9 +327,9 @@ export function ProductivityInsightsPanel({
                       Bultos declarados: {formatNumber(row.declared)}
                     </p>
                   </div>
-                  <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200">
+                  <div className="mt-2 h-2.5 w-full rounded-full bg-slate-200 dark:bg-slate-600">
                     <div
-                      className="h-2.5 rounded-full bg-[#16263F] transition-all"
+                      className="h-2.5 rounded-full bg-[#16263F] dark:bg-blue-500 transition-all"
                       style={{ width: `${Math.min(row.completionRate, 100)}%` }}
                     />
                   </div>
@@ -289,7 +340,7 @@ export function ProductivityInsightsPanel({
               ))}
             {stats.byModule.every((row) => row.total === 0) && (
               <p className="rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                Aun no hay inventarios para comparar entre modulos.
+                Aún no hay RAs tuyos en ningún módulo.
               </p>
             )}
           </div>
@@ -298,7 +349,7 @@ export function ProductivityInsightsPanel({
         <div className="space-y-4">
           <div className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
             <p className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
-              Clientes con mayor carga
+              Clientes en tus RAs
             </p>
             <div className="mt-3 space-y-2">
               {stats.byClient.length === 0 ? (
@@ -325,34 +376,55 @@ export function ProductivityInsightsPanel({
 
           <div className="rounded-3xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-5 shadow-sm md:p-6">
             <p className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
-              Actividad reciente
+              Actividad reciente (tuya)
             </p>
             <div className="mt-3 space-y-2">
               {stats.recentActivity.length === 0 ? (
                 <p className="rounded-xl bg-slate-50 dark:bg-slate-800/60 p-4 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                  Sin inventarios recientes registrados.
+                  Sin RAs con tu actividad todavía. Trabaja en un inventario y
+                  guarda: aquí verás el historial ordenado por tu último cambio.
                 </p>
               ) : (
-                stats.recentActivity.map((task) => (
-                  <div
-                    key={task.id}
-                    className="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
-                        RA {task.ra}
+                stats.recentActivity.map((task) => {
+                  const opened =
+                    normalizeContributorEmail(task.createdByEmail) === emailKey;
+                  const helped = userHelpedOnlyOnTask(task, emailKey);
+                  return (
+                    <div
+                      key={task.id}
+                      className="rounded-xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">
+                          RA {task.ra}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {opened ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/80 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                              <Sparkles className="h-3 w-3" /> Abriste
+                            </span>
+                          ) : helped ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-sky-300/80 bg-sky-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-sky-900 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200">
+                              <Handshake className="h-3 w-3" /> Colaboraste
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              Participaste
+                            </span>
+                          )}
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {MODULE_LABELS[(task.type || "unknown") as ModuleKey]}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        {toReadableStatus(task.status)} · Bultos{" "}
+                        {formatNumber(task.currentBultos || 0)}/
+                        {formatNumber(task.expectedBultos || 0)}
                       </p>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-slate-300">
-                        {MODULE_LABELS[(task.type || "unknown") as ModuleKey]}
-                      </span>
                     </div>
-                    <p className="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                      {toReadableStatus(task.status)} · Bultos{" "}
-                      {formatNumber(task.currentBultos || 0)}/
-                      {formatNumber(task.expectedBultos || 0)}
-                    </p>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -364,7 +436,7 @@ export function ProductivityInsightsPanel({
           <Info className="h-4 w-4 text-blue-500" />
           Guia rapida del panel
         </p>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
           <GuideCard
             title="Completado"
             text="RA con inventario cerrado y listo para continuidad operativa."
@@ -376,6 +448,10 @@ export function ProductivityInsightsPanel({
           <GuideCard
             title="Pendiente"
             text="RA sin captura activa. Requiere atencion de inventario."
+          />
+          <GuideCard
+            title="Tu huella"
+            text="Cada vez que guardas en un RA, el sistema registra tu usuario. Abriste = lo creaste o importaste; Colaboraste = ayudaste en un RA de otro."
           />
         </div>
       </section>

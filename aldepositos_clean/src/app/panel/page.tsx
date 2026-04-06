@@ -39,6 +39,7 @@ import {
 import { isPublicAvatarUrl } from "@/lib/profileAvatar";
 import { fetchPerfilUsuario } from "@/lib/perfiles";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
+import { withTaskContribution } from "@/lib/taskContributions";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -250,12 +251,15 @@ export default function PanelPage() {
 
       if (dedupedNew.length === 0) return prev;
 
-      normalized = dedupedNew.map((t) => ({
-        ...t,
-        date: t.date || today,
-        dispatched: t.dispatched ?? false,
-        containerDraft: t.containerDraft ?? false,
-      }));
+      normalized = dedupedNew.map((t) => {
+        const base: Task = {
+          ...t,
+          date: t.date || today,
+          dispatched: t.dispatched ?? false,
+          containerDraft: t.containerDraft ?? false,
+        };
+        return withTaskContribution(base, userEmail, userDisplayName, "create");
+      });
       return [...prev, ...normalized];
     });
 
@@ -272,11 +276,17 @@ export default function PanelPage() {
   };
 
   const handleUpdateTask = async (updatedTask: Task) => {
+    const persisted = withTaskContribution(
+      updatedTask,
+      userEmail,
+      userDisplayName,
+      "touch",
+    );
     setTasks((prev) =>
-      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
+      prev.map((t) => (t.id === persisted.id ? persisted : t)),
     );
     try {
-      await updateTask(updatedTask);
+      await updateTask(persisted);
     } catch (e) {
       console.error(e);
       // eslint-disable-next-line no-alert
@@ -373,12 +383,18 @@ export default function PanelPage() {
       );
       return;
     }
-    const normalized: Task = {
+    const base: Task = {
       ...taskData,
       date: taskData.date || today,
       dispatched: taskData.dispatched ?? false,
       containerDraft: taskData.containerDraft ?? false,
     };
+    const normalized = withTaskContribution(
+      base,
+      userEmail,
+      userDisplayName,
+      exists ? "touch" : "create",
+    );
     try {
       if (exists) {
         await updateTask(normalized);
@@ -415,12 +431,19 @@ export default function PanelPage() {
     const taskIds = container.tasks.map((t) => t.id);
     const updated: Task[] = tasks
       .filter((t) => taskIds.includes(t.id))
-      .map((t) => ({
-        ...t,
-        dispatched: false,
-        containerDraft: true,
-        dispatchInfo: undefined,
-      }));
+      .map((t) =>
+        withTaskContribution(
+          {
+            ...t,
+            dispatched: false,
+            containerDraft: true,
+            dispatchInfo: undefined,
+          },
+          userEmail,
+          userDisplayName,
+          "touch",
+        ),
+      );
     try {
       if (updated.length > 0) {
         await Promise.all(updated.map((t) => updateTask(t)));
@@ -550,6 +573,7 @@ export default function PanelPage() {
         {visibleView === "productivity" && (
           <ProductivityInsightsPanel
             tasks={tasks}
+            userEmail={userEmail}
             userDisplayName={userDisplayName}
           />
         )}

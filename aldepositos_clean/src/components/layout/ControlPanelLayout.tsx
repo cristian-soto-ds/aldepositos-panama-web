@@ -1,7 +1,7 @@
 "use client";
 
 import React, { ReactNode, useState } from "react";
-import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound, BookMarked } from "lucide-react";
+import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound, BookMarked, HandHelping } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 import { clearWorkPresence, getSharedWorkPresenceTabId } from "@/lib/panelPresence";
@@ -114,6 +114,15 @@ export function ControlPanelLayout({
             active={currentView === "airway"}
             onClick={() => {
               setCurrentView("airway");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<HandHelping size={20} />}
+            text="Orden de recolección"
+            active={currentView === "collection-orders"}
+            onClick={() => {
+              setCurrentView("collection-orders");
               setSidebarOpen(false);
             }}
           />

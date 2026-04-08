@@ -24,6 +24,9 @@ import {
 import type { Task } from "@/lib/types/task";
 import type { UserPreferences } from "@/lib/userPreferences";
 import {
+  clearWorkPresence,
+  getSharedWorkPresenceTabId,
+  publishWorkPresence,
   subscribeWorkPresence,
   type WorkPresenceEntry,
 } from "@/lib/panelPresence";
@@ -186,6 +189,29 @@ export function ControlPanelHome({
   }, []);
 
   useEffect(() => {
+    const userKey = String(userEmail ?? "").trim().toLowerCase();
+    if (!userKey) return;
+    const tabId = getSharedWorkPresenceTabId();
+    const label = peerPresenceVisibleName(userDisplayName || userKey, userKey);
+    const pulse = () => {
+      publishWorkPresence({
+        tabId,
+        userKey,
+        userLabel: label,
+        avatarUrl: userAvatarSrc || null,
+        ra: "",
+        module: "none",
+      });
+    };
+    pulse();
+    const interval = window.setInterval(pulse, 12000);
+    return () => {
+      window.clearInterval(interval);
+      void clearWorkPresence(tabId);
+    };
+  }, [userEmail, userDisplayName, userAvatarSrc]);
+
+  useEffect(() => {
     setNow(new Date());
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
@@ -285,11 +311,13 @@ export function ControlPanelHome({
   }, [presenceList]);
 
   const connectedUsers = useMemo(() => {
+    const nowTs = Date.now();
+    const fresh = presenceList.filter((p) => nowTs - p.updatedAt <= 45_000);
     const map = new Map<
       string,
       { userLabel: string; avatarUrl: string | null | undefined }
     >();
-    for (const entry of presenceList) {
+    for (const entry of fresh) {
       const prev = map.get(entry.userKey);
       const fromEntry = entry.avatarUrl?.trim();
       const av = fromEntry || prev?.avatarUrl;

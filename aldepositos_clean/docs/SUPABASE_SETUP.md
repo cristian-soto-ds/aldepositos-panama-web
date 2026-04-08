@@ -42,6 +42,13 @@ Para que los cambios se vean en otros dispositivos sin recargar:
 - [ ] Si usas políticas distintas (por ejemplo solo ciertos roles), ajusta las políticas RLS en Supabase.
 - [ ] En Vercel, añade las mismas variables `NEXT_PUBLIC_*` y redeploy.
 
+## Tabla `collection_orders` (orden de recolección)
+
+El panel guarda las **órdenes de recolección** (antes del RA en almacén) en `public.collection_orders`, mismo patrón que `tasks`: `id`, `payload` (JSON), `updated_at`.
+
+- Ejecuta **`supabase/migrations/007_collection_orders.sql`** en el SQL Editor.
+- Activa **Replication** para esta tabla si quieres tiempo real entre dispositivos (el script intenta añadirla a `supabase_realtime`; si falla, hazlo desde el dashboard).
+
 ## Tabla `reference_catalog` (catálogo maestro)
 
 La app consulta `public.reference_catalog` para autocompletar medidas y peso al capturar **referencia** en ingreso rápido/detallado. No sustituye a `tasks`.

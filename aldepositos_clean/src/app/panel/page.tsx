@@ -21,6 +21,7 @@ import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
 import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
 import { ProductivityInsightsPanel } from "@/components/control-panel/ProductivityInsightsPanel";
 import { ReferenceCatalogModule } from "@/components/control-panel/ReferenceCatalogModule";
+import { CollectionOrderModule } from "@/components/control-panel/CollectionOrderModule";
 import { UserOptionsPanel } from "@/components/control-panel/UserOptionsPanel";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
@@ -46,6 +47,7 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "quick-entry",
   "detailed-entry",
   "airway",
+  "collection-orders",
 ]);
 
 export default function PanelPage() {
@@ -559,6 +561,14 @@ export default function PanelPage() {
           />
         )}
 
+        {visibleView === "collection-orders" && (
+          <CollectionOrderModule
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            userEmail={userEmail}
+          />
+        )}
+
         {visibleView === "reference-catalog" && <ReferenceCatalogModule />}
 
         {visibleView === "reports" && (
@@ -593,7 +603,13 @@ export default function PanelPage() {
         )}
 
         {visibleView === "monitor" && (
-          <LiveMonitor tasks={tasks} onDeleteTask={handleDeleteTask} />
+          <LiveMonitor
+            tasks={tasks}
+            onDeleteTask={handleDeleteTask}
+            userEmail={userEmail}
+            userDisplayName={userDisplayName}
+            userAvatarSrc={presenceBroadcastAvatarUrl}
+          />
         )}
 
         {showOptionsModule && visibleView === "options" && (

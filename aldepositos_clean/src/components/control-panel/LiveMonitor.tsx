@@ -1,22 +1,68 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Activity, FolderOpen, Search, Trash2 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
+import {
+  clearWorkPresence,
+  getSharedWorkPresenceTabId,
+  publishWorkPresence,
+  subscribeWorkPresence,
+  type WorkPresenceEntry,
+} from "@/lib/panelPresence";
+import {
+  avatarInitialsFromName,
+  peerPresenceVisibleName,
+} from "@/lib/viewerIdentity";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type LiveMonitorProps = {
   tasks: Task[];
   onDeleteTask: (id: string) => void;
+  userEmail?: string | null;
+  userDisplayName?: string | null;
+  userAvatarSrc?: string | null;
 };
 
-export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
+export function LiveMonitor({
+  tasks,
+  onDeleteTask,
+  userEmail = null,
+  userDisplayName = null,
+  userAvatarSrc = null,
+}: LiveMonitorProps) {
   const [clientFilter, setClientFilter] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState<
     "all" | "active" | "completed" | "dispatched" | "priority"
   >("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [presenceList, setPresenceList] = useState<WorkPresenceEntry[]>([]);
+
+  useEffect(() => subscribeWorkPresence(setPresenceList), []);
+
+  useEffect(() => {
+    const userKey = String(userEmail ?? "").trim().toLowerCase();
+    if (!userKey) return;
+    const tabId = getSharedWorkPresenceTabId();
+    const label = peerPresenceVisibleName(userDisplayName || userKey, userKey);
+    const pulse = () => {
+      publishWorkPresence({
+        tabId,
+        userKey,
+        userLabel: label,
+        avatarUrl: userAvatarSrc || null,
+        ra: "",
+        module: "none",
+      });
+    };
+    pulse();
+    const interval = window.setInterval(pulse, 12000);
+    return () => {
+      window.clearInterval(interval);
+      void clearWorkPresence(tabId);
+    };
+  }, [userEmail, userDisplayName, userAvatarSrc]);
 
   const filterByStatus = (task: Task) => {
     if (statusFilter === "active") return task.status !== "completed";
@@ -86,6 +132,27 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
     ).length;
     return { completed, active, dispatched, priority };
   }, [tasks]);
+
+  const connectedUsers = useMemo(() => {
+    const nowTs = Date.now();
+    const fresh = presenceList.filter((p) => nowTs - p.updatedAt <= 45_000);
+    const map = new Map<string, { userLabel: string; avatarUrl: string | null }>();
+    for (const entry of fresh) {
+      const userKey = String(entry.userKey || "").trim().toLowerCase();
+      if (!userKey) continue;
+      const prev = map.get(userKey);
+      const nextAvatar = entry.avatarUrl?.trim() || prev?.avatarUrl || null;
+      map.set(userKey, {
+        userLabel: peerPresenceVisibleName(entry.userLabel, userKey),
+        avatarUrl: nextAvatar,
+      });
+    }
+    return Array.from(map.entries()).map(([userKey, v]) => ({
+      userKey,
+      userLabel: v.userLabel,
+      avatarUrl: v.avatarUrl,
+    }));
+  }, [presenceList]);
 
   const hasAnyRowData = (row: Record<string, unknown>) => {
     const keys = [
@@ -223,6 +290,52 @@ export function LiveMonitor({ tasks, onDeleteTask }: LiveMonitorProps) {
                 {totals.dispatched}
               </p>
             </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-4 shadow-sm mx-2 md:mx-0">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-[10px] font-black text-[#16263F] dark:text-slate-100 uppercase tracking-widest">
+                Conectados en vivo
+              </p>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                {connectedUsers.length}
+              </span>
+            </div>
+            {connectedUsers.length === 0 ? (
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                No hay usuarios conectados ahora.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {connectedUsers.map((u) => (
+                  <div
+                    key={u.userKey}
+                    className="flex items-center gap-2 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 px-2.5 py-2"
+                  >
+                    <div className="h-8 w-8 rounded-full bg-[#16263F] text-white flex items-center justify-center text-[10px] font-black">
+                      {u.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={u.avatarUrl}
+                          alt={`Avatar de ${u.userLabel}`}
+                          className="h-full w-full rounded-full object-cover object-center"
+                        />
+                      ) : (
+                        avatarInitialsFromName(null, u.userLabel, null)
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-black text-[#16263F] dark:text-slate-100">
+                        {u.userLabel}
+                      </p>
+                      <p className="text-[10px] font-semibold text-emerald-700">
+                        En vivo
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-600 p-3 md:p-4 shadow-sm mx-2 md:mx-0">

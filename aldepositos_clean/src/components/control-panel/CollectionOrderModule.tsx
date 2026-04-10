@@ -27,17 +27,13 @@ import {
   mergeCatalogIntoImportedRows,
   normalizePartNumber,
 } from "@/lib/referenceCatalog";
-import { normalizeCollectionOrderLineFromImport } from "@/lib/collectionOrderUnitNormalization";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
 } from "@/lib/exportInventarioCsv";
 import { downloadMagayaReferenciasCsv } from "@/lib/exportMagayaCsv";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
-import { CollectionOrderGeminiPanel } from "@/components/control-panel/CollectionOrderGeminiPanel";
-import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
-import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   applyPesoTotalToLine,
@@ -165,15 +161,12 @@ type CollectionOrderModuleProps = {
   tasks: Task[];
   onUpdateTask: (task: Task) => void | Promise<void>;
   userEmail: string | null;
-  /** Nombre visible en el panel para el asistente IA (opcional). */
-  userDisplayName?: string | null;
 };
 
 export function CollectionOrderModule({
   tasks,
   onUpdateTask,
   userEmail,
-  userDisplayName = null,
 }: CollectionOrderModuleProps) {
   const { orders, setOrders, reloadOrders, ordersLoading } =
     useSupabaseCollectionOrders({ enabled: !!userEmail });
@@ -184,7 +177,6 @@ export function CollectionOrderModule({
   const [csvOpen, setCsvOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
-  const [geminiOpen, setGeminiOpen] = useState(false);
   const [unresolvedRefByRow, setUnresolvedRefByRow] = useState<
     Record<string, boolean>
   >({});
@@ -766,11 +758,11 @@ export function CollectionOrderModule({
           </button>
           <button
             type="button"
-            onClick={() => setGeminiOpen(true)}
-            title={`${AI_ASSISTANT_DISPLAY_NAME}: documentos y extracción de referencias`}
-            className="flex items-center gap-2 rounded-xl border-2 border-violet-300 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-2 text-xs font-black tracking-tight text-violet-900 shadow-sm hover:brightness-95 dark:border-violet-600/50 dark:from-violet-950/40 dark:to-indigo-950/30 dark:text-violet-100"
+            disabled
+            title="IA en mantenimiento"
+            className="flex cursor-not-allowed items-center gap-2 rounded-xl border-2 border-violet-200 bg-violet-50/70 px-4 py-2 text-xs font-black tracking-tight text-violet-500 opacity-80 dark:border-violet-800/50 dark:bg-violet-950/25 dark:text-violet-300"
           >
-            <Sparkles className="h-4 w-4 shrink-0" aria-hidden /> {AI_ASSISTANT_DISPLAY_NAME}
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden /> IA en mantenimiento
           </button>
           <button
             type="button"
@@ -1246,26 +1238,6 @@ export function CollectionOrderModule({
         onConfirm={(taskId, merge) => void confirmTransfer(taskId, merge)}
       />
 
-      <CollectionOrderGeminiPanel
-        open={geminiOpen}
-        onClose={() => setGeminiOpen(false)}
-        orderNumber={String(e.numero ?? "").trim()}
-        viewerDisplayName={userDisplayName}
-        existingReferencias={e.lines
-          .map((r) => String(r.referencia ?? "").trim())
-          .filter(Boolean)
-          .slice(0, 80)}
-        onApplyLines={(lines: CollectionGeminiLine[]) => {
-          setEditing((prev) => {
-            if (!prev) return prev;
-            const additions: CollectionOrderLine[] = lines.map((row) => ({
-              id: generateId(),
-              ...normalizeCollectionOrderLineFromImport(row),
-            }));
-            return { ...prev, lines: [...prev.lines, ...additions] };
-          });
-        }}
-      />
     </>
   );
 }

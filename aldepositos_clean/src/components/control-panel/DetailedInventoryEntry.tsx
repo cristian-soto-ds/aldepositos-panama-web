@@ -337,6 +337,7 @@ export function DetailedInventoryEntry({
             },
           ];
 
+    const serverHasCapture = detailedRowsHaveAnyCapture(taskRows);
     let rowsToUse = taskRows;
     if (typeof window !== "undefined") {
       const rawDraft = window.localStorage.getItem(detailedDraftKey(task.id));
@@ -344,7 +345,12 @@ export function DetailedInventoryEntry({
         try {
           const parsed = JSON.parse(rawDraft) as DetailedDraft;
           if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
-            rowsToUse = parsed.rows;
+            const draftHasCapture = detailedRowsHaveAnyCapture(parsed.rows);
+            // Si el servidor ya tiene líneas (p. ej. enviadas desde orden de recolección),
+            // no dejar que un borrador local vacío/antiguo las pise.
+            if (!serverHasCapture && draftHasCapture) {
+              rowsToUse = parsed.rows;
+            }
           }
         } catch {
           // ignore invalid draft

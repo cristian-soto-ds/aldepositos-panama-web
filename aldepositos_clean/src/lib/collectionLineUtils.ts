@@ -68,28 +68,45 @@ export function lineHasData(line: CollectionOrderLine): boolean {
 /**
  * Convierte líneas de recolección a filas `measureData` para RA tipo detallado.
  */
+function cubicajeTotalM3FromLine(line: CollectionOrderLine): string {
+  const l = parseN(line.l);
+  const w = parseN(line.w);
+  const h = parseN(line.h);
+  const b = parseIntN(line.bultos);
+  if (l <= 0 || w <= 0 || h <= 0 || b <= 0) return "";
+  const tot = ((l * w * h) / 1_000_000) * b;
+  return tot > 0 ? tot.toFixed(4) : "";
+}
+
 export function collectionLinesToDetailedMeasureData(
   lines: CollectionOrderLine[],
 ): Record<string, unknown>[] {
-  return lines.filter(lineHasData).map((row) => ({
-    id: row.id,
-    referencia: String(row.referencia ?? "").trim(),
-    descripcion: String(row.descripcion ?? "").trim(),
-    bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
-    unidadesPorBulto:
-      row.unidadesPorBulto === "" || row.unidadesPorBulto === undefined
-        ? ""
-        : row.unidadesPorBulto,
-    pesoPorBulto:
-      row.pesoPorBulto === "" || row.pesoPorBulto === undefined ? "" : row.pesoPorBulto,
-    l: row.l ?? "",
-    w: row.w ?? "",
-    h: row.h ?? "",
-    volumenM3: row.volumenM3 ?? "",
-    unidad: row.unidad ?? "",
-    reempaque: false,
-    bultoContenedor: "",
-    referenciasContenedor: "",
-    referenciaContenedora: "",
-  }));
+  return lines.filter(lineHasData).map((row) => {
+    const hasVol =
+      row.volumenM3 !== undefined &&
+      row.volumenM3 !== "" &&
+      String(row.volumenM3).trim() !== "";
+    const volumenM3 = hasVol ? row.volumenM3 : cubicajeTotalM3FromLine(row);
+    return {
+      id: row.id,
+      referencia: String(row.referencia ?? "").trim(),
+      descripcion: String(row.descripcion ?? "").trim(),
+      bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
+      unidadesPorBulto:
+        row.unidadesPorBulto === "" || row.unidadesPorBulto === undefined
+          ? ""
+          : row.unidadesPorBulto,
+      pesoPorBulto:
+        row.pesoPorBulto === "" || row.pesoPorBulto === undefined ? "" : row.pesoPorBulto,
+      l: row.l ?? "",
+      w: row.w ?? "",
+      h: row.h ?? "",
+      volumenM3: volumenM3 ?? "",
+      unidad: row.unidad ?? "",
+      reempaque: false,
+      bultoContenedor: "",
+      referenciasContenedor: "",
+      referenciaContenedora: "",
+    };
+  });
 }

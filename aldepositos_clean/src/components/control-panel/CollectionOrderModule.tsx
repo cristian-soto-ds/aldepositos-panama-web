@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Download,
@@ -9,6 +9,7 @@ import {
   Plus,
   Save,
   Send,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import type { Task } from "@/lib/types/task";
@@ -26,12 +27,17 @@ import {
   mergeCatalogIntoImportedRows,
   normalizePartNumber,
 } from "@/lib/referenceCatalog";
+import { normalizeCollectionOrderLineFromImport } from "@/lib/collectionOrderUnitNormalization";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
 } from "@/lib/exportInventarioCsv";
+import { downloadMagayaReferenciasCsv } from "@/lib/exportMagayaCsv";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
+import { CollectionOrderGeminiPanel } from "@/components/control-panel/CollectionOrderGeminiPanel";
+import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
+import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   applyPesoTotalToLine,
@@ -63,6 +69,31 @@ function formatWeight(value: string | number | undefined): string {
   const n = parseFloat(String(value).replace(",", "."));
   if (!Number.isFinite(n)) return "";
   return n.toFixed(2);
+}
+
+function mergePendingTotalsIntoLines(
+  lines: CollectionOrderLine[],
+  unitsMode: "per_bundle" | "total",
+  weightMode: "per_bundle" | "total",
+  pendingUnd: Record<string, string>,
+  pendingPeso: Record<string, string>,
+): CollectionOrderLine[] {
+  return lines.map((row) => {
+    let r = row;
+    if (unitsMode === "total") {
+      const raw = pendingUnd[row.id];
+      if (raw !== undefined && String(raw).trim() !== "") {
+        r = applyUnidadesTotalesToLine(r, sanitizeIntegerInput(raw));
+      }
+    }
+    if (weightMode === "total") {
+      const raw = pendingPeso[row.id];
+      if (raw !== undefined && String(raw).trim() !== "") {
+        r = applyPesoTotalToLine(r, sanitizeDecimalInput(raw, 2));
+      }
+    }
+    return r;
+  });
 }
 
 const emptyLine = (): CollectionOrderLine => ({
@@ -102,16 +133,47 @@ function parseOrderNumber(n: string | undefined): number {
   return Number.isFinite(val) ? val : 0;
 }
 
+function normalizeRaKey(ra: string | undefined): string {
+  return String(ra ?? "").trim();
+}
+
+/**
+ * Un RA solo puede enlazarse a una orden de recolección (salvo la misma orden que ya lo usó).
+ */
+function taskIsBlockedForCollectionOrder(
+  task: Task,
+  currentCollectionOrderId: string,
+  allOrders: CollectionOrder[],
+): boolean {
+  const ra = normalizeRaKey(task.ra);
+  if (!ra) return true;
+
+  const claimedByOtherOrder = allOrders.some(
+    (o) =>
+      o.id !== currentCollectionOrderId &&
+      (o.linkedRaNumbers ?? []).some((x) => normalizeRaKey(x) === ra),
+  );
+  if (claimedByOtherOrder) return true;
+
+  const lock = task.linkedCollectionOrderId;
+  if (lock && lock !== currentCollectionOrderId) return true;
+
+  return false;
+}
+
 type CollectionOrderModuleProps = {
   tasks: Task[];
   onUpdateTask: (task: Task) => void | Promise<void>;
   userEmail: string | null;
+  /** Nombre visible en el panel para el asistente IA (opcional). */
+  userDisplayName?: string | null;
 };
 
 export function CollectionOrderModule({
   tasks,
   onUpdateTask,
   userEmail,
+  userDisplayName = null,
 }: CollectionOrderModuleProps) {
   const { orders, setOrders, reloadOrders, ordersLoading } =
     useSupabaseCollectionOrders({ enabled: !!userEmail });
@@ -122,11 +184,15 @@ export function CollectionOrderModule({
   const [csvOpen, setCsvOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [geminiOpen, setGeminiOpen] = useState(false);
   const [unresolvedRefByRow, setUnresolvedRefByRow] = useState<
     Record<string, boolean>
   >({});
   const [unitsMode, setUnitsMode] = useState<"per_bundle" | "total">("per_bundle");
   const [weightMode, setWeightMode] = useState<"per_bundle" | "total">("per_bundle");
+  /** Totales capturados en modo "total" antes de blur — se fusionan al guardar / pasar al RA */
+  const [pendingUndTot, setPendingUndTot] = useState<Record<string, string>>({});
+  const [pendingPesoTot, setPendingPesoTot] = useState<Record<string, string>>({});
 
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -139,9 +205,19 @@ export function CollectionOrderModule({
     };
   }, []);
 
+  useEffect(() => {
+    if (unitsMode === "per_bundle") setPendingUndTot({});
+  }, [unitsMode]);
+
+  useEffect(() => {
+    if (weightMode === "per_bundle") setPendingPesoTot({});
+  }, [weightMode]);
+
   const openNew = () => {
     setEditing(newDraftOrder());
     setUnresolvedRefByRow({});
+    setPendingUndTot({});
+    setPendingPesoTot({});
   };
 
   const openEdit = (o: CollectionOrder) => {
@@ -149,11 +225,15 @@ export function CollectionOrderModule({
       JSON.parse(JSON.stringify(o)) as CollectionOrder,
     );
     setUnresolvedRefByRow({});
+    setPendingUndTot({});
+    setPendingPesoTot({});
   };
 
   const backToList = () => {
     setEditing(null);
     setUnresolvedRefByRow({});
+    setPendingUndTot({});
+    setPendingPesoTot({});
     void reloadOrders();
   };
 
@@ -229,6 +309,18 @@ export function CollectionOrderModule({
       delete next[lineId];
       return next;
     });
+    setPendingUndTot((prev) => {
+      if (!(lineId in prev)) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
+    setPendingPesoTot((prev) => {
+      if (!(lineId in prev)) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
     setEditing((prev) => {
       if (!prev) return prev;
       const next = prev.lines.filter((r) => r.id !== lineId);
@@ -241,6 +333,15 @@ export function CollectionOrderModule({
 
   const saveOrder = async () => {
     if (!editing) return;
+    const mergedLines = mergePendingTotalsIntoLines(
+      editing.lines,
+      unitsMode,
+      weightMode,
+      pendingUndTot,
+      pendingPesoTot,
+    );
+    setPendingUndTot({});
+    setPendingPesoTot({});
     const maxExisting = Math.max(
       0,
       ...orders.map((o) => parseOrderNumber(o.numero)),
@@ -250,6 +351,7 @@ export function CollectionOrderModule({
     const numero = numeroRaw || suggested;
     const payload: CollectionOrder = {
       ...editing,
+      lines: mergedLines,
       numero,
       updatedAt: new Date().toISOString(),
     };
@@ -278,7 +380,12 @@ export function CollectionOrderModule({
 
   const deleteOrder = async (o: CollectionOrder) => {
      
-    if (!confirm(`¿Eliminar la orden de recolección (${o.cliente || "sin cliente"})?`)) return;
+    if (
+      !confirm(
+        `¿Eliminar la orden de recolección #${String(o.numero ?? "").trim() || o.id.slice(0, 8)}?`,
+      )
+    )
+      return;
     try {
       await deleteCollectionOrderById(o.id);
       setOrders((prev) => prev.filter((x) => x.id !== o.id));
@@ -371,12 +478,60 @@ export function CollectionOrderModule({
     }
   };
 
-  const transferLinesCount =
-    editing?.lines.filter(lineHasData).length ?? 0;
+  const mergedEditorLinesPreview = useMemo((): CollectionOrderLine[] => {
+    if (!editing) return [];
+    return mergePendingTotalsIntoLines(
+      editing.lines,
+      unitsMode,
+      weightMode,
+      pendingUndTot,
+      pendingPesoTot,
+    );
+  }, [editing, unitsMode, weightMode, pendingUndTot, pendingPesoTot]);
+
+  /** Mismas reglas que la tabla: bultos, peso (kg) y CBM total por línea. */
+  const editorAggregatedTotals = useMemo(() => {
+    let totalBultos = 0;
+    let totalPesoKg = 0;
+    let totalCbm = 0;
+    for (const row of mergedEditorLinesPreview) {
+      const bultos = parseFloat(String(row.bultos ?? 0).replace(",", ".")) || 0;
+      totalBultos += Math.max(0, Math.round(bultos));
+      totalPesoKg += pesoTotalFromLine(row);
+      const l = parseFloat(String(row.l ?? 0).replace(",", ".")) || 0;
+      const w = parseFloat(String(row.w ?? 0).replace(",", ".")) || 0;
+      const h = parseFloat(String(row.h ?? 0).replace(",", ".")) || 0;
+      const cbmBulto = (l * w * h) / 1_000_000;
+      totalCbm += cbmBulto * bultos;
+    }
+    return { totalBultos, totalPesoKg, totalCbm };
+  }, [mergedEditorLinesPreview]);
+
+  const transferLinesCount = useMemo(
+    () => mergedEditorLinesPreview.filter(lineHasData).length,
+    [mergedEditorLinesPreview],
+  );
+
+  const tasksEligibleForCollectionTransfer = useMemo(() => {
+    if (!editing) return [];
+    return tasks.filter(
+      (t) => !taskIsBlockedForCollectionOrder(t, editing.id, orders),
+    );
+  }, [tasks, editing, orders]);
+
+  const transferTargetsExcluded =
+    tasks.length > 0 && tasksEligibleForCollectionTransfer.length === 0;
 
   const confirmTransfer = async (taskId: string, merge: "append" | "replace") => {
     if (!editing) return;
-    const lines = editing.lines.filter(lineHasData);
+    const mergedLines = mergePendingTotalsIntoLines(
+      editing.lines,
+      unitsMode,
+      weightMode,
+      pendingUndTot,
+      pendingPesoTot,
+    );
+    const lines = mergedLines.filter(lineHasData);
     if (lines.length === 0) {
        
       alert("No hay líneas con datos para enviar.");
@@ -388,11 +543,22 @@ export function CollectionOrderModule({
       alert("RA no encontrado.");
       return;
     }
+    if (taskIsBlockedForCollectionOrder(task, editing.id, orders)) {
+       
+      alert(
+        "Este RA ya está vinculado a otra orden de recolección. Cada RA solo puede recibir una orden distinta.",
+      );
+      return;
+    }
+    setPendingUndTot({});
+    setPendingPesoTot({});
+    const orderWithMergedLines: CollectionOrder = { ...editing, lines: mergedLines };
+    setEditing(orderWithMergedLines);
     setTransferBusy(true);
     try {
-      const existsInDb = orders.some((o) => o.id === editing.id);
+      const existsInDb = orders.some((o) => o.id === orderWithMergedLines.id);
       const baseOrder: CollectionOrder = {
-        ...editing,
+        ...orderWithMergedLines,
         updatedAt: new Date().toISOString(),
       };
       if (!existsInDb) {
@@ -413,11 +579,18 @@ export function CollectionOrderModule({
       const prevData = (task.measureData || []) as Record<string, unknown>[];
       const nextMeasure: unknown[] =
         merge === "replace" ? adapted : [...prevData, ...adapted];
+      const sanitizedMeasure = JSON.parse(JSON.stringify(nextMeasure)) as unknown[];
       const updatedTask: Task = {
         ...task,
-        measureData: nextMeasure,
+        measureData: sanitizedMeasure,
+        linkedCollectionOrderId: baseOrder.id,
       };
-      await Promise.resolve(onUpdateTask(updatedTask));
+      await onUpdateTask(updatedTask);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(`detailed_inventory_draft_v1_${task.id}`);
+        window.localStorage.removeItem(`quick_inventory_draft_v1_${task.id}`);
+        window.localStorage.removeItem(`airway_inventory_draft_v1_${task.id}`);
+      }
       const ra = String(task.ra ?? "").trim();
       const linked = Array.from(
         new Set([...(baseOrder.linkedRaNumbers || []), ra].filter(Boolean)),
@@ -499,10 +672,7 @@ export function CollectionOrderModule({
                 <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
-                    #${String(o.numero ?? "S/N")} · {o.cliente || "Sin cliente"} ·{" "}
-                    <span className="font-bold text-slate-600 dark:text-slate-400">
-                      {o.proveedor || "Sin proveedor"}
-                    </span>
+                    Orden #{String(o.numero ?? "S/N")}
                   </p>
                   <p className="mt-1 text-xs font-medium text-slate-500">
                     {o.lines.filter(lineHasData).length} línea(s) ·{" "}
@@ -546,9 +716,6 @@ export function CollectionOrderModule({
 
   /* ——— Editor ——— */
   const e = editing;
-  const totalLines = e.lines.length;
-  const linesWithData = e.lines.filter(lineHasData).length;
-  const linkedRaCount = e.linkedRaNumbers?.length ?? 0;
   const maxExistingNumber = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
   const suggestedNumber = String(maxExistingNumber + 1);
 
@@ -573,11 +740,37 @@ export function CollectionOrderModule({
           </button>
           <button
             type="button"
+            onClick={() => {
+              const rows = e.lines as unknown as Record<string, unknown>[];
+              if (countInventarioCsvRows(rows) === 0) {
+                alert("No hay líneas con datos para exportar.");
+                return;
+              }
+              downloadMagayaReferenciasCsv({
+                measureRows: rows,
+                filenameBase: `magaya-recoleccion-${e.id.slice(0, 8)}`,
+              });
+            }}
+            title="CSV para Magaya: 17 columnas (Numero de parte, DESCRIPCION, … CUBICAJE)"
+            className="flex items-center gap-2 rounded-xl border-2 border-amber-400/90 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:bg-amber-100 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-100"
+          >
+            <Download className="h-4 w-4" /> CSV Magaya
+          </button>
+          <button
+            type="button"
             disabled={saveBusy}
             onClick={() => void saveOrder()}
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1f3467] to-[#0f172a] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:brightness-110 disabled:opacity-50"
           >
             <Save className="h-4 w-4" /> Guardar borrador
+          </button>
+          <button
+            type="button"
+            onClick={() => setGeminiOpen(true)}
+            title={`${AI_ASSISTANT_DISPLAY_NAME}: documentos y extracción de referencias`}
+            className="flex items-center gap-2 rounded-xl border-2 border-violet-300 bg-gradient-to-r from-violet-50 to-indigo-50 px-4 py-2 text-xs font-black tracking-tight text-violet-900 shadow-sm hover:brightness-95 dark:border-violet-600/50 dark:from-violet-950/40 dark:to-indigo-950/30 dark:text-violet-100"
+          >
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden /> {AI_ASSISTANT_DISPLAY_NAME}
           </button>
           <button
             type="button"
@@ -590,81 +783,52 @@ export function CollectionOrderModule({
         </div>
 
         <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
-          Paso 1 · Datos del encabezado · Paso 2 · Líneas · Paso 3 · Pasar al RA
+          Paso 1 · Número de orden · Paso 2 · Líneas · Paso 3 · Pasar al RA
         </p>
 
         <div className="mb-3 grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-white to-indigo-50/60 px-3 py-2 shadow-sm dark:border-indigo-900/50 dark:from-slate-900 dark:to-indigo-950/20">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Líneas totales
+              Cantidad de bultos
             </p>
             <p className="mt-1 text-lg font-black tabular-nums text-[#16263F] dark:text-slate-100">
-              {totalLines}
+              {editorAggregatedTotals.totalBultos.toLocaleString("es")}
             </p>
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
             <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-              Líneas con datos
+              Peso total (kg)
             </p>
             <p className="mt-1 text-lg font-black tabular-nums text-emerald-800 dark:text-emerald-200">
-              {linesWithData}
+              {editorAggregatedTotals.totalPesoKg.toLocaleString("es", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </p>
           </div>
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 shadow-sm dark:border-indigo-900/40 dark:bg-indigo-950/20">
-            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">
-              RA vinculados
+          <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-3 py-2 shadow-sm dark:border-sky-900/40 dark:bg-sky-950/25">
+            <p className="text-[10px] font-black uppercase tracking-widest text-sky-800 dark:text-sky-200">
+              Cubicaje total (m³)
             </p>
-            <p className="mt-1 text-lg font-black tabular-nums text-indigo-800 dark:text-indigo-200">
-              {linkedRaCount}
+            <p className="mt-1 text-lg font-black tabular-nums text-sky-900 dark:text-sky-100">
+              {editorAggregatedTotals.totalCbm.toLocaleString("es", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </p>
           </div>
         </div>
 
-        <div className="mb-3 grid shrink-0 gap-3 rounded-2xl border-2 border-indigo-200 bg-white p-4 shadow-md dark:border-indigo-900/45 dark:bg-slate-900 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
-              Número de orden
-            </label>
-            <input
-              value={e.numero ?? ""}
-              onChange={(ev) => updateEditing({ numero: ev.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-              placeholder={`Ej. ${suggestedNumber}`}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
-              Cliente / consignatario
-            </label>
-            <input
-              value={e.cliente}
-              onChange={(ev) => updateEditing({ cliente: ev.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-              placeholder="Nombre del cliente"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
-              Proveedor
-            </label>
-            <input
-              value={e.proveedor}
-              onChange={(ev) => updateEditing({ proveedor: ev.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-              placeholder="Proveedor o naviera"
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
-              Notas (opcional)
-            </label>
-            <input
-              value={e.notes ?? ""}
-              onChange={(ev) => updateEditing({ notes: ev.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
-              placeholder="Instrucciones para quien recolecta…"
-            />
-          </div>
+        <div className="mb-3 shrink-0 rounded-2xl border-2 border-indigo-200 bg-white p-4 shadow-md dark:border-indigo-900/45 dark:bg-slate-900 max-w-md">
+          <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
+            Número de orden
+          </label>
+          <input
+            value={e.numero ?? ""}
+            onChange={(ev) => updateEditing({ numero: ev.target.value })}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+            placeholder={`Ej. ${suggestedNumber}`}
+          />
         </div>
 
         <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -847,8 +1011,22 @@ export function CollectionOrderModule({
                           type="number"
                           disabled={unitsMode === "per_bundle"}
                           title="Si llenas unidades totales, al salir recalcula und/bulto con los bultos actuales"
-                          defaultValue={totUnd > 0 ? String(Math.round(totUnd)) : ""}
-                          key={`undtot-${row.id}-${row.bultos}-${row.unidadesPorBulto}-${unitsMode}`}
+                          value={
+                            unitsMode === "total"
+                              ? pendingUndTot[row.id] !== undefined
+                                ? pendingUndTot[row.id]!
+                                : totUnd > 0
+                                  ? String(Math.round(totUnd))
+                                  : ""
+                              : ""
+                          }
+                          onChange={(ev) => {
+                            if (unitsMode !== "total") return;
+                            setPendingUndTot((p) => ({
+                              ...p,
+                              [row.id]: sanitizeIntegerInput(ev.target.value),
+                            }));
+                          }}
                           onBlur={(ev) => {
                             if (unitsMode !== "total") return;
                             const next = applyUnidadesTotalesToLine(
@@ -865,6 +1043,11 @@ export function CollectionOrderModule({
                                   }
                                 : prev,
                             );
+                            setPendingUndTot((p) => {
+                              const n = { ...p };
+                              delete n[row.id];
+                              return n;
+                            });
                           }}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs font-bold transition ${
                             unitsMode === "total"
@@ -904,8 +1087,24 @@ export function CollectionOrderModule({
                           type="number"
                           title="Al salir del campo recalcula peso por bulto con los bultos actuales"
                           disabled={weightMode === "per_bundle"}
-                          defaultValue={pesoTot > 0 ? pesoTot.toFixed(2) : ""}
-                          key={`pesotot-${row.id}-${row.bultos}-${row.pesoPorBulto}-${weightMode}`}
+                          value={
+                            weightMode === "total"
+                              ? pendingPesoTot[row.id] !== undefined
+                                ? pendingPesoTot[row.id]!
+                                : pesoTot > 0
+                                  ? pesoTot.toFixed(2)
+                                  : ""
+                              : pesoTot > 0
+                                ? pesoTot.toFixed(2)
+                                : ""
+                          }
+                          onChange={(ev) => {
+                            if (weightMode !== "total") return;
+                            setPendingPesoTot((p) => ({
+                              ...p,
+                              [row.id]: sanitizeDecimalInput(ev.target.value, 2),
+                            }));
+                          }}
                           onBlur={(ev) => {
                             if (weightMode !== "total") return;
                             const next = applyPesoTotalToLine(
@@ -922,6 +1121,11 @@ export function CollectionOrderModule({
                                   }
                                 : prev,
                             );
+                            setPendingPesoTot((p) => {
+                              const n = { ...p };
+                              delete n[row.id];
+                              return n;
+                            });
                           }}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs font-bold transition ${
                             weightMode === "total"
@@ -1011,7 +1215,7 @@ export function CollectionOrderModule({
 
       <InventoryCsvExportModal
         open={csvOpen}
-        raLabel={`Recolección · ${e.cliente || e.proveedor || e.id.slice(0, 8)}`}
+        raLabel={`Recolección · orden ${String(e.numero ?? "").trim() || e.id.slice(0, 8)}`}
         defaultNumero={String(e.numero ?? "").trim() || suggestedNumber}
         onCancel={() => setCsvOpen(false)}
         onConfirm={(numeroDocumento) => {
@@ -1034,11 +1238,33 @@ export function CollectionOrderModule({
 
       <TransferCollectionToRaModal
         open={transferOpen}
-        tasks={tasks}
+        tasks={tasksEligibleForCollectionTransfer}
         lineCount={transferLinesCount}
         busy={transferBusy}
+        noEligibleTargets={transferTargetsExcluded}
         onCancel={() => setTransferOpen(false)}
         onConfirm={(taskId, merge) => void confirmTransfer(taskId, merge)}
+      />
+
+      <CollectionOrderGeminiPanel
+        open={geminiOpen}
+        onClose={() => setGeminiOpen(false)}
+        orderNumber={String(e.numero ?? "").trim()}
+        viewerDisplayName={userDisplayName}
+        existingReferencias={e.lines
+          .map((r) => String(r.referencia ?? "").trim())
+          .filter(Boolean)
+          .slice(0, 80)}
+        onApplyLines={(lines: CollectionGeminiLine[]) => {
+          setEditing((prev) => {
+            if (!prev) return prev;
+            const additions: CollectionOrderLine[] = lines.map((row) => ({
+              id: generateId(),
+              ...normalizeCollectionOrderLineFromImport(row),
+            }));
+            return { ...prev, lines: [...prev.lines, ...additions] };
+          });
+        }}
       />
     </>
   );

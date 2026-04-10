@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -63,6 +63,10 @@ type MeasureRow = {
   referencia?: string;
   descripcion?: string;
   bultos?: string | number;
+  /** Und/bulto (p. ej. desde orden de recolección → RA rápido) */
+  unidadesPorBulto?: string | number;
+  /** Peso por bulto en kg si viene de captura detallada */
+  pesoPorBulto?: string | number;
   l?: string | number;
   w?: string | number;
   h?: string | number;
@@ -116,7 +120,10 @@ function hasQuickRequiredData(
 function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
   return rows.some((row) => {
     const referencia = String(row.referencia ?? "").trim();
+    const descripcion = String(row.descripcion ?? "").trim();
     const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+    const upb = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
+    const pesoDet = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
@@ -129,7 +136,10 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
     const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     return (
       referencia.length > 0 ||
+      descripcion.length > 0 ||
       bultos > 0 ||
+      upb > 0 ||
+      pesoDet > 0 ||
       l > 0 ||
       w > 0 ||
       h > 0 ||
@@ -311,7 +321,10 @@ export function QuickInventoryEntry({
             {
               id: generateId(),
               referencia: "",
+              descripcion: "",
               bultos: "",
+              unidadesPorBulto: "",
+              pesoPorBulto: "",
               l: "",
               w: "",
               h: "",
@@ -325,6 +338,7 @@ export function QuickInventoryEntry({
           ];
     const taskWeightMode = ((task.weightMode as WeightMode) || "by_reference") as WeightMode;
 
+    const serverHasCapture = quickRowsHaveAnyCapture(taskRows);
     let rowsToUse = taskRows;
     let modeToUse = taskWeightMode;
     let quickModeToUse: "normal" | "reempaque" = "normal";
@@ -336,16 +350,25 @@ export function QuickInventoryEntry({
         try {
           const parsed = JSON.parse(rawDraft) as QuickDraft;
           if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
-            rowsToUse = parsed.rows;
-            modeToUse = parsed.weightMode || taskWeightMode;
-            if (parsed.quickMode === "reempaque" || parsed.quickMode === "normal") {
-              quickModeToUse = parsed.quickMode;
+            const draftHasCapture = quickRowsHaveAnyCapture(parsed.rows);
+            if (!serverHasCapture && draftHasCapture) {
+              rowsToUse = parsed.rows;
+              modeToUse = parsed.weightMode || taskWeightMode;
+              if (parsed.quickMode === "reempaque" || parsed.quickMode === "normal") {
+                quickModeToUse = parsed.quickMode;
+              }
             }
           }
         } catch {
           // ignore invalid draft
         }
       }
+    }
+    if (
+      quickModeToUse === "normal" &&
+      rowsToUse.some((r) => r.reempaque === true)
+    ) {
+      quickModeToUse = "reempaque";
     }
 
     setMeasureRows(rowsToUse);
@@ -377,7 +400,10 @@ export function QuickInventoryEntry({
       {
         id: generateId(),
         referencia: "",
+        descripcion: "",
         bultos: "",
+        unidadesPorBulto: "",
+        pesoPorBulto: "",
         l: "",
         w: "",
         h: "",
@@ -738,6 +764,26 @@ export function QuickInventoryEntry({
     setAutosaveState("saved");
     clearTask();
   };
+
+  const showDetailedLineExtras = useMemo(
+    () =>
+      measureRows.some(
+        (row) =>
+          String(row.descripcion ?? "").trim() !== "" ||
+          String(row.unidadesPorBulto ?? "").trim() !== "" ||
+          String(row.pesoPorBulto ?? "").trim() !== "",
+      ),
+    [measureRows],
+  );
+
+  const tableMinWidthClass =
+    quickMode === "reempaque"
+      ? showDetailedLineExtras
+        ? "min-w-[1460px]"
+        : "min-w-[1180px]"
+      : showDetailedLineExtras
+        ? "min-w-[1260px]"
+        : "min-w-[980px]";
 
   // Lista de órdenes (sin task seleccionado) — encabezado fijo, solo la lista con barra de desplazamiento
   if (!selectedTask) {
@@ -1364,15 +1410,21 @@ export function QuickInventoryEntry({
           <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-[inset_0_0_0_1px_rgb(241,245,249)] dark:shadow-[inset_0_0_0_1px_rgb(30,41,59)]">
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
             <table
-              className={`w-full border-collapse text-left text-sm md:min-w-full ${
-                quickMode === "reempaque" ? "min-w-[1180px]" : "min-w-[980px]"
-              }`}
+              className={`w-full border-collapse text-left text-sm md:min-w-full ${tableMinWidthClass}`}
             >
               <thead className="sticky top-0 z-20 border-b border-slate-200 dark:border-slate-600 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                 <tr>
                   <th className="w-10 px-2 py-2 text-center">#</th>
                   {showReferenceColumn && (
                     <th className="w-32 px-2 py-2 text-left">REFERENCIA</th>
+                  )}
+                  {showReferenceColumn && showDetailedLineExtras && (
+                    <th className="min-w-[120px] max-w-[200px] px-2 py-2 text-left">
+                      Descripción
+                    </th>
+                  )}
+                  {showReferenceColumn && showDetailedLineExtras && (
+                    <th className="w-24 px-2 py-2 text-center">Und/bulto</th>
                   )}
                   <th className="w-28 px-2 py-2 text-center">BULTOS</th>
                   {quickMode === "reempaque" && (
@@ -1438,6 +1490,38 @@ export function QuickInventoryEntry({
                             value={row.referencia || ""}
                             className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1.5 text-left text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-[#16263F] focus:ring-1 focus:ring-[#16263F]/20"
                             placeholder="Referencia"
+                          />
+                        </td>
+                      )}
+
+                      {showReferenceColumn && showDetailedLineExtras && (
+                        <td className="px-2 py-1 align-top">
+                          <input
+                            type="text"
+                            value={row.descripcion ?? ""}
+                            onChange={(e) =>
+                              updateRowValue(row.id, "descripcion", e.target.value)
+                            }
+                            className="w-full min-w-[100px] rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1.5 text-left text-xs font-semibold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
+                            placeholder="Descripción"
+                          />
+                        </td>
+                      )}
+                      {showReferenceColumn && showDetailedLineExtras && (
+                        <td className="px-2 py-1">
+                          <input
+                            type="number"
+                            value={row.unidadesPorBulto ?? ""}
+                            onChange={(e) =>
+                              updateRowValue(
+                                row.id,
+                                "unidadesPorBulto",
+                                e.target.value.replace(/\D+/g, ""),
+                              )
+                            }
+                            inputMode="numeric"
+                            className="no-spinners w-full rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/25 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-indigo-500"
+                            placeholder="—"
                           />
                         </td>
                       )}

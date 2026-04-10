@@ -34,8 +34,9 @@ export function adaptMeasureDataForModule(
   }
 
   if (toType === "quick" || toType === "airway") {
-    // detailed → quick/airway: mapear pesoPorBulto a weight
+    // detailed → quick/airway: conservar campos extra (und/bulto, desc., etc.) y mapear peso a weight
     return measureData.map((row) => ({
+      ...row,
       id: row.id ?? generateId(),
       referencia: row.referencia ?? "",
       descripcion: row.descripcion ?? "",
@@ -46,6 +47,12 @@ export function adaptMeasureDataForModule(
       weight: row.pesoPorBulto ?? row.weight ?? "",
       volumenM3: row.volumenM3 ?? "",
       unidad: row.unidad ?? "",
+      unidadesPorBulto: row.unidadesPorBulto ?? "",
+      pesoPorBulto: row.pesoPorBulto ?? "",
+      reempaque: row.reempaque ?? false,
+      bultoContenedor: row.bultoContenedor ?? "",
+      referenciasContenedor: row.referenciasContenedor ?? "",
+      referenciaContenedora: row.referenciaContenedora ?? "",
     }));
   }
 

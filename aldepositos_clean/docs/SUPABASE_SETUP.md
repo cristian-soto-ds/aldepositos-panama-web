@@ -9,6 +9,10 @@ En `.env.local` (y en Vercel → Project → Settings → Environment Variables)
 | `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave anónima (pública) |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Solo servidor** (no uses el prefijo `NEXT_PUBLIC_`). Opcional pero recomendada: el panel llama a `/api/me/display-name` para leer `perfiles.nombre_completo` y el avatar aunque RLS no permita `SELECT` al cliente. Obtén la clave en Supabase → Project Settings → API → `service_role`. |
+| `GEMINI_API_KEY` | **Solo servidor** (sin `NEXT_PUBLIC_`). Obligatoria para **Alde.IA** (asistente de IA) en **Orden de recolección**. Crea la clave en [Google AI Studio](https://aistudio.google.com/apikey) y pégala en `.env.local`. |
+| `GEMINI_MODEL` | Opcional. Por defecto la app usa `gemini-flash-latest` (ver `src/lib/geminiConfig.ts`). |
+
+En despliegue (p. ej. Vercel), añade `GEMINI_API_KEY` en **Settings → Environment Variables** y vuelve a desplegar.
 
 ## Crear la tabla
 

@@ -11,6 +11,8 @@ type TransferCollectionToRaModalProps = {
   tasks: Task[];
   lineCount: number;
   busy?: boolean;
+  /** Hay RA en el panel pero ninguno admite otra orden de recolección */
+  noEligibleTargets?: boolean;
   onCancel: () => void;
   onConfirm: (taskId: string, merge: TransferCollectionMergeMode) => void;
 };
@@ -20,6 +22,7 @@ export function TransferCollectionToRaModal({
   tasks,
   lineCount,
   busy = false,
+  noEligibleTargets = false,
   onCancel,
   onConfirm,
 }: TransferCollectionToRaModalProps) {
@@ -111,7 +114,9 @@ export function TransferCollectionToRaModal({
             </label>
             {list.length === 0 ? (
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                No hay órdenes en el panel. Cree un RA desde el panel o ingreso manual.
+                {noEligibleTargets
+                  ? "Todos los RA del panel ya están vinculados a otra orden de recolección. Cada RA solo puede recibir una orden distinta (la misma orden puede volver a enviar al mismo RA)."
+                  : "No hay órdenes en el panel. Cree un RA desde el panel o ingreso manual."}
               </p>
             ) : (
               <select

@@ -18,7 +18,13 @@ const HEADERS = [
   "Peso por Piezas (kg)",
   "Peso (kg)",
   "Volumen (m³)",
+  "UNIDAD",
+  "TIPO DE EMBALAJE",
 ] as const;
+
+/** Valores fijos por fila para integraciones que exigen unidad y tipo de embalaje. */
+const CSV_UNIDAD_FIJA = "PZA";
+const CSV_TIPO_EMBALAJE_FIJO = "CARTON";
 
 function parseNum(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -27,14 +33,14 @@ function parseNum(v: unknown): number {
 }
 
 /** Números para CSV: vacío o inválido → 0 */
-function csvNum(n: number): string {
+export function csvNum(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "0";
   if (Number.isInteger(n)) return String(Math.trunc(n));
   const s = n.toFixed(6).replace(/\.?0+$/, "");
   return s === "" || s === "-0" ? "0" : s;
 }
 
-function escapeCsvCell(raw: string): string {
+export function escapeCsvCell(raw: string): string {
   const s = raw ?? "";
   if (/[",\r\n]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
@@ -42,7 +48,7 @@ function escapeCsvCell(raw: string): string {
   return s;
 }
 
-function rowHasExportableData(row: Record<string, unknown>): boolean {
+export function rowHasExportableData(row: Record<string, unknown>): boolean {
   if (String(row.referencia ?? "").trim()) return true;
   if (String(row.descripcion ?? "").trim()) return true;
   if (String(row.referenciaContenedora ?? "").trim()) return true;
@@ -110,6 +116,8 @@ function buildLineCells(
     csvNum(pesoPorPiezas),
     csvNum(pesoTotal),
     csvNum(vol),
+    CSV_UNIDAD_FIJA,
+    CSV_TIPO_EMBALAJE_FIJO,
   ];
 }
 
@@ -177,7 +185,7 @@ const UNICODE_TO_CP1252: Map<number, number> = (() => {
 })();
 
 /** Codifica texto como Windows-1252 (caracteres fuera de tabla → '?'). */
-function encodeWindows1252(csvText: string): Uint8Array {
+export function encodeCsvWindows1252(csvText: string): Uint8Array {
   const out: number[] = [];
   for (let i = 0; i < csvText.length; ) {
     const cp = csvText.codePointAt(i)!;
@@ -210,7 +218,7 @@ export function downloadInventarioCsv(params: {
     params.measureRows,
     params.variant,
   );
-  const bytes = encodeWindows1252(body);
+  const bytes = encodeCsvWindows1252(body);
   const blob = new Blob([bytes as BlobPart], {
     type: "text/csv;charset=windows-1252",
   });

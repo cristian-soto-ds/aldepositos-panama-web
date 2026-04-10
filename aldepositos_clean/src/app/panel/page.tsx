@@ -566,6 +566,7 @@ export default function PanelPage() {
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
             userEmail={userEmail}
+            userDisplayName={userDisplayName}
           />
         )}
 

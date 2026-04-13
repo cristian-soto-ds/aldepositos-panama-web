@@ -61,6 +61,7 @@ export function lineHasData(line: CollectionOrderLine): boolean {
   if (parseN(line.bultos) > 0) return true;
   if (parseN(line.unidadesPorBulto) > 0) return true;
   if (parseN(line.pesoPorBulto) > 0) return true;
+  if (parseN(line.pesoPiezaKg) > 0) return true;
   if (parseN(line.l) || parseN(line.w) || parseN(line.h)) return true;
   return false;
 }
@@ -98,11 +99,20 @@ export function collectionLinesToDetailedMeasureData(
           : row.unidadesPorBulto,
       pesoPorBulto:
         row.pesoPorBulto === "" || row.pesoPorBulto === undefined ? "" : row.pesoPorBulto,
+      pesoPiezaKg:
+        row.pesoPiezaKg === "" || row.pesoPiezaKg === undefined ? "" : row.pesoPiezaKg,
       l: row.l ?? "",
       w: row.w ?? "",
       h: row.h ?? "",
       volumenM3: volumenM3 ?? "",
       unidad: row.unidad ?? "",
+      magayaModelo: row.magayaModelo ?? "",
+      paisOrigen: row.paisOrigen ?? "",
+      tejido: row.tejido ?? "",
+      talla: row.talla ?? "",
+      forro: row.forro ?? "",
+      genero: row.genero ?? "",
+      composicion: row.composicion ?? "",
       reempaque: false,
       bultoContenedor: "",
       referenciasContenedor: "",

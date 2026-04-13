@@ -60,11 +60,19 @@ export type ImportLineInput = {
   pesoPorBulto?: string;
   unidadesTotales?: string;
   pesoTotalKg?: string;
+  pesoUnaPiezaKg?: string;
   l?: string;
   w?: string;
   h?: string;
   volumenM3?: string;
   unidad?: string;
+  modelo?: string;
+  paisOrigen?: string;
+  tejido?: string;
+  talla?: string;
+  forro?: string;
+  genero?: string;
+  composicion?: string;
 };
 
 /**
@@ -85,6 +93,8 @@ export function normalizeCollectionOrderLineFromImport(
   let pesoPorBulto = String(row.pesoPorBulto ?? "").trim();
   const unidadesTotales = String(row.unidadesTotales ?? "").trim();
   const pesoTotalKg = String(row.pesoTotalKg ?? "").trim();
+  const piezaFromIa = String(row.pesoUnaPiezaKg ?? "").trim();
+  let pesoPiezaKg = piezaFromIa;
 
   const draft: CollectionOrderLine = {
     id: "",
@@ -98,6 +108,14 @@ export function normalizeCollectionOrderLineFromImport(
     h: row.h ?? "",
     volumenM3: row.volumenM3 ?? "",
     unidad: row.unidad ?? "",
+    magayaModelo: String(row.modelo ?? "").trim(),
+    paisOrigen: String(row.paisOrigen ?? "").trim(),
+    tejido: String(row.tejido ?? "").trim(),
+    talla: String(row.talla ?? "").trim(),
+    forro: String(row.forro ?? "").trim(),
+    genero: String(row.genero ?? "").trim(),
+    composicion: String(row.composicion ?? "").trim(),
+    pesoPiezaKg,
   };
 
   const bultosNum = Math.max(0, Math.round(parseFloatLoose(String(draft.bultos)) || 0));
@@ -107,9 +125,27 @@ export function normalizeCollectionOrderLineFromImport(
     draft.unidadesPorBulto = withTot.unidadesPorBulto;
   }
 
-  if (pesoTotalKg && bultosNum > 0) {
+  if (pesoTotalKg && bultosNum > 0 && !piezaFromIa) {
     const withPeso = applyPesoTotalToLine(draft, pesoTotalKg);
     draft.pesoPorBulto = withPeso.pesoPorBulto;
+  }
+
+  const undNum = Math.max(0, Math.round(parseFloatLoose(String(draft.unidadesPorBulto)) || 0));
+
+  const pbStr = String(draft.pesoPorBulto ?? "").trim();
+  if (!pesoPiezaKg && pbStr && undNum > 0) {
+    const pb = parseFloatLoose(pbStr);
+    if (Number.isFinite(pb) && pb > 0) {
+      pesoPiezaKg = (pb / undNum).toFixed(4).replace(/\.?0+$/, "");
+      draft.pesoPiezaKg = pesoPiezaKg;
+    }
+  }
+
+  if (pesoPiezaKg && undNum > 0 && !String(draft.pesoPorBulto ?? "").trim()) {
+    const pp = parseFloatLoose(pesoPiezaKg);
+    if (Number.isFinite(pp) && pp > 0) {
+      draft.pesoPorBulto = (pp * undNum).toFixed(2);
+    }
   }
 
   return {
@@ -118,10 +154,18 @@ export function normalizeCollectionOrderLineFromImport(
     bultos: draft.bultos,
     unidadesPorBulto: draft.unidadesPorBulto,
     pesoPorBulto: draft.pesoPorBulto,
+    pesoPiezaKg: draft.pesoPiezaKg,
     l: draft.l,
     w: draft.w,
     h: draft.h,
     volumenM3: draft.volumenM3,
     unidad: draft.unidad,
+    magayaModelo: draft.magayaModelo,
+    paisOrigen: draft.paisOrigen,
+    tejido: draft.tejido,
+    talla: draft.talla,
+    forro: draft.forro,
+    genero: draft.genero,
+    composicion: draft.composicion,
   };
 }

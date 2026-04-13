@@ -1,6 +1,7 @@
 /**
- * CSV para importar referencias en Magaya (plantilla 17 columnas).
+ * CSV para importar referencias en Magaya (plantilla 18 columnas, incl. composición).
  * Misma codificación que inventario: coma, CRLF, Windows-1252.
+ * Columna PESO = peso de una pieza (kg), según negocio / extracción IA.
  */
 
 import {
@@ -29,10 +30,13 @@ const MAGAYA_HEADERS = [
   "ANCHO",
   "ALTO",
   "CUBICAJE",
+  "COMPOSICION",
 ] as const;
 
 const MAGAYA_TIPO_EMBALAJE = "CARTON";
 const MAGAYA_UNIDAD = "PZA";
+const MAGAYA_UNI = "UNI";
+const MAGAYA_FORRO_DEFAULT = "N/A";
 
 function parseNum(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -55,34 +59,53 @@ function cubicajeTotalM3(
   return 0;
 }
 
+/** Peso de una pieza (kg) para columna PESO. */
+function pesoUnaPiezaKg(row: Record<string, unknown>): number {
+  const explicit = parseNum(row.pesoPiezaKg);
+  if (explicit > 0) return explicit;
+  const und = parseNum(row.unidadesPorBulto);
+  const porBulto = parseNum(row.pesoPorBulto);
+  if (und > 0 && porBulto > 0) return porBulto / und;
+  return porBulto > 0 ? porBulto : 0;
+}
+
 function buildMagayaRow(row: Record<string, unknown>): string[] {
   const bultos = parseNum(row.bultos);
   const l = parseNum(row.l);
   const w = parseNum(row.w);
   const h = parseNum(row.h);
   const undBulto = parseNum(row.unidadesPorBulto);
-  const pesoPorBulto = parseNum(row.pesoPorBulto);
-  const pesoTotal = bultos * pesoPorBulto;
+  const pesoPieza = pesoUnaPiezaKg(row);
   const cubicaje = cubicajeTotalM3(row, bultos, l, w, h);
+
+  const modelo = String(row.magayaModelo ?? "").trim();
+  const pais = String(row.paisOrigen ?? "").trim();
+  const tejido = String(row.tejido ?? "").trim();
+  const talla = String(row.talla ?? "").trim();
+  const forroRaw = String(row.forro ?? "").trim();
+  const forro = forroRaw || MAGAYA_FORRO_DEFAULT;
+  const genero = String(row.genero ?? "").trim();
+  const composicion = String(row.composicion ?? "").trim();
 
   return [
     String(row.referencia ?? "").trim(),
     String(row.descripcion ?? "").trim(),
-    "",
+    modelo,
     MAGAYA_TIPO_EMBALAJE,
-    "",
+    MAGAYA_UNI,
     MAGAYA_UNIDAD,
-    csvNum(pesoTotal),
-    "",
+    csvNum(pesoPieza),
+    pais,
     csvNum(undBulto),
-    "",
-    "",
-    "",
-    "",
+    tejido,
+    talla,
+    forro,
+    genero,
     csvNum(l),
     csvNum(w),
     csvNum(h),
     csvNum(cubicaje),
+    composicion,
   ];
 }
 

@@ -8,11 +8,22 @@ export type CollectionOrderLine = {
   bultos?: string | number;
   unidadesPorBulto?: string | number;
   pesoPorBulto?: string | number;
+  /** Peso de una sola pieza (kg); columna PESO del CSV Magaya */
+  pesoPiezaKg?: string | number;
   l?: string | number;
   w?: string | number;
   h?: string | number;
   volumenM3?: string | number;
   unidad?: string;
+  /** Columna MODELO (Magaya): marca/modelo resuelto, ej. CONCEPTS */
+  magayaModelo?: string;
+  paisOrigen?: string;
+  tejido?: string;
+  talla?: string;
+  forro?: string;
+  genero?: string;
+  /** Columna R Magaya: composición legible */
+  composicion?: string;
 };
 
 export type CollectionOrderStatus = "draft" | "sent";

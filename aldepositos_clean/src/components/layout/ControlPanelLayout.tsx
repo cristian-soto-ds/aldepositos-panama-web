@@ -117,17 +117,8 @@ export function ControlPanelLayout({
 
         <nav className="flex-1 p-4 md:p-6 space-y-2 md:space-y-4 overflow-y-auto hide-scrollbar">
           <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
-            Ingreso de Carga
+            Ingreso de carga
           </p>
-          <NavItem
-            icon={<LayoutDashboard size={20} />}
-            text="Panel Principal"
-            active={currentView === "dashboard"}
-            onClick={() => {
-              setCurrentView("dashboard");
-              setSidebarOpen(false);
-            }}
-          />
           <NavItem
             icon={<Box size={20} />}
             text="Ingreso Rápido"
@@ -157,19 +148,73 @@ export function ControlPanelLayout({
           />
           <NavItem
             icon={<HandHelping size={20} />}
-            text="Orden de recolección"
+            text="Orden de Recolección"
             active={currentView === "collection-orders"}
             onClick={() => {
               setCurrentView("collection-orders");
               setSidebarOpen(false);
             }}
           />
+
+          <div className="my-4 border-b border-white/5" />
+
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+            Logística y control
+          </p>
+          <NavItem
+            icon={<PackageSearch size={20} />}
+            text="Contenedores"
+            active={currentView === "container-reports"}
+            onClick={() => {
+              setCurrentView("container-reports");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<Activity size={20} />}
+            text="Monitoreo Live"
+            active={currentView === "monitor"}
+            onClick={() => {
+              setCurrentView("monitor");
+              setSidebarOpen(false);
+            }}
+          />
           <NavItem
             icon={<BookMarked size={20} />}
-            text="Catálogo de referencias"
+            text="Catálogo de Referencias"
             active={currentView === "reference-catalog"}
             onClick={() => {
               setCurrentView("reference-catalog");
+              setSidebarOpen(false);
+            }}
+          />
+
+          <div className="my-4 border-b border-white/5" />
+
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+            Salida
+          </p>
+          <NavItem
+            icon={<Truck size={20} />}
+            text="Entrega de Carga"
+            active={currentView === "dispatch"}
+            onClick={() => {
+              setCurrentView("dispatch");
+              setSidebarOpen(false);
+            }}
+          />
+
+          <div className="my-4 border-b border-white/5" />
+
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+            Administración y rendimiento
+          </p>
+          <NavItem
+            icon={<LayoutDashboard size={20} />}
+            text="Panel Principal"
+            active={currentView === "dashboard"}
+            onClick={() => {
+              setCurrentView("dashboard");
               setSidebarOpen(false);
             }}
           />
@@ -191,43 +236,10 @@ export function ControlPanelLayout({
               setSidebarOpen(false);
             }}
           />
-
-          <div className="my-6 border-b border-white/5" />
-
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
-            Salida y Trazabilidad
-          </p>
-          <NavItem
-            icon={<Truck size={20} />}
-            text="Entrega de Carga"
-            active={currentView === "dispatch"}
-            onClick={() => {
-              setCurrentView("dispatch");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<PackageSearch size={20} />}
-            text="Contenedores"
-            active={currentView === "container-reports"}
-            onClick={() => {
-              setCurrentView("container-reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<Activity size={20} />}
-            text="Monitoreo Live"
-            active={currentView === "monitor"}
-            onClick={() => {
-              setCurrentView("monitor");
-              setSidebarOpen(false);
-            }}
-          />
           {showOptionsModule && (
             <NavItem
               icon={<Settings size={20} />}
-              text="Opciones de usuario"
+              text="Opciones de Usuario"
               active={currentView === "options"}
               onClick={() => {
                 setCurrentView("options");

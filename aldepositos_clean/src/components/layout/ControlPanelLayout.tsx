@@ -1,7 +1,25 @@
 "use client";
 
-import React, { ReactNode, useState } from "react";
-import { LogOut, Menu, Truck, Activity, LayoutDashboard, Box, FileText, Plane, X, ClipboardList, PackageSearch, BarChart3, Settings, UserRound, BookMarked, HandHelping } from "lucide-react";
+import React, { ReactNode, useEffect, useRef, useState } from "react";
+import {
+  LogOut,
+  Menu,
+  Truck,
+  Activity,
+  LayoutDashboard,
+  Box,
+  FileText,
+  Plane,
+  X,
+  ClipboardList,
+  PackageSearch,
+  BarChart3,
+  Settings,
+  UserRound,
+  BookMarked,
+  HandHelping,
+  MoreHorizontal,
+} from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
 import { clearWorkPresence, getSharedWorkPresenceTabId } from "@/lib/panelPresence";
@@ -13,6 +31,7 @@ type ControlPanelLayoutProps = {
   currentView: string;
   setCurrentView: (view: string) => void;
   userDisplayName?: string | null;
+  userEmail?: string | null;
   /** Imagen de perfil (URL pública o data URL local). */
   userAvatarSrc?: string | null;
   preferences?: UserPreferences;
@@ -24,6 +43,7 @@ export function ControlPanelLayout({
   currentView,
   setCurrentView,
   userDisplayName,
+  userEmail = null,
   userAvatarSrc = null,
   preferences,
   showOptionsModule = false,
@@ -33,13 +53,31 @@ export function ControlPanelLayout({
     preferences?.avatarDataUrl ||
     null;
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const router = useRouter();
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     void clearWorkPresence(getSharedWorkPresenceTabId());
     router.push("/login");
   };
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDown = (ev: MouseEvent | TouchEvent) => {
+      const el = userMenuRef.current;
+      if (!el) return;
+      if (ev.target instanceof Node && el.contains(ev.target)) return;
+      setUserMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("touchstart", onDown);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("touchstart", onDown);
+    };
+  }, [userMenuOpen]);
 
   return (
     <div className={`h-dvh min-h-screen flex flex-col md:flex-row font-sans text-gray-800 dark:text-slate-200 overflow-hidden ${
@@ -72,7 +110,7 @@ export function ControlPanelLayout({
               ALDEPOSITOS
             </p>
             <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] mt-1 opacity-80">
-              Warehouse OS
+              Zona Libre Panamá
             </p>
           </div>
         </div>
@@ -199,30 +237,54 @@ export function ControlPanelLayout({
           )}
         </nav>
 
-        <div className="p-4 md:p-6 border-t border-white/5 bg-black/20 text-center">
-          <div className="mb-3 flex items-center gap-2 justify-center">
-            <div className="w-7 h-7 rounded-full overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center">
+        <div className="p-4 md:p-6 border-t border-white/5 bg-black/20">
+          <div
+            ref={userMenuRef}
+            className="relative flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"
+          >
+            <div className="w-9 h-9 rounded-full overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
               {avatarSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={avatarSrc}
-                  alt="Avatar"
-                  className="w-full h-full object-cover"
-                />
+                <img src={avatarSrc} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <UserRound size={14} className="text-slate-300" />
+                <UserRound size={16} className="text-slate-200" />
               )}
             </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[12px] font-black text-white truncate">
+                {userDisplayName || "Operador"}
+              </p>
+              {userEmail && (
+                <p className="text-[11px] font-semibold text-slate-300/90 truncate">
+                  {userEmail}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setUserMenuOpen((v) => !v)}
+              className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-slate-200 hover:bg-white/10"
+              aria-label="Opciones de usuario"
+              aria-expanded={userMenuOpen}
+            >
+              <MoreHorizontal size={18} />
+            </button>
+
+            {userMenuOpen && (
+              <div className="absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0d1627] shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    void handleLogout();
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-3 text-left text-[11px] font-black uppercase tracking-widest text-red-300 hover:bg-white/5"
+                >
+                  <LogOut size={16} /> Cerrar sesión
+                </button>
+              </div>
+            )}
           </div>
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-400 truncate">
-            {userDisplayName || "Operador"}
-          </p>
-          <button
-            onClick={handleLogout}
-            className="w-full py-3 md:py-0 text-red-400 font-black text-xs uppercase tracking-[0.2em] hover:text-white transition-colors flex items-center justify-center gap-2"
-          >
-            <LogOut size={16} className="md:hidden" /> Cerrar Sesión
-          </button>
         </div>
       </aside>
 

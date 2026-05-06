@@ -113,7 +113,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
 
       <div className="mt-8 text-center relative z-10 border-t border-slate-100 pt-6">
         <p className="text-slate-400 text-[9px] font-bold tracking-[0.2em] uppercase">
-          Warehouse OS v2.0
+          AldePositos Zona Libre Panamá
         </p>
       </div>
     </div>

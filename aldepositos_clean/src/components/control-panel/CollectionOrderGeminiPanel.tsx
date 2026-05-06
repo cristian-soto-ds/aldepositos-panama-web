@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import {
   FileUp,
   Loader2,
@@ -13,16 +13,23 @@ import {
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import {
   formatGeminiUsageLines,
-  loadGeminiUsageSummary,
-  recordGeminiRequestSuccess,
   type GeminiUsageSummary,
 } from "@/lib/geminiClientUsage";
-import { supabase } from "@/lib/supabase";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 
 type ChatTurn = { role: "user" | "model"; text: string };
 
 type ErrorBanner = { text: string; code?: number };
+
+export type CollectionOrderGeminiJobState = {
+  input: string;
+  history: ChatTurn[];
+  busy: boolean;
+  errorBanner: ErrorBanner | null;
+  pendingFileName: string | null;
+  lastLines: CollectionGeminiLine[];
+  usageSummary: GeminiUsageSummary | null;
+};
 
 type CollectionOrderGeminiPanelProps = {
   open: boolean;
@@ -32,23 +39,13 @@ type CollectionOrderGeminiPanelProps = {
   viewerDisplayName?: string | null;
   /** Referencias ya en tabla (evitar duplicar contexto) */
   existingReferencias: string[];
-  onApplyLines: (lines: CollectionGeminiLine[]) => void;
+  job: CollectionOrderGeminiJobState;
+  onChangeJob: (patch: Partial<CollectionOrderGeminiJobState>) => void;
+  onSend: (args: { text: string; file: File | null }) => Promise<void>;
+  onApplyLines: () => void;
 };
 
 const ACCEPT_FILES = ".pdf,.png,.jpg,.jpeg,.webp";
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => {
-      const s = String(r.result ?? "");
-      const i = s.indexOf(",");
-      resolve(i >= 0 ? s.slice(i + 1) : s);
-    };
-    r.onerror = () => reject(new Error("No se pudo leer el archivo"));
-    r.readAsDataURL(file);
-  });
-}
 
 export function CollectionOrderGeminiPanel({
   open,
@@ -56,23 +53,21 @@ export function CollectionOrderGeminiPanel({
   orderNumber,
   viewerDisplayName = null,
   existingReferencias,
+  job,
+  onChangeJob,
+  onSend,
   onApplyLines,
 }: CollectionOrderGeminiPanelProps) {
-  const [input, setInput] = useState("");
-  const [history, setHistory] = useState<ChatTurn[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [errorBanner, setErrorBanner] = useState<ErrorBanner | null>(null);
-  const [pendingFile, setPendingFile] = useState<{
-    file: File;
-    mime: string;
-  } | null>(null);
-  const [lastLines, setLastLines] = useState<CollectionGeminiLine[]>([]);
-  const [usageSummary, setUsageSummary] = useState<GeminiUsageSummary | null>(null);
+  const { input, history, busy, errorBanner, lastLines, usageSummary } = job;
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) setUsageSummary(loadGeminiUsageSummary());
+    // Mantener el panel "en blanco" al cerrarse visualmente pero preservar jobs por orden.
+    // El resumen de uso se actualiza desde arriba (job.usageSummary).
+    void orderNumber;
+    void viewerDisplayName;
+    void existingReferencias;
   }, [open]);
 
   const scrollBottom = useCallback(() => {
@@ -84,134 +79,15 @@ export function CollectionOrderGeminiPanel({
 
   const send = async () => {
     const text = input.trim();
-    if (!text && !pendingFile) return;
-    setErrorBanner(null);
-    setBusy(true);
-    setInput("");
-    const userVisible = [
-      text,
-      pendingFile ? `📎 ${pendingFile.file.name}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    setHistory((h) => [...h, { role: "user", text: userVisible }]);
-    scrollBottom();
-
-    let filePayload: { base64: string; mimeType: string } | undefined;
-    if (pendingFile) {
-      try {
-        const base64 = await fileToBase64(pendingFile.file);
-        filePayload = { base64, mimeType: pendingFile.mime };
-      } catch {
-        setErrorBanner({ text: "No se pudo leer el archivo." });
-        setBusy(false);
-        return;
-      }
-    }
-
-    const contextHint =
-      existingReferencias.length > 0
-        ? `Referencias ya cargadas en la orden (no duplicar salvo corrección): ${existingReferencias.slice(0, 40).join(", ")}${existingReferencias.length > 40 ? "…" : ""}`
-        : undefined;
-
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        setErrorBanner({ text: "Sesión expirada. Vuelve a iniciar sesión.", code: 401 });
-        setBusy(false);
-        return;
-      }
-
-      const res = await fetch("/api/collection-order/gemini", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          message: text || "Analiza el documento adjunto y extrae las líneas.",
-          history: history.map((t) => ({ role: t.role, text: t.text })),
-          file: filePayload,
-          orderNumber: orderNumber.trim() || undefined,
-          contextHint,
-          viewerDisplayName: String(viewerDisplayName ?? "").trim() || undefined,
-        }),
-      });
-
-      let data: {
-        error?: string;
-        reply?: string;
-        lines?: CollectionGeminiLine[];
-        usage?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-          totalTokenCount?: number;
-        } | null;
-      };
-      try {
-        data = (await res.json()) as typeof data;
-      } catch {
-        setErrorBanner({
-          text: `El servidor respondió ${res.status} pero el cuerpo no es JSON. Revisa logs o la URL de la API.`,
-          code: res.status,
-        });
-        setBusy(false);
-        return;
-      }
-
-      if (!res.ok) {
-        setErrorBanner({
-          text: data.error || `Error ${res.status}`,
-          code: res.status,
-        });
-        setBusy(false);
-        return;
-      }
-
-      const reply = String(data.reply ?? "");
-      const lines = Array.isArray(data.lines) ? data.lines : [];
-      setLastLines(lines);
-      setUsageSummary(recordGeminiRequestSuccess(data.usage ?? null));
-      setHistory((h) => [...h, { role: "model", text: reply }]);
-      setPendingFile(null);
+      const f = fileRef.current?.files?.[0] ?? null;
+      if (!text && !f) return;
+      onChangeJob({ input: "" });
+      await onSend({ text, file: f });
       if (fileRef.current) fileRef.current.value = "";
     } catch (e) {
-      setErrorBanner({
-        text: e instanceof Error ? e.message : "Error de red (revisa tu conexión).",
-      });
-    } finally {
-      setBusy(false);
       scrollBottom();
     }
-  };
-
-  const applyLines = () => {
-    const useful = lastLines.filter(
-      (row) =>
-        row.referencia ||
-        row.descripcion ||
-        row.bultos ||
-        row.unidadesPorBulto ||
-        row.unidadesTotales ||
-        row.pesoUnaPiezaKg ||
-        row.pesoPorBulto ||
-        row.pesoTotalKg ||
-        row.l ||
-        row.w ||
-        row.h ||
-        row.volumenM3 ||
-        row.modelo ||
-        row.paisOrigen ||
-        row.tejido ||
-        row.talla ||
-        row.forro ||
-        row.genero ||
-        row.composicion,
-    );
-    if (useful.length === 0) return;
-    onApplyLines(useful);
-    setLastLines([]);
   };
 
   if (!open) return null;
@@ -221,7 +97,7 @@ export function CollectionOrderGeminiPanel({
       className="fixed inset-0 z-[320] flex justify-end bg-slate-950/50 backdrop-blur-sm"
       role="presentation"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy) onClose();
+        if (e.target === e.currentTarget) onClose();
       }}
     >
       <aside
@@ -252,7 +128,6 @@ export function CollectionOrderGeminiPanel({
           </div>
           <button
             type="button"
-            disabled={busy}
             onClick={onClose}
             className="relative z-10 rounded-xl p-2 text-white/95 ring-1 ring-white/20 hover:bg-white/15 disabled:opacity-50"
             aria-label="Cerrar"
@@ -262,7 +137,8 @@ export function CollectionOrderGeminiPanel({
         </header>
 
         <p className="shrink-0 border-b border-violet-100 bg-gradient-to-r from-violet-50/95 to-indigo-50/90 px-4 py-3 text-[11px] font-medium leading-relaxed text-violet-950 dark:border-violet-900/40 dark:from-violet-950/40 dark:to-indigo-950/30 dark:text-violet-100">
-          Sube un <strong>PDF</strong> o <strong>imagen</strong> (packing list, factura, etiqueta) o{" "}
+          Sube un <strong>PDF</strong> (con texto seleccionable, suele responder más rápido) o{" "}
+          <strong>imagen</strong> (packing list, factura, etiqueta), o{" "}
           <strong>pega una tabla</strong> desde Excel. La IA devuelve filas listas para{" "}
           <strong className="whitespace-nowrap">«Añadir a la tabla»</strong>.
         </p>
@@ -374,7 +250,7 @@ export function CollectionOrderGeminiPanel({
             </p>
             <button
               type="button"
-              onClick={applyLines}
+              onClick={onApplyLines}
               className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow hover:bg-emerald-700"
             >
               Añadir a la tabla de la orden
@@ -383,19 +259,9 @@ export function CollectionOrderGeminiPanel({
         )}
 
         <div className="shrink-0 border-t border-slate-200 p-3 dark:border-slate-700">
-          {pendingFile && (
+          {job.pendingFileName && (
             <p className="mb-2 truncate text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              Adjunto: {pendingFile.file.name}
-              <button
-                type="button"
-                className="ml-2 text-red-600 hover:underline"
-                onClick={() => {
-                  setPendingFile(null);
-                  if (fileRef.current) fileRef.current.value = "";
-                }}
-              >
-                Quitar
-              </button>
+              Adjunto: {job.pendingFileName}
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -407,8 +273,7 @@ export function CollectionOrderGeminiPanel({
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                const mime = f.type || "application/octet-stream";
-                setPendingFile({ file: f, mime });
+                onChangeJob({ pendingFileName: f.name });
               }}
             />
             <button
@@ -423,10 +288,12 @@ export function CollectionOrderGeminiPanel({
               type="button"
               disabled={busy}
               onClick={() => {
-                setHistory([]);
-                setLastLines([]);
-                setErrorBanner(null);
-                setPendingFile(null);
+                onChangeJob({
+                  history: [],
+                  lastLines: [],
+                  errorBanner: null,
+                  pendingFileName: null,
+                });
                 if (fileRef.current) fileRef.current.value = "";
               }}
               className="flex items-center gap-2 rounded-xl border-2 border-slate-200 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -436,7 +303,7 @@ export function CollectionOrderGeminiPanel({
           </div>
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => onChangeJob({ input: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -450,7 +317,7 @@ export function CollectionOrderGeminiPanel({
           />
           <button
             type="button"
-            disabled={busy || (!input.trim() && !pendingFile)}
+            disabled={busy || (!input.trim() && !job.pendingFileName)}
             onClick={() => void send()}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 py-3 text-xs font-black tracking-tight text-white shadow-md hover:brightness-110 disabled:opacity-50"
           >

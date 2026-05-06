@@ -486,6 +486,7 @@ export default function PanelPage() {
       currentView={visibleView}
       setCurrentView={setCurrentView}
       userDisplayName={userDisplayName}
+      userEmail={userEmail}
       userAvatarSrc={sidebarAvatarUrl}
       preferences={preferences}
       showOptionsModule={showOptionsModule}

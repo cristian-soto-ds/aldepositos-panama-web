@@ -2,6 +2,7 @@
  * CSV delimitado por comas para exportar líneas de inventario por RA.
  * Mismo criterio que Excel al guardar como «CSV (delimitado por comas)» en Windows:
  * separador coma, CRLF, codificación Windows-1252 (ANSI) y sin BOM UTF-8.
+ * Primera línea `sep=,` para que Excel abra por columnas aunque el sistema regional use `;`.
  */
 
 export type InventarioCsvModule = "quick" | "airway" | "detailed";
@@ -24,7 +25,7 @@ const HEADERS = [
 
 /** Valores fijos por fila para integraciones que exigen unidad y tipo de embalaje. */
 const CSV_UNIDAD_FIJA = "PZA";
-const CSV_TIPO_EMBALAJE_FIJO = "CARTON";
+const CSV_TIPO_EMBALAJE_FIJO = "Cartón";
 
 function parseNum(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -46,6 +47,14 @@ export function escapeCsvCell(raw: string): string {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
+}
+
+/**
+ * Fuerza a Excel el separador por comas al abrir el archivo (lista regional / decimal en español).
+ * La línea aparece en la primera fila; así las columnas A, B, C… cuadran con los encabezados.
+ */
+export function withExcelSeparatorHint(csvWithoutHint: string): string {
+  return `sep=,\r\n${csvWithoutHint}`;
 }
 
 export function rowHasExportableData(row: Record<string, unknown>): boolean {
@@ -135,7 +144,7 @@ export function buildInventarioCsv(
         buildLineCells(num, row, variant).map(escapeCsvCell).join(","),
       ),
   ];
-  return lines.join("\r\n");
+  return withExcelSeparatorHint(lines.join("\r\n"));
 }
 
 /** Bytes 0x80–0x9F de Windows-1252 → punto de código Unicode. */

@@ -6,15 +6,11 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
-  Boxes,
   ClipboardCheck,
   Download,
   Edit,
   FileSpreadsheet,
-  FileText,
-  Package,
   Plus,
-  Scale,
   Trash2,
 } from "lucide-react";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
@@ -29,7 +25,7 @@ import {
   clearWorkPresence,
 } from "@/lib/panelPresence";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
-import { M3Unit } from "@/components/control-panel/inventorySummaryUnits";
+import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import {
   buildMeasurePatchFromCatalog,
   getReferenceCatalogItem,
@@ -1054,219 +1050,25 @@ export function DetailedInventoryEntry({
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden pr-1">
           <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1 overflow-hidden rounded-2xl border border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-2 shadow-xl sm:p-3 md:shadow-2xl lg:rounded-[3rem]">
-            <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:flex-row lg:items-stretch lg:gap-3">
-              <div className="relative min-w-0 flex-1 overflow-x-hidden rounded-2xl border-2 border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 shadow-md ring-1 ring-slate-900/[0.04]">
-                <div
-                  className="absolute left-0 top-0 h-full w-1.5 rounded-l-2xl bg-[#16263F]"
-                  aria-hidden
-                />
-                <div className="pl-3 pr-3 pb-3 pt-3 sm:pl-5 sm:pr-5 sm:pb-4 sm:pt-4">
-                  <div className="mb-3 flex flex-wrap items-center gap-2.5 border-b-2 border-slate-100 dark:border-slate-700 pb-3 sm:gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#16263F] text-white shadow-md ring-2 ring-[#16263F]/20">
-                      <ClipboardCheck className="h-5 w-5" aria-hidden />
-                    </span>
-                    <h4 className="min-w-0 flex-1 text-sm font-black uppercase tracking-wide text-[#16263F] dark:text-slate-100 sm:text-base">
-                      Datos originales
-                    </h4>
-                    <span className="inline-flex shrink-0 items-center rounded-full border-2 border-blue-200/80 bg-blue-50 dark:bg-blue-950/45 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-800 shadow-sm sm:text-[11px]">
-                      Ingreso detallado
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
-                    <div className="rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-800/95 px-3 py-2.5 shadow-sm sm:py-3">
-                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:text-[11px]">
-                        Proveedor / naviera
-                      </p>
-                      <p className="break-words text-sm font-bold leading-snug text-[#16263F] dark:text-slate-100 sm:text-base">
-                        {t.provider}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border-2 border-slate-100 dark:border-slate-700 bg-slate-50/95 dark:bg-slate-800/95 px-3 py-2.5 shadow-sm sm:py-3">
-                      <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:text-[11px]">
-                        Marca · tracking
-                      </p>
-                      <p className="break-words text-sm font-bold leading-snug text-[#16263F] dark:text-slate-100 sm:text-base">
-                        {t.brand}
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:grid-cols-2 sm:gap-3">
-                      <div className="rounded-xl border-2 border-sky-200/80 bg-gradient-to-br from-sky-50 to-sky-100/40 px-3 py-2.5 shadow-sm sm:py-3">
-                        <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-sky-800 sm:text-[11px]">
-                          Volumen en documento
-                        </p>
-                        <p className="flex flex-wrap items-baseline gap-1 text-lg font-black tabular-nums text-sky-950 sm:text-xl">
-                          {t.expectedCbm ?? 0}
-                          <M3Unit
-                            size="md"
-                            className="font-black text-sky-800 text-sm sm:text-base"
-                          />
-                        </p>
-                      </div>
-                      <div className="rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2.5 shadow-sm sm:py-3">
-                        <p className="mb-1 text-[10px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 sm:text-[11px]">
-                          Peso en documento
-                        </p>
-                        <p className="text-lg font-black tabular-nums text-slate-900 dark:text-slate-100 sm:text-xl">
-                          {t.expectedWeight ?? 0}
-                          <span className="ml-1 text-sm font-bold text-slate-500 dark:text-slate-400 sm:text-base">
-                            kg
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 rounded-xl border-2 border-dashed border-amber-400/70 bg-gradient-to-br from-amber-50/95 to-orange-50/50 px-3 py-2.5 shadow-sm sm:mt-4 sm:px-4 sm:py-3">
-                    <p className="mb-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-wide text-amber-900 sm:text-[11px]">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-200/60 text-amber-900">
-                        <FileText className="h-4 w-4" aria-hidden />
-                      </span>
-                      Expedidor · notas
-                    </p>
-                    <p className="text-sm font-semibold leading-relaxed text-amber-950/95 sm:text-[15px]">
-                      {t.subClient}
-                      {t.notes ? (
-                        <>
-                          <span className="mx-2 inline font-light text-amber-700/50">
-                            |
-                          </span>
-                          {t.notes}
-                        </>
-                      ) : null}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex min-w-0 shrink-0 flex-col gap-2 lg:w-[min(100%,24.5rem)] lg:border-l lg:border-slate-200 dark:border-slate-600 lg:pl-4">
-                <div className="rounded-xl bg-[#16263F] px-3 py-2 shadow-md ring-1 ring-black/10">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/85">
-                    Captura actual
-                  </p>
-                  <p className="mt-0.5 text-balance text-sm font-black leading-snug text-white sm:text-[0.95rem]">
-                    Bultos · totales líneas
-                  </p>
-                </div>
-                <div className="grid min-w-0 grid-cols-2 gap-2">
-                  <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-gradient-to-b from-white to-slate-50/90 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
-                        <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
-                      </span>
-                      <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-slate-600 dark:text-slate-300 sm:text-[11px]">
-                        Declarados
-                      </p>
-                    </div>
-                    <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-[#16263F] dark:text-slate-100 sm:text-[1.85rem]">
-                      {originalExpected}
-                    </p>
-                  </div>
-                  <div className="flex min-h-[4.75rem] min-w-0 flex-col justify-between rounded-xl border-2 border-violet-300 bg-gradient-to-b from-violet-50 to-violet-100/40 px-2.5 py-2 shadow-sm sm:min-h-[5rem] sm:px-3 sm:py-2.5">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl">
-                        <Boxes className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
-                      </span>
-                      <p className="min-w-0 text-[9px] font-black uppercase leading-tight tracking-wide text-violet-900 sm:text-[11px]">
-                        Físicos
-                      </p>
-                    </div>
-                    <p className="text-[1.6rem] font-black tabular-nums leading-none tracking-tight text-violet-950 sm:text-[1.85rem]">
-                      {totals.bultos}
-                    </p>
-                  </div>
-                  <div
-                    className={`col-span-2 flex min-h-[4.25rem] items-center justify-between gap-3 rounded-xl border-2 px-3 py-2 shadow-sm sm:min-h-[4.5rem] sm:py-2.5 ${
-                      faltantes > 0
-                        ? "border-amber-400 bg-gradient-to-r from-amber-50 to-amber-100/40"
-                        : faltantes < 0
-                          ? "border-red-400 bg-gradient-to-r from-red-50 to-red-100/35"
-                          : "border-emerald-400 bg-gradient-to-r from-emerald-50 to-emerald-100/40"
-                    }`}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <span
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white shadow-sm sm:h-9 sm:w-9 sm:rounded-xl ${
-                          faltantes > 0
-                            ? "bg-amber-600"
-                            : faltantes < 0
-                              ? "bg-red-600"
-                              : "bg-emerald-600"
-                        }`}
-                      >
-                        <Scale className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-slate-900 dark:text-slate-100 sm:text-[11px]">
-                          Diferencia
-                        </p>
-                        <p
-                          className={`text-[9px] font-bold uppercase tracking-wide sm:text-[10px] ${
-                            faltantes === 0
-                              ? "text-emerald-800"
-                              : faltantes > 0
-                                ? "text-amber-900"
-                                : "text-red-800"
-                          }`}
-                        >
-                          {faltantes === 0
-                            ? "Cuadra con declarado"
-                            : faltantes > 0
-                              ? "Faltan por contar"
-                              : "Revisar exceso"}
-                        </p>
-                      </div>
-                    </div>
-                    <p
-                      className={`shrink-0 text-3xl font-black tabular-nums leading-none sm:text-[2.25rem] ${
-                        faltantes > 0
-                          ? "text-amber-800"
-                          : faltantes < 0
-                            ? "text-red-600"
-                            : "text-emerald-800"
-                      }`}
-                    >
-                      {faltantes}
-                    </p>
-                  </div>
-                  <div className="col-span-2 rounded-xl border-2 border-slate-200 dark:border-slate-600 bg-slate-50/90 dark:bg-slate-800/90 px-3 py-2 shadow-sm sm:py-2.5">
-                    <p className="mb-1.5 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 sm:mb-2 sm:text-[10px]">
-                      Resumen tabla
-                    </p>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                          Unidades
-                        </p>
-                        <p className="text-base font-black tabular-nums text-[#16263F] dark:text-slate-100 sm:text-lg">
-                          {totals.unidades}
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                          Volumen
-                        </p>
-                        <p className="flex flex-wrap items-baseline gap-1 text-base font-black tabular-nums text-[#16263F] dark:text-slate-100 sm:text-lg">
-                          {Number(totals.cbm).toFixed(2)}
-                          <M3Unit size="sm" className="text-xs font-black sm:text-sm" />
-                        </p>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                          Peso
-                        </p>
-                        <p className="text-base font-black tabular-nums text-[#16263F] dark:text-slate-100 sm:text-lg">
-                          {totals.weight.toFixed(2)}
-                          <span className="ml-1 text-sm font-bold text-slate-500 dark:text-slate-400">
-                            kg
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <InventoryReceptionCompact
+              leadingIcon={<ClipboardCheck className="h-4 w-4" aria-hidden />}
+              badge="Ingreso detallado"
+              provider={t.provider}
+              brand={t.brand}
+              expectedCbm={t.expectedCbm ?? 0}
+              expectedWeight={t.expectedWeight ?? 0}
+              subClient={t.subClient}
+              notes={t.notes}
+              declared={originalExpected}
+              physical={totals.bultos}
+              faltantes={faltantes}
+              totalCbm={totals.cbm}
+              totalWeight={totals.weight}
+              totalWeightDecimals={2}
+              showTotalUnidades
+              totalUnidades={totals.unidades}
+              totalsSectionTitle="Resumen tabla"
+            />
 
             <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-[inset_0_0_0_1px_rgb(241,245,249)] dark:shadow-[inset_0_0_0_1px_rgb(30,41,59)]">
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">

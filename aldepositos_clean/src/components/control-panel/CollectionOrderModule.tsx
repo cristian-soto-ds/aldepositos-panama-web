@@ -32,9 +32,12 @@ import {
   countInventarioCsvRows,
   downloadInventarioCsv,
 } from "@/lib/exportInventarioCsv";
-import { downloadMagayaReferenciasCsv } from "@/lib/exportMagayaCsv";
+import { downloadMagayaReferenciasExcel } from "@/lib/exportMagayaExcel";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
-import { CollectionOrderGeminiPanel } from "@/components/control-panel/CollectionOrderGeminiPanel";
+import {
+  CollectionOrderGeminiPanel,
+  type CollectionOrderGeminiJobState,
+} from "@/components/control-panel/CollectionOrderGeminiPanel";
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
@@ -47,13 +50,45 @@ import {
   pesoTotalFromLine,
   unidadesTotalesFromLine,
 } from "@/lib/collectionLineUtils";
+import { supabase } from "@/lib/supabase";
+import { prepareFilePayloadForGemini } from "@/lib/geminiClientImagePrep";
+import {
+  recordGeminiRequestSuccess,
+} from "@/lib/geminiClientUsage";
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
 const CATALOG_DEBOUNCE_MS = 500;
 
+const makeEmptyGeminiJob = (): CollectionOrderGeminiJobState => ({
+  input: "",
+  history: [],
+  busy: false,
+  errorBanner: null,
+  pendingFileName: null,
+  lastLines: [],
+  usageSummary: null,
+});
+
 function sanitizeIntegerInput(raw: string): string {
   const digitsOnly = raw.replace(/\D+/g, "");
   return digitsOnly;
+}
+
+function displayUndBultoValue(params: {
+  rowId: string;
+  raw: string;
+  focusedUndBultoRowId: string | null;
+  draftByRow: Record<string, string>;
+}): string {
+  const { rowId, raw, focusedUndBultoRowId, draftByRow } = params;
+  if (focusedUndBultoRowId === rowId) {
+    return draftByRow[rowId] ?? raw;
+  }
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const n = parseFloat(s.replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return s;
+  return String(Math.round(n));
 }
 
 function sanitizeDecimalInput(raw: string, maxDecimals = 2): string {
@@ -62,6 +97,11 @@ function sanitizeDecimalInput(raw: string, maxDecimals = 2): string {
   const decimalPart = rest.join("").slice(0, maxDecimals);
   if (!normalized.includes(".")) return intPart;
   return `${intPart}.${decimalPart}`;
+}
+
+/** Und/bulto puede llevar decimales (totales línea como 140÷3 bultos). */
+function sanitizeQtyPerBundleInput(raw: string): string {
+  return sanitizeDecimalInput(raw, 8);
 }
 
 function formatWeight(value: string | number | undefined): string {
@@ -193,6 +233,10 @@ export function CollectionOrderModule({
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [geminiOpen, setGeminiOpen] = useState(false);
+  const [geminiJobByOrderId, setGeminiJobByOrderId] = useState<
+    Record<string, CollectionOrderGeminiJobState>
+  >({});
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [unresolvedRefByRow, setUnresolvedRefByRow] = useState<
     Record<string, boolean>
   >({});
@@ -201,6 +245,12 @@ export function CollectionOrderModule({
   /** Totales capturados en modo "total" antes de blur — se fusionan al guardar / pasar al RA */
   const [pendingUndTot, setPendingUndTot] = useState<Record<string, string>>({});
   const [pendingPesoTot, setPendingPesoTot] = useState<Record<string, string>>({});
+  /**
+   * UND/BULTO: cuando NO está enfocado, mostramos entero (mejor legibilidad).
+   * Cuando se enfoca, mostramos el valor real (puede tener decimales) sin perder precisión interna.
+   */
+  const [focusedUndBultoRowId, setFocusedUndBultoRowId] = useState<string | null>(null);
+  const [undBultoDraft, setUndBultoDraft] = useState<Record<string, string>>({});
 
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -226,6 +276,8 @@ export function CollectionOrderModule({
     setUnresolvedRefByRow({});
     setPendingUndTot({});
     setPendingPesoTot({});
+    setFocusedUndBultoRowId(null);
+    setUndBultoDraft({});
   };
 
   const openEdit = (o: CollectionOrder) => {
@@ -235,6 +287,8 @@ export function CollectionOrderModule({
     setUnresolvedRefByRow({});
     setPendingUndTot({});
     setPendingPesoTot({});
+    setFocusedUndBultoRowId(null);
+    setUndBultoDraft({});
   };
 
   const backToList = () => {
@@ -242,7 +296,20 @@ export function CollectionOrderModule({
     setUnresolvedRefByRow({});
     setPendingUndTot({});
     setPendingPesoTot({});
+    setFocusedUndBultoRowId(null);
+    setUndBultoDraft({});
     void reloadOrders();
+  };
+
+  const getGeminiJob = (orderId: string): CollectionOrderGeminiJobState => {
+    return geminiJobByOrderId[orderId] ?? makeEmptyGeminiJob();
+  };
+
+  const patchGeminiJob = (orderId: string, patch: Partial<CollectionOrderGeminiJobState>) => {
+    setGeminiJobByOrderId((prev) => ({
+      ...prev,
+      [orderId]: { ...getGeminiJob(orderId), ...patch },
+    }));
   };
 
   const updateEditing = (patch: Partial<CollectionOrder>) => {
@@ -339,6 +406,41 @@ export function CollectionOrderModule({
     });
   };
 
+  const persistOrder = useCallback(
+    async (params: { order: CollectionOrder; showAlerts: boolean }) => {
+      const { order, showAlerts } = params;
+      const maxExisting = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
+      const suggested = String(maxExisting + 1);
+      const numeroRaw = String(order.numero ?? "").trim();
+      const numero = numeroRaw || suggested;
+      const payload: CollectionOrder = {
+        ...order,
+        numero,
+        updatedAt: new Date().toISOString(),
+      };
+      const exists = orders.some((o) => o.id === payload.id);
+      if (showAlerts) setSaveBusy(true);
+      try {
+        if (exists) await updateCollectionOrder(payload);
+        else await insertCollectionOrder(payload);
+        setOrders((prev) => {
+          const rest = prev.filter((o) => o.id !== payload.id);
+          return [payload, ...rest];
+        });
+        setEditing((prev) => (prev && prev.id === payload.id ? payload : prev));
+        if (showAlerts) alert(`Orden guardada. Número: ${numero}.`);
+      } catch (e) {
+        console.error(e);
+        if (showAlerts) {
+          alert("No se pudo guardar. ¿Aplicaste la migración SQL `collection_orders` en Supabase?");
+        }
+      } finally {
+        if (showAlerts) setSaveBusy(false);
+      }
+    },
+    [orders],
+  );
+
   const saveOrder = async () => {
     if (!editing) return;
     const mergedLines = mergePendingTotalsIntoLines(
@@ -350,41 +452,29 @@ export function CollectionOrderModule({
     );
     setPendingUndTot({});
     setPendingPesoTot({});
-    const maxExisting = Math.max(
-      0,
-      ...orders.map((o) => parseOrderNumber(o.numero)),
-    );
-    const suggested = String(maxExisting + 1);
-    const numeroRaw = String(editing.numero ?? "").trim();
-    const numero = numeroRaw || suggested;
-    const payload: CollectionOrder = {
-      ...editing,
-      lines: mergedLines,
-      numero,
-      updatedAt: new Date().toISOString(),
-    };
-    const exists = orders.some((o) => o.id === payload.id);
-    setSaveBusy(true);
-    try {
-      if (exists) await updateCollectionOrder(payload);
-      else await insertCollectionOrder(payload);
-      setOrders((prev) => {
-        const rest = prev.filter((o) => o.id !== payload.id);
-        return [payload, ...rest];
-      });
-      setEditing(payload);
-       
-      alert(`Orden guardada. Número: ${numero}.`);
-    } catch (e) {
-      console.error(e);
-       
-      alert(
-        "No se pudo guardar. ¿Aplicaste la migración SQL `collection_orders` en Supabase?",
-      );
-    } finally {
-      setSaveBusy(false);
-    }
+    const mergedOrder: CollectionOrder = { ...editing, lines: mergedLines };
+    setEditing(mergedOrder);
+    await persistOrder({ order: mergedOrder, showAlerts: true });
   };
+
+  const scheduleAutoSave = useCallback(
+    (order: CollectionOrder | null) => {
+      if (!order || !userEmail) return;
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = setTimeout(() => {
+        autoSaveTimerRef.current = null;
+        void persistOrder({ order, showAlerts: false });
+      }, 1200);
+    },
+    [persistOrder, userEmail],
+  );
+
+  useEffect(() => {
+    scheduleAutoSave(editing);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [editing, scheduleAutoSave]);
 
   const deleteOrder = async (o: CollectionOrder) => {
      
@@ -681,6 +771,10 @@ export function CollectionOrderModule({
         ) : (
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {orders.map((o) => (
+              (() => {
+                const job = geminiJobByOrderId[o.id];
+                const analyzing = job?.busy === true;
+                return (
               <div
                 key={o.id}
                 className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-600 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between"
@@ -701,6 +795,15 @@ export function CollectionOrderModule({
                     >
                       {o.status === "sent" ? "Enviada al almacén" : "Borrador"}
                     </span>
+                    {analyzing && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
+                          {AI_ASSISTANT_DISPLAY_NAME}: analizando…
+                        </span>
+                      </>
+                    )}
                     {o.linkedRaNumbers && o.linkedRaNumbers.length > 0 && (
                       <> · RA: {o.linkedRaNumbers.join(", ")}</>
                     )}
@@ -723,6 +826,8 @@ export function CollectionOrderModule({
                   </button>
                 </div>
               </div>
+                );
+              })()
             ))}
           </div>
         )}
@@ -734,6 +839,192 @@ export function CollectionOrderModule({
   const e = editing;
   const maxExistingNumber = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
   const suggestedNumber = String(maxExistingNumber + 1);
+  const orderId = e.id;
+  const geminiJob = getGeminiJob(orderId);
+
+  const sendToGemini = async (args: { text: string; file: File | null }) => {
+    const text = String(args.text ?? "").trim();
+    const f = args.file;
+    if (!text && !f) return;
+
+    patchGeminiJob(orderId, { errorBanner: null, busy: true });
+
+    const userVisible = [text, f ? `📎 ${f.name}` : ""].filter(Boolean).join("\n");
+    const nextHistory = [...geminiJob.history, { role: "user", text: userVisible } as const];
+    patchGeminiJob(orderId, { history: nextHistory, pendingFileName: f ? f.name : null });
+
+    const contextHint =
+      e.lines.map((r) => String(r.referencia ?? "").trim()).filter(Boolean).length > 0
+        ? `Referencias ya cargadas en la orden (no duplicar salvo corrección): ${e.lines
+            .map((r) => String(r.referencia ?? "").trim())
+            .filter(Boolean)
+            .slice(0, 40)
+            .join(", ")}${e.lines.filter((r) => String(r.referencia ?? "").trim()).length > 40 ? "…" : ""}`
+        : undefined;
+
+    try {
+      const filePromise =
+        f != null
+          ? prepareFilePayloadForGemini(f, f.type || "application/octet-stream")
+          : Promise.resolve(undefined as undefined);
+      const [sessionOutcome, fileOutcome] = await Promise.allSettled([
+        supabase.auth.getSession(),
+        filePromise,
+      ]);
+
+      if (sessionOutcome.status === "rejected") {
+        patchGeminiJob(orderId, {
+          errorBanner: { text: "No se pudo comprobar la sesión. Reintenta." },
+          busy: false,
+        });
+        return;
+      }
+      if (fileOutcome.status === "rejected") {
+        patchGeminiJob(orderId, {
+          errorBanner: { text: "No se pudo leer o optimizar el archivo adjunto." },
+          busy: false,
+        });
+        return;
+      }
+
+      const token = sessionOutcome.value.data.session?.access_token;
+      if (!token) {
+        patchGeminiJob(orderId, {
+          errorBanner: { text: "Sesión expirada. Vuelve a iniciar sesión.", code: 401 },
+          busy: false,
+        });
+        return;
+      }
+
+      const outboundMessage = (text || "Analiza el documento adjunto y extrae las líneas.").slice(
+        0,
+        28_000,
+      );
+
+      const bodyPayload = {
+        message: outboundMessage,
+        history: nextHistory.map((t) => ({
+          role: t.role,
+          text: String(t.text ?? "").slice(0, 6500),
+        })),
+        file: fileOutcome.value,
+        orderNumber: String(e.numero ?? "").trim() || undefined,
+        contextHint,
+        viewerDisplayName: String(userDisplayName ?? "").trim() || undefined,
+      };
+
+      const callApi = () =>
+        fetch("/api/collection-order/gemini", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(bodyPayload),
+        });
+
+      let res = await callApi();
+      if ([429, 502, 503].includes(res.status)) {
+        await new Promise((r) => setTimeout(r, 1700));
+        res = await callApi();
+      }
+
+      let data: {
+        error?: string;
+        reply?: string;
+        lines?: CollectionGeminiLine[];
+        usage?: {
+          promptTokenCount?: number;
+          candidatesTokenCount?: number;
+          totalTokenCount?: number;
+        } | null;
+      };
+      try {
+        data = (await res.json()) as typeof data;
+      } catch {
+        patchGeminiJob(orderId, {
+          errorBanner: {
+            text: `El servidor respondió ${res.status} pero el cuerpo no es JSON. Revisa logs o la URL de la API.`,
+            code: res.status,
+          },
+          busy: false,
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        patchGeminiJob(orderId, {
+          errorBanner: { text: data.error || `Error ${res.status}`, code: res.status },
+          busy: false,
+        });
+        return;
+      }
+
+      const reply = String(data.reply ?? "");
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+      const usageSummary = recordGeminiRequestSuccess(data.usage ?? null);
+
+      patchGeminiJob(orderId, {
+        lastLines: lines,
+        usageSummary,
+        history: [...nextHistory, { role: "model", text: reply } as const],
+        pendingFileName: null,
+        busy: false,
+      });
+      // Auto-aplicar y autoguardar siempre.
+      applyGeminiLinesToOrder(lines);
+    } catch (err) {
+      patchGeminiJob(orderId, {
+        errorBanner: {
+          text: err instanceof Error ? err.message : "Error de red (revisa tu conexión).",
+        },
+        busy: false,
+      });
+    }
+  };
+
+  const applyGeminiLinesToOrder = (incoming?: CollectionGeminiLine[]) => {
+    const source = Array.isArray(incoming)
+      ? incoming
+      : (geminiJobByOrderId[orderId]?.lastLines ?? []);
+    const useful = source.filter(
+      (row) =>
+        row.referencia ||
+        row.descripcion ||
+        row.bultos ||
+        row.unidadesPorBulto ||
+        row.unidadesTotales ||
+        row.pesoUnaPiezaKg ||
+        row.pesoPorBulto ||
+        row.pesoTotalKg ||
+        row.l ||
+        row.w ||
+        row.h ||
+        row.volumenM3 ||
+        row.modelo ||
+        row.paisOrigen ||
+        row.tejido ||
+        row.talla ||
+        row.forro ||
+        row.genero ||
+        row.composicion,
+    );
+    if (useful.length === 0) return;
+    const additions: CollectionOrderLine[] = useful.map((row) => ({
+      id: generateId(),
+      ...normalizeCollectionOrderLineFromImport(row),
+    }));
+    const baseOrder =
+      (editing && editing.id === orderId
+        ? editing
+        : orders.find((o) => o.id === orderId)) ?? e;
+    const nextOrder: CollectionOrder = {
+      ...baseOrder,
+      lines: [...(baseOrder.lines || []), ...additions],
+    };
+    patchGeminiJob(orderId, { lastLines: [] });
+    void persistOrder({ order: nextOrder, showAlerts: false });
+  };
 
   return (
     <>
@@ -762,15 +1053,15 @@ export function CollectionOrderModule({
                 alert("No hay líneas con datos para exportar.");
                 return;
               }
-              downloadMagayaReferenciasCsv({
+              void downloadMagayaReferenciasExcel({
                 measureRows: rows,
                 filenameBase: `magaya-recoleccion-${e.id.slice(0, 8)}`,
               });
             }}
-            title="CSV para Magaya: 18 columnas (incl. COMPOSICION; PESO = una pieza)"
-            className="flex items-center gap-2 rounded-xl border-2 border-amber-400/90 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:bg-amber-100 dark:border-amber-600/50 dark:bg-amber-950/40 dark:text-amber-100"
+            title="Magaya: plantilla Excel con 18 columnas; columna «cantidad por bulto» se ve como entero (0 decimales) pero conserva el valor exacto al seleccionar la celda."
+            className="flex items-center gap-2 rounded-xl border-2 border-amber-500/80 bg-gradient-to-r from-amber-100 to-orange-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:from-amber-200 hover:to-orange-100 dark:border-amber-500/40 dark:from-amber-950/50 dark:to-orange-950/30 dark:text-amber-100"
           >
-            <Download className="h-4 w-4" /> CSV Magaya
+            <FileSpreadsheet className="h-4 w-4" /> Magaya
           </button>
           <button
             type="button"
@@ -933,9 +1224,8 @@ export function CollectionOrderModule({
                 {e.lines.map((row, idx) => {
                   const totUnd = unidadesTotalesFromLine(row);
                   const pesoTot = pesoTotalFromLine(row);
+                  const totalUndRounded = Math.round(totUnd);
                   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-                  const und = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
-                  const totalUnd = bultos * und;
                   const l = parseFloat(String(row.l ?? 0)) || 0;
                   const w = parseFloat(String(row.w ?? 0)) || 0;
                   const h = parseFloat(String(row.h ?? 0)) || 0;
@@ -1004,16 +1294,34 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-20">
                         <input
-                          type="number"
-                          value={row.unidadesPorBulto ?? ""}
+                          type={focusedUndBultoRowId === row.id ? "number" : "text"}
+                          value={displayUndBultoValue({
+                            rowId: row.id,
+                            raw: String(row.unidadesPorBulto ?? ""),
+                            focusedUndBultoRowId,
+                            draftByRow: undBultoDraft,
+                          })}
                           disabled={unitsMode === "total"}
+                          onFocus={() => {
+                            if (unitsMode === "total") return;
+                            setFocusedUndBultoRowId(row.id);
+                            setUndBultoDraft((prev) => ({
+                              ...prev,
+                              [row.id]: String(row.unidadesPorBulto ?? ""),
+                            }));
+                          }}
                           onChange={(ev) =>
-                            updateLine(row.id, {
-                              unidadesPorBulto: sanitizeIntegerInput(ev.target.value),
-                            })
+                            (() => {
+                              const next = sanitizeQtyPerBundleInput(ev.target.value);
+                              setUndBultoDraft((prev) => ({ ...prev, [row.id]: next }));
+                              updateLine(row.id, { unidadesPorBulto: next });
+                            })()
                           }
-                          inputMode="numeric"
-                          step={1}
+                          onBlur={() => {
+                            setFocusedUndBultoRowId((prev) => (prev === row.id ? null : prev));
+                          }}
+                          inputMode="decimal"
+                          step="any"
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs transition dark:bg-slate-950 ${
                             unitsMode === "total"
                               ? "border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
@@ -1022,7 +1330,7 @@ export function CollectionOrderModule({
                         />
                       </td>
                       <td className="bg-slate-50/80 px-2 py-1 text-center text-sm font-black text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100">
-                        {Math.round(totalUnd)}
+                        {totalUndRounded}
                       </td>
                       <td className="px-2 py-1 w-24 bg-slate-50/70 dark:bg-slate-800/60">
                         <input
@@ -1273,16 +1581,10 @@ export function CollectionOrderModule({
           .map((r) => String(r.referencia ?? "").trim())
           .filter(Boolean)
           .slice(0, 80)}
-        onApplyLines={(lines: CollectionGeminiLine[]) => {
-          setEditing((prev) => {
-            if (!prev) return prev;
-            const additions: CollectionOrderLine[] = lines.map((row) => ({
-              id: generateId(),
-              ...normalizeCollectionOrderLineFromImport(row),
-            }));
-            return { ...prev, lines: [...prev.lines, ...additions] };
-          });
-        }}
+        job={geminiJob}
+        onChangeJob={(patch) => patchGeminiJob(orderId, patch)}
+        onSend={sendToGemini}
+        onApplyLines={applyGeminiLinesToOrder}
       />
     </>
   );

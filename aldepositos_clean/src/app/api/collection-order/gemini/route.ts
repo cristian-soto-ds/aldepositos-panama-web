@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, MediaResolution } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import {
   collectionGeminiResponseSchema,
@@ -18,6 +18,9 @@ import {
   sanitizeViewerDisplayNameHint,
 } from "@/lib/geminiCollectionOrderContext";
 import type { GeminiTokenUsage } from "@/lib/geminiClientUsage";
+import { postProcessGeminiExtractedLines } from "@/lib/collectionOrderGeminiPostProcess";
+import { extractPdfTextForGeminiFastPath } from "@/lib/geminiPdfTextForModel";
+import { parseCollectionGeminiModelText } from "@/lib/geminiCollectionOrderResponseParse";
 
 function usageFromGenAiResponse(response: unknown): GeminiTokenUsage | null {
   if (!response || typeof response !== "object") return null;
@@ -40,6 +43,13 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
+/** Menos tokens en prompt = menor latencia (suficiente para citas rápidas). */
+const HISTORY_TURNS = 4;
+const HISTORY_TURN_MAX_CHARS = 5_000;
+/** Proformas largas: 4096 truncaba JSON inválido; 8192 evita cortes típicos. */
+const REPLY_MAX_OUTPUT_TOKENS = 8192;
+const JSON_RETRY_PROMPT =
+  "Corrige formato: tu salida debe ser únicamente un objeto JSON válido con propiedades \"reply\" (string) y \"lines\" (array de filas), sin texto ni ``` markdown antes/después ni comentarios. Si antes quedaste sin espacio, acorta \"reply\" a 2–3 frases y completa todas las filas detectables del documento en \"lines\".";
 const ALLOWED_MIME = new Set([
   "application/pdf",
   "image/png",
@@ -148,32 +158,55 @@ export async function POST(request: NextRequest) {
     email: user.email ?? undefined,
   });
 
-  const userPreamble = [
+  let preambleLines = [
     `Quién escribe (sesión): ${preferredName}.`,
     body.orderNumber
       ? `Número de orden de recolección (contexto): ${body.orderNumber}.`
       : "",
     body.contextHint ? `Contexto adicional:\n${body.contextHint}` : "",
     message || "(Sin texto: solo analiza el archivo adjunto.)",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ];
 
   type ContentPart = { text?: string; inlineData?: { mimeType: string; data: string } };
   type GenContent = { role: string; parts: ContentPart[] };
 
   const contents: GenContent[] = [];
-  const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
+  const history = Array.isArray(body.history) ? body.history.slice(-HISTORY_TURNS) : [];
   for (const h of history) {
     const role = h.role === "model" ? "model" : "user";
-    const text = String(h.text ?? "").slice(0, 12_000);
+    const text = String(h.text ?? "").slice(0, HISTORY_TURN_MAX_CHARS);
     if (text) {
       contents.push({ role, parts: [{ text }] });
     }
   }
 
+  let pdfVisionSkippedForSpeed = false;
+  const mime = body.file ? String(body.file.mimeType ?? "").toLowerCase() : "";
+  if (
+    body.file?.base64 &&
+    mime === "application/pdf" &&
+    process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1"
+  ) {
+    const extracted = await extractPdfTextForGeminiFastPath(body.file.base64);
+    if (extracted) {
+      pdfVisionSkippedForSpeed = true;
+      preambleLines = [
+        ...preambleLines,
+        "Este PDF se procesó como texto seleccionable (respuesta más rápida). Extrae líneas como siempre; si ves tablas algo rotas en el texto, infiere orden de columnas desde continuidad y encabezados.",
+        "--- Contenido del PDF ---",
+        extracted,
+      ];
+    }
+  }
+
+  const userPreamble = preambleLines.filter(Boolean).join("\n\n");
+
   const parts: ContentPart[] = [{ text: userPreamble }];
-  if (body.file?.base64 && body.file.mimeType) {
+  if (
+    body.file?.base64 &&
+    body.file.mimeType &&
+    !pdfVisionSkippedForSpeed
+  ) {
     parts.push({
       inlineData: {
         mimeType: body.file.mimeType,
@@ -181,23 +214,39 @@ export async function POST(request: NextRequest) {
       },
     });
   }
+
   contents.push({ role: "user", parts });
 
   const ai = new GoogleGenAI({ apiKey });
+  const hasBinaryMedia =
+    pdfVisionSkippedForSpeed === false &&
+    Boolean(body.file?.base64 && body.file.mimeType);
+
+  const mrRaw = process.env.GEMINI_MEDIA_RESOLUTION?.trim().toLowerCase();
+  let mediaResolution: MediaResolution = MediaResolution.MEDIA_RESOLUTION_LOW;
+  if (mrRaw === "high") mediaResolution = MediaResolution.MEDIA_RESOLUTION_HIGH;
+  else if (mrRaw === "medium") {
+    mediaResolution = MediaResolution.MEDIA_RESOLUTION_MEDIUM;
+  }
 
   try {
-    const response = await ai.models.generateContent({
+    const genConfig = {
+      systemInstruction,
+      responseMimeType: "application/json" as const,
+      responseSchema: collectionGeminiResponseSchema,
+      temperature: 0.1,
+      topP: 0.85,
+      maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+      ...(hasBinaryMedia ? { mediaResolution } : {}),
+    };
+
+    let response = await ai.models.generateContent({
       model,
       contents,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: collectionGeminiResponseSchema,
-        temperature: 0.2,
-      },
+      config: genConfig,
     });
 
-    const raw = response.text;
+    let raw = response.text;
     if (!raw) {
       return NextResponse.json(
         {
@@ -207,27 +256,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let parsed: CollectionGeminiApiResponse;
-    try {
-      parsed = JSON.parse(raw) as CollectionGeminiApiResponse;
-    } catch {
+    let decoded = parseCollectionGeminiModelText(raw);
+    if (!decoded && process.env.GEMINI_SKIP_JSON_RETRY?.trim() !== "1") {
+      const retryContents = [
+        ...contents,
+        { role: "user", parts: [{ text: JSON_RETRY_PROMPT }] },
+      ];
+      response = await ai.models.generateContent({
+        model,
+        contents: retryContents,
+        config: genConfig,
+      });
+      raw = response.text;
+      decoded = raw ? parseCollectionGeminiModelText(raw) : null;
+    }
+
+    if (!decoded) {
+      logGeminiServerError("collection-order/gemini", new Error("json_parse_failed"), {
+        model,
+        rawSnippet: typeof raw === "string" ? raw.slice(0, 400) : null,
+      });
       return NextResponse.json(
         {
-          error: "Respuesta del modelo no es JSON válido.",
-          raw: raw.slice(0, 500),
+          error:
+            "La respuesta no llegó como JSON válido (a veces documentos muy largos o formato inesperado). Prueba «Nuevo chat», trocea el archivo o fuerza GEMINI_FORCE_PDF_VISION=1 si sospechas PDF solo imagen.",
+          raw: typeof raw === "string" ? raw.slice(0, 800) : "",
         },
         { status: 502 },
       );
     }
 
-    const lines = Array.isArray(parsed.lines) ? parsed.lines : [];
-    const reply = typeof parsed.reply === "string" ? parsed.reply : "";
-    const usage = usageFromGenAiResponse(response);
+    const parsed = decoded.parsed;
 
-    return NextResponse.json({
-      reply,
-      usage,
-      lines: lines.map((row: CollectionGeminiLine) => ({
+    const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+    const trimmed = rawLines
+      .filter(
+        (row): row is CollectionGeminiLine =>
+          row !== null && typeof row === "object",
+      )
+      .map((row: CollectionGeminiLine) => ({
         referencia: String(row.referencia ?? "").trim(),
         descripcion: String(row.descripcion ?? "").trim(),
         bultos: String(row.bultos ?? "").trim(),
@@ -248,7 +315,15 @@ export async function POST(request: NextRequest) {
         forro: String(row.forro ?? "").trim(),
         genero: String(row.genero ?? "").trim(),
         composicion: String(row.composicion ?? "").trim(),
-      })),
+      }));
+    const lines = postProcessGeminiExtractedLines(trimmed);
+    const reply = typeof parsed.reply === "string" ? parsed.reply : "";
+    const usage = usageFromGenAiResponse(response);
+
+    return NextResponse.json({
+      reply,
+      usage,
+      lines,
     });
   } catch (e) {
     logGeminiServerError("collection-order/gemini", e, { model });

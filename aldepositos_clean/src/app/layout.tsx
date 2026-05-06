@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Aldepositos Warehouse OS",
+  title: "AldePositos Zona Libre Panamá",
   description: "Sistema de gestión logística",
 };
 

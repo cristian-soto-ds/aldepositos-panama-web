@@ -12,13 +12,29 @@ function parseIntN(v: unknown): number {
   return Math.round(n);
 }
 
-/** Unidades totales = bultos × und/bulto */
+/** Unidades totales = bultos × und/bulto (admite und/bulto decimal para cuadrar totales exactos p. ej. 140÷3). */
 export function unidadesTotalesFromLine(line: CollectionOrderLine): number {
-  return parseIntN(line.bultos) * parseIntN(line.unidadesPorBulto);
+  const b = parseN(line.bultos);
+  const u = parseN(line.unidadesPorBulto);
+  if (b <= 0 || u <= 0) return 0;
+  const product = b * u;
+  const r = Math.round(product);
+  return Math.abs(product - r) < 1e-3 ? r : product;
+}
+
+function formatUnidadesPorBultoFromTotal(tot: number, bultos: number): string {
+  const und = tot / bultos;
+  if (!Number.isFinite(und) || und <= 0) return "";
+  if (Math.abs(und - Math.round(und)) < 1e-9) {
+    return String(Math.round(und));
+  }
+  const rounded = Math.round(und * 1e8) / 1e8;
+  return rounded.toFixed(8).replace(/\.?0+$/, "");
 }
 
 /**
  * Usuario edita unidades totales: recalcula und/bulto si hay bultos > 0.
+ * No redondea a entero si el total no es múltiplo de los bultos (evita 140 → 47×3=141).
  */
 export function applyUnidadesTotalesToLine(
   line: CollectionOrderLine,
@@ -29,8 +45,7 @@ export function applyUnidadesTotalesToLine(
   if (b <= 0 || tot <= 0) {
     return { ...line };
   }
-  const und = Math.round(tot / b);
-  return { ...line, unidadesPorBulto: String(und) };
+  return { ...line, unidadesPorBulto: formatUnidadesPorBultoFromTotal(tot, b) };
 }
 
 /** Peso total = bultos × peso por bulto */

@@ -8,7 +8,7 @@ export type CollectionOrderLine = {
   bultos?: string | number;
   unidadesPorBulto?: string | number;
   pesoPorBulto?: string | number;
-  /** Peso de una sola pieza (kg); columna PESO del CSV Magaya */
+  /** Peso de una pieza (kg); en CSV Magaya la columna PESO usa pesoPorBulto (igual que CSV Descargar). */
   pesoPiezaKg?: string | number;
   l?: string | number;
   w?: string | number;

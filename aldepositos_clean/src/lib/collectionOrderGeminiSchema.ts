@@ -7,7 +7,7 @@ export const collectionGeminiResponseSchema = {
     reply: {
       type: Type.STRING,
       description:
-        "Respuesta conversacional en español: resume lo encontrado, dudas o advertencias.",
+        "Español, breve y operativo (3–8 frases o viñetas): archivo o texto reconocido, nº líneas, conversiones docenas/dz→piezas si hubo, dudas mínimas; tono profesional de piso logístico.",
     },
     lines: {
       type: Type.ARRAY,
@@ -26,22 +26,22 @@ export const collectionGeminiResponseSchema = {
           unidadesPorBulto: {
             type: Type.STRING,
             description:
-              "Piezas dentro de UN bulto/caja, ENTEROS. Convierte pares (1 par=2), docenas (=12), medias docenas (=6), etc.",
+              "Piezas por UN bulto/caja. Convierte docenas/dz/pares a piezas. Si el total de línea no divide en entero entre bultos (ej. 140 piezas y 3 bultos), déjalo vacío y usa unidadesTotales.",
           },
           unidadesTotales: {
             type: Type.STRING,
             description:
-              "Si el documento solo da total de piezas de la línea, total en unidades (entero). Vacío si ya diste unidadesPorBulto.",
+              "Total piezas de la línea (entero). Si la factura dice cantidad como N (M) = N docenas + M piezas (ej. 11 (8) → 140), pon 140 aquí. Docenas sueltas: 10 dz → 120. La app reparte total÷bultos con decimales si hace falta.",
           },
           pesoUnaPiezaKg: {
             type: Type.STRING,
             description:
-              "Peso en kg de UNA sola pieza (artículo). Obligatorio cuando haya dato de peso: si el doc da peso por bulto, divide entre unidades por bulto. Es el valor de la columna PESO del CSV Magaya.",
+              "Peso en kg de una sola pieza cuando el documento lo permita derivar (peso por bulto ÷ piezas por bulto). El CSV Magaya usa columna PESO = pesoPorBulto (mismo que «Peso por Piezas» al descargar CSV); rellena pesoPorBulto en coherencia con el documento.",
           },
           pesoPorBulto: {
             type: Type.STRING,
             description:
-              "Peso del bulto completo en kg si el documento lo separa; si no, puedes dejar vacío si ya diste pesoUnaPiezaKg y unidadesPorBulto.",
+              "Peso en kg que la app usa igual que la columna «Peso por Piezas» al descargar CSV y como columna PESO en CSV Magaya: es el peso por bulto (no el total de la línea entera salvo que el documento lo defina así). Si el doc da solo peso por pieza × unidades por bulto, calcula el producto aquí.",
           },
           pesoTotalKg: {
             type: Type.STRING,

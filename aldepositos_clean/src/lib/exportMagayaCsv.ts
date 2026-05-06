@@ -1,7 +1,9 @@
 /**
- * CSV para importar referencias en Magaya (plantilla 18 columnas, incl. composición).
+ * CSV para importar referencias en Magaya (plantilla 18 columnas).
  * Misma codificación que inventario: coma, CRLF, Windows-1252.
- * Columna PESO = peso de una pieza (kg), según negocio / extracción IA.
+ * Columna PESO = mismo valor que «Peso por Piezas (kg)» del CSV Descargar (detailed): pesoPorBulto.
+ * UNI y COMPOSICION se dejan vacías por requisitos de Magaya / Excel (evita fecha en TALLA con punto final).
+ * Igual que inventario: primera línea `sep=,` para abrir por columnas en Excel regional ES.
  */
 
 import {
@@ -9,10 +11,11 @@ import {
   encodeCsvWindows1252,
   escapeCsvCell,
   rowHasExportableData,
+  withExcelSeparatorHint,
 } from "@/lib/exportInventarioCsv";
 
 /** Encabezados exactos requeridos por Magaya (orden fijo). */
-const MAGAYA_HEADERS = [
+export const MAGAYA_HEADERS = [
   "Numero de parte",
   "DESCRIPCION",
   "MODELO",
@@ -33,10 +36,16 @@ const MAGAYA_HEADERS = [
   "COMPOSICION",
 ] as const;
 
-const MAGAYA_TIPO_EMBALAJE = "CARTON";
+const MAGAYA_TIPO_EMBALAJE = "Cartón";
 const MAGAYA_UNIDAD = "PZA";
-const MAGAYA_UNI = "UNI";
 const MAGAYA_FORRO_DEFAULT = "N/A";
+
+/** Evita que Excel interprete rangos tipo 1-15 como fecha; punto final solo si hay texto. */
+function tallaParaCsvMagaya(raw: string): string {
+  const t = raw.trim();
+  if (!t) return "";
+  return t.endsWith(".") ? t : `${t}.`;
+}
 
 function parseNum(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -59,54 +68,62 @@ function cubicajeTotalM3(
   return 0;
 }
 
-/** Peso de una pieza (kg) para columna PESO. */
-function pesoUnaPiezaKg(row: Record<string, unknown>): number {
-  const explicit = parseNum(row.pesoPiezaKg);
-  if (explicit > 0) return explicit;
-  const und = parseNum(row.unidadesPorBulto);
-  const porBulto = parseNum(row.pesoPorBulto);
-  if (und > 0 && porBulto > 0) return porBulto / und;
-  return porBulto > 0 ? porBulto : 0;
+/** Igual que `exportInventarioCsv` variant `detailed`: columna «Peso por Piezas (kg)» (= pesoPorBulto). */
+function pesoMagayaIgualCsvInventario(row: Record<string, unknown>): number {
+  return parseNum(row.pesoPorBulto);
 }
 
-function buildMagayaRow(row: Record<string, unknown>): string[] {
+/**
+ * Valores de una fila Magaya: números como number (p. ej. und/bulto con decimales) para CSV o Excel.
+ * Índice 8 = columna «cantidad por bulto» (uno-based Excel col I).
+ */
+export function buildMagayaRowValues(
+  row: Record<string, unknown>,
+): (string | number)[] {
   const bultos = parseNum(row.bultos);
   const l = parseNum(row.l);
   const w = parseNum(row.w);
   const h = parseNum(row.h);
   const undBulto = parseNum(row.unidadesPorBulto);
-  const pesoPieza = pesoUnaPiezaKg(row);
+  const pesoColumn = pesoMagayaIgualCsvInventario(row);
   const cubicaje = cubicajeTotalM3(row, bultos, l, w, h);
 
   const modelo = String(row.magayaModelo ?? "").trim();
   const pais = String(row.paisOrigen ?? "").trim();
   const tejido = String(row.tejido ?? "").trim();
-  const talla = String(row.talla ?? "").trim();
+  const talla = tallaParaCsvMagaya(String(row.talla ?? ""));
   const forroRaw = String(row.forro ?? "").trim();
   const forro = forroRaw || MAGAYA_FORRO_DEFAULT;
-  const genero = String(row.genero ?? "").trim();
-  const composicion = String(row.composicion ?? "").trim();
+  const generoRaw = String(row.genero ?? "").trim();
+  const genero = generoRaw ? generoRaw.toLocaleUpperCase("es") : "";
 
   return [
     String(row.referencia ?? "").trim(),
     String(row.descripcion ?? "").trim(),
     modelo,
     MAGAYA_TIPO_EMBALAJE,
-    MAGAYA_UNI,
+    "",
     MAGAYA_UNIDAD,
-    csvNum(pesoPieza),
+    pesoColumn,
     pais,
-    csvNum(undBulto),
+    undBulto,
     tejido,
     talla,
     forro,
     genero,
-    csvNum(l),
-    csvNum(w),
-    csvNum(h),
-    csvNum(cubicaje),
-    composicion,
+    l,
+    w,
+    h,
+    cubicaje,
+    "",
   ];
+}
+
+function buildMagayaRow(row: Record<string, unknown>): string[] {
+  const v = buildMagayaRowValues(row);
+  return v.map((cell) =>
+    typeof cell === "number" ? csvNum(cell) : cell,
+  );
 }
 
 export function buildMagayaReferenciasCsv(
@@ -118,7 +135,7 @@ export function buildMagayaReferenciasCsv(
       .filter((r) => rowHasExportableData(r))
       .map((row) => buildMagayaRow(row).map(escapeCsvCell).join(",")),
   ];
-  return lines.join("\r\n");
+  return withExcelSeparatorHint(lines.join("\r\n"));
 }
 
 export function downloadMagayaReferenciasCsv(params: {

@@ -19,6 +19,7 @@ import {
   BarChart3,
   Search,
   Clock3,
+  Zap,
 } from "lucide-react";
 
 import type { Task } from "@/lib/types/task";
@@ -203,19 +204,56 @@ export function ControlPanelHome({
         module: "none",
       });
     };
-    pulse();
-    const interval = window.setInterval(pulse, 12000);
+    let intervalId: number | undefined;
+    const start = () => {
+      pulse();
+      if (intervalId != null) window.clearInterval(intervalId);
+      intervalId = window.setInterval(pulse, 12_000);
+    };
+    const stop = () => {
+      if (intervalId != null) {
+        window.clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
       void clearWorkPresence(tabId);
     };
   }, [userEmail, userDisplayName, userAvatarSrc]);
 
   useEffect(() => {
-    setNow(new Date());
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+    const tick = () => setNow(new Date());
+    tick();
+    const ms = preferences?.showSeconds ? 1_000 : 60_000;
+    let intervalId: number | undefined;
+    const start = () => {
+      if (intervalId != null) window.clearInterval(intervalId);
+      intervalId = window.setInterval(tick, ms);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        tick();
+        start();
+      } else if (intervalId != null) {
+        window.clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (intervalId != null) window.clearInterval(intervalId);
+    };
+  }, [preferences?.showSeconds]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -310,8 +348,19 @@ export function ControlPanelHome({
     }));
   }, [presenceList]);
 
+  const presenceByRa = useMemo(() => {
+    const m = new Map<
+      string,
+      { raKey: string; entries: WorkPresenceEntry[]; operatorCount: number }
+    >();
+    for (const g of presenceGrouped) {
+      m.set(g.raKey, g);
+    }
+    return m;
+  }, [presenceGrouped]);
+
   const connectedUsers = useMemo(() => {
-    const nowTs = Date.now();
+    const nowTs = now.getTime();
     const fresh = presenceList.filter((p) => nowTs - p.updatedAt <= 45_000);
     const map = new Map<
       string,
@@ -332,7 +381,7 @@ export function ControlPanelHome({
       avatarUrl: v.avatarUrl ?? null,
       connected: true,
     }));
-  }, [presenceList]);
+  }, [presenceList, now]);
 
   const filteredHighlight = useMemo(() => {
     let list = dashboard.sortedHighlight;
@@ -496,14 +545,6 @@ export function ControlPanelHome({
     setParsedData([]);
   };
 
-  const bultosPct =
-    dashboard.expectedBultos > 0
-      ? Math.min(
-          100,
-          Math.round((dashboard.currentBultos / dashboard.expectedBultos) * 100),
-        )
-      : 0;
-
   const completionDonutPct =
     dashboard.total > 0
       ? Math.round((dashboard.completed / dashboard.total) * 100)
@@ -524,14 +565,61 @@ export function ControlPanelHome({
     String(userDisplayName ?? "").trim() ||
     "Operador";
 
+  const isDark = preferences?.theme === "dark";
+
   return (
     <div className="max-w-[1600px] mx-auto animate-fade pb-10 px-0">
-      {/* Fondo suave tipo dashboard */}
-      <div className="rounded-[2rem] bg-slate-100/70 border border-slate-200 dark:border-slate-600/80 p-4 md:p-6 shadow-sm">
+      <div
+        className={`relative overflow-hidden rounded-[2rem] border p-4 shadow-md md:p-7 ${
+          isDark
+            ? "border-slate-700/70 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 shadow-[inset_6px_0_0_0_rgba(245,158,11,0.85)]"
+            : "border-slate-200/80 bg-gradient-to-br from-white via-slate-50/95 to-slate-100/70 shadow-[inset_6px_0_0_0_#e8b84a]"
+        }`}
+      >
+        <div
+          className={`pointer-events-none absolute inset-0 opacity-[0.35] ${
+            isDark
+              ? "bg-[radial-gradient(ellipse_120%_80%_at_0%_-20%,rgba(59,130,246,0.14),transparent_50%),radial-gradient(ellipse_80%_60%_at_100%_0%,rgba(16,185,129,0.06),transparent_45%)]"
+              : "bg-[radial-gradient(ellipse_100%_70%_at_0%_-10%,rgba(37,99,235,0.08),transparent_50%),radial-gradient(ellipse_70%_50%_at_100%_0%,rgba(22,38,63,0.05),transparent_40%)]"
+          }`}
+          aria-hidden
+        />
+        <div className="relative z-10">
+        {/* Franja de operaciones: cambio visual muy visible vs. versiones anteriores */}
+        <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-white/15 bg-gradient-to-r from-[#16263F] via-[#1a3558] to-blue-600/95 p-4 text-white shadow-md sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6 md:p-5">
+          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FFC400] text-[#16263F] shadow-md">
+              <Zap className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#FFC400]">
+                Centro de operaciones
+              </p>
+              <p className="mt-0.5 text-sm font-bold leading-snug text-blue-100 sm:text-base">
+                Resumen en vivo de RAs, bultos y quién está capturando ahora.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+            <span className="rounded-full bg-white/12 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-white/95 backdrop-blur-sm">
+              {formatNumber(dashboard.total)} RAs en sistema
+            </span>
+            <span className="rounded-full bg-emerald-400/20 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-emerald-50">
+              {formatNumber(activeOrders)} activas
+            </span>
+          </div>
+        </div>
+
         {/* Barra superior: título + búsqueda / filtro + acciones */}
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-6">
-          <div className="flex items-start gap-4 min-w-0">
-            <div className="relative flex h-[120px] w-[120px] shrink-0 items-center justify-center rounded-[1.6rem] bg-[#16263F] text-white overflow-hidden border-2 border-white/80 shadow-[0_10px_30px_rgba(15,23,42,0.18)]">
+        <header className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4 md:gap-5">
+            <div
+              className={`relative flex h-[112px] w-[112px] shrink-0 items-center justify-center overflow-hidden rounded-[1.35rem] text-white shadow-xl md:h-[120px] md:w-[120px] md:rounded-[1.5rem] ${
+                isDark
+                  ? "border border-white/10 bg-gradient-to-br from-slate-800 to-[#16263F] shadow-black/40 ring-2 ring-blue-500/25"
+                  : "border-2 border-white bg-[#16263F] shadow-[0_12px_40px_rgba(22,38,63,0.22)] ring-2 ring-slate-200/80"
+              }`}
+            >
               {headerAvatarSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -540,7 +628,7 @@ export function ControlPanelHome({
                   className="h-full w-full object-cover object-center"
                 />
               ) : (
-                <span className="text-base font-black tracking-wide" aria-hidden>
+                <span className="text-lg font-black tracking-wide md:text-xl" aria-hidden>
                   {avatarInitialsFromName(
                     profileFullName,
                     userDisplayName,
@@ -549,47 +637,76 @@ export function ControlPanelHome({
                 </span>
               )}
             </div>
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                {currentDate}
-              </p>
-              <h1 className="text-2xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 tracking-tight leading-tight">
+            <div className="min-w-0 pt-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] ${
+                    isDark
+                      ? "border border-slate-600/80 bg-slate-800/80 text-slate-300"
+                      : "border border-slate-200 bg-white/90 text-slate-500 shadow-sm"
+                  }`}
+                >
+                  Vista general
+                </span>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                  {currentDate}
+                </p>
+              </div>
+              <h1 className="mt-1.5 bg-gradient-to-r from-[#16263F] via-blue-700 to-blue-500 bg-clip-text text-2xl font-black leading-tight tracking-tight text-transparent dark:from-white dark:via-sky-200 dark:to-blue-300 md:text-3xl md:leading-tight">
                 Panel principal
               </h1>
-              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300 mt-0.5 truncate">
+              <p className="mt-1 truncate text-sm font-semibold text-slate-600 dark:text-slate-300">
                 {getGreeting()},{" "}
-                <span className="text-[#16263F] dark:text-slate-100">{greetingName}</span>
+                <span className="text-[#16263F] dark:text-sky-300">{greetingName}</span>
               </p>
-              <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 shadow-sm">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-[#16263F] text-white">
-                  <Clock3 className="w-3.5 h-3.5" />
+              <div
+                className={`mt-3 inline-flex items-center gap-2 rounded-xl px-2.5 py-1.5 ${
+                  isDark
+                    ? "border border-slate-600/70 bg-slate-800/60 shadow-inner shadow-black/20"
+                    : "border border-slate-200/90 bg-white shadow-sm"
+                }`}
+              >
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#16263F] to-blue-700 text-white shadow-md shadow-blue-900/20">
+                  <Clock3 className="h-3.5 w-3.5" />
                 </span>
                 <div className="leading-tight">
                   <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
                     Hora en vivo
                   </p>
-                  <p className="text-xs font-black text-[#16263F] dark:text-slate-100 tabular-nums">{currentTime}</p>
+                  <p className="text-xs font-black tabular-nums text-[#16263F] dark:text-slate-100">
+                    {currentTime}
+                  </p>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto lg:max-w-2xl">
-            <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white/90 backdrop-blur-sm px-4 py-2.5 shadow-sm">
+          <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto lg:max-w-2xl">
+            <div
+              className={`flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-3 py-2.5 backdrop-blur-sm transition-shadow focus-within:ring-2 sm:rounded-full sm:px-4 ${
+                isDark
+                  ? "border border-slate-600/80 bg-slate-800/70 focus-within:border-blue-500/50 focus-within:ring-blue-500/25"
+                  : "border border-slate-200/90 bg-white/95 shadow-sm focus-within:border-blue-300/80 focus-within:ring-blue-500/20"
+              }`}
+            >
               <Search className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Buscar RA, cliente o proveedor…"
-                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] dark:text-slate-100 placeholder:text-slate-400 dark:text-slate-500 outline-none"
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
               <select
                 value={filterStatus}
                 onChange={(e) =>
                   setFilterStatus(e.target.value as "all" | "in_progress" | "pending")
                 }
-                className="shrink-0 rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 py-1.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider text-[#16263F] dark:text-slate-100 outline-none cursor-pointer"
+                className={`shrink-0 cursor-pointer rounded-xl border py-1.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider outline-none sm:rounded-full ${
+                  isDark
+                    ? "border-slate-600 bg-slate-900/80 text-slate-100"
+                    : "border-slate-200 bg-slate-50 text-[#16263F]"
+                }`}
                 aria-label="Filtrar por estado"
               >
                 <option value="all">Todos</option>
@@ -597,15 +714,15 @@ export function ControlPanelHome({
                 <option value="pending">Pendiente</option>
               </select>
             </div>
-            <div className="flex gap-2 shrink-0">
+            <div className="flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={openManualModal}
-                className="inline-flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-full bg-[#16263F] px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-[#16263F]/20 hover:bg-[#0f1b2e] transition active:scale-[0.98]"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#16263F] to-[#1a3560] px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-[#16263F]/20 transition hover:brightness-110 active:scale-[0.98] sm:flex-none"
               >
                 <Plus className="h-4 w-4" /> Manual
               </button>
-              <label className="inline-flex flex-1 sm:flex-none cursor-pointer items-center justify-center gap-2 rounded-full bg-emerald-600 px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-emerald-600/25 hover:bg-emerald-700 transition active:scale-[0.98]">
+              <label className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-r from-emerald-600 to-emerald-500 px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-emerald-700/20 transition hover:brightness-110 active:scale-[0.98] sm:flex-none">
                 <UploadCloud className="h-4 w-4" /> Excel
                 <input
                   type="file"
@@ -620,13 +737,18 @@ export function ControlPanelHome({
         </header>
 
         {/* Hero + donut + KPIs compactos */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5 mb-6">
-          <div className="lg:col-span-7 relative overflow-hidden rounded-[2rem] border border-white/20 bg-gradient-to-br from-[#16263F] via-[#1a3a66] to-[#2563eb] p-6 md:p-8 text-white shadow-xl shadow-[#16263F]/15">
+        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
+          <div className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-gradient-to-br from-[#16263F] via-[#1a3a66] to-[#2563eb] p-6 text-white shadow-lg shadow-[#16263F]/15 md:p-8 lg:col-span-7">
             <div
-              className="pointer-events-none absolute -right-8 -top-8 h-48 w-48 rounded-full bg-white/10 blur-3xl"
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(105deg,transparent_40%,rgba(255,255,255,0.06)_50%,transparent_60%)]"
               aria-hidden
             />
-            <div className="relative z-10 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+            <div
+              className="pointer-events-none absolute -right-8 -top-8 h-52 w-52 rounded-full bg-white/12 blur-3xl"
+              aria-hidden
+            />
+            <div className="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full bg-emerald-400/10 blur-3xl" aria-hidden />
+            <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-200/90">
                   Resumen operativo
@@ -661,8 +783,8 @@ export function ControlPanelHome({
             </div>
           </div>
 
-          <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4">
-            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/50 dark:shadow-black/30 flex flex-row items-center gap-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-5 lg:grid-cols-1">
+            <div className="flex flex-row items-center gap-5 rounded-[2rem] border border-slate-200/80 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
               <DonutRing percent={completionDonutPct} />
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
@@ -677,7 +799,7 @@ export function ControlPanelHome({
                 </p>
               </div>
             </div>
-            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-4 shadow-md shadow-slate-200/50 dark:shadow-black/30 grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 rounded-[2rem] border border-slate-200/80 bg-white p-4 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
               <MiniStat icon={<Truck className="h-3.5 w-3.5" />} label="Despachados" value={dashboard.dispatched} />
               <MiniStat icon={<AlertCircle className="h-3.5 w-3.5 text-red-500" />} label="Prioridad" value={dashboard.priority} />
               <MiniStat icon={<Package className="h-3.5 w-3.5" />} label="Progreso real" value={`${overallProgressPct}%`} />
@@ -688,21 +810,25 @@ export function ControlPanelHome({
 
         {/* Contenido principal: lista + lateral */}
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <section className="xl:col-span-8 rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 md:p-6 shadow-md shadow-slate-200/40 dark:shadow-black/25">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-              <div className="flex items-center gap-2">
-                <Activity className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
-                <h2 className="text-sm font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
-                  Actividad en depósito
-                </h2>
+          <section className="rounded-[2rem] border border-slate-200/80 bg-white p-5 shadow-md shadow-slate-200/25 md:p-6 xl:col-span-8 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+            <div className="mb-5 flex flex-col gap-3 border-b border-slate-100 pb-4 dark:border-slate-800 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#16263F] to-blue-700 text-white shadow-md shadow-blue-900/25">
+                  <Activity className="h-5 w-5" aria-hidden />
+                </span>
+                <div>
+                  <h2 className="text-sm font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
+                    Actividad en depósito
+                  </h2>
+                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Quién trabaja qué · mismo RA
+                  </p>
+                </div>
               </div>
-              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                Quién trabaja qué · colaboración en el mismo RA
-              </p>
             </div>
 
             {presenceGrouped.length > 0 && (
-              <div className="mb-5 rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-950/50 p-3">
+              <div className="mb-5 rounded-2xl border border-blue-200/80 bg-gradient-to-br from-blue-50 to-white p-3.5 dark:border-blue-900/50 dark:from-blue-950/60 dark:to-slate-900/80">
                 <p className="text-[10px] font-black uppercase tracking-wider text-blue-800 mb-2">
                   En captura ahora (esta sesión)
                 </p>
@@ -720,17 +846,18 @@ export function ControlPanelHome({
             )}
 
             {filteredHighlight.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/80 py-12 text-center px-4">
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/90 px-4 py-14 text-center dark:border-slate-600 dark:bg-slate-800/60">
+                <Package className="mx-auto mb-3 h-10 w-10 text-slate-300 dark:text-slate-600" aria-hidden />
                 <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
                   No hay órdenes que coincidan con el filtro o la búsqueda.
                 </p>
               </div>
             ) : (
-              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              <ul className="space-y-2">
                 {filteredHighlight.map((t) => {
                   const taskProgress = getTaskProgressPercent(t);
                   const raK = String(t.ra || "").trim().toUpperCase();
-                  const pres = presenceGrouped.find((p) => p.raKey === raK);
+                  const pres = presenceByRa.get(raK);
                   const liveLabels = pres
                     ? Array.from(
                         new Map(
@@ -744,19 +871,19 @@ export function ControlPanelHome({
                   return (
                     <li
                       key={t.id}
-                      className="flex flex-col gap-3 py-4 first:pt-0 md:flex-row md:items-center md:justify-between"
+                      className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50/40 px-4 py-4 transition-colors hover:border-slate-200 hover:bg-white dark:border-slate-800 dark:bg-slate-800/30 dark:hover:border-slate-600 dark:hover:bg-slate-800/60 md:flex-row md:items-center md:justify-between"
                     >
                       <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-black text-[#16263F] dark:text-slate-100">RA {t.ra}</span>
-                            <span className="rounded-full border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-slate-600 dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-300">
                               {moduleLabel(t.type)}
                             </span>
                             <span
                               className={`rounded-full px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider ${
                                 t.status === "pending"
-                                  ? "bg-amber-100 text-amber-900"
-                                  : "bg-sky-100 text-sky-900"
+                                  ? "border border-amber-200/80 bg-amber-100 text-amber-950 dark:border-amber-800/60 dark:bg-amber-950/50 dark:text-amber-100"
+                                  : "border border-sky-200/80 bg-sky-100 text-sky-950 dark:border-sky-800/60 dark:bg-sky-950/45 dark:text-sky-100"
                               }`}
                             >
                               {statusLabel(t.status)}
@@ -782,9 +909,9 @@ export function ControlPanelHome({
                             <span>Progreso</span>
                             <span>{taskProgress}%</span>
                           </div>
-                          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-700">
                             <div
-                              className="h-full rounded-full bg-emerald-500 transition-all"
+                              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all"
                               style={{ width: `${taskProgress}%` }}
                             />
                           </div>
@@ -799,7 +926,7 @@ export function ControlPanelHome({
               </ul>
             )}
 
-            <div className="mt-5 flex flex-wrap items-start gap-2 rounded-2xl border border-blue-100 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-950/60 p-3 md:p-4">
+            <div className="mt-5 flex flex-wrap items-start gap-3 rounded-2xl border border-blue-200/70 bg-blue-50/90 p-3.5 dark:border-blue-900/45 dark:bg-blue-950/50 md:p-4">
               <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
               <p className="text-xs font-semibold text-blue-900 leading-relaxed">
                 <span className="font-black">Colaboración:</span> varias personas pueden
@@ -810,10 +937,12 @@ export function ControlPanelHome({
             </div>
           </section>
 
-          <aside className="xl:col-span-4 space-y-4">
-            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
+          <aside className="space-y-4 xl:col-span-4">
+            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/80 dark:text-violet-300">
+                  <BarChart3 className="h-5 w-5" aria-hidden />
+                </span>
                 <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Por módulo
                 </h3>
@@ -840,16 +969,18 @@ export function ControlPanelHome({
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
-              <div className="flex items-center gap-2 mb-3">
-                <Layers className="h-5 w-5 text-[#16263F] dark:text-slate-100" />
+            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-3 flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100 text-sky-800 dark:bg-sky-950/80 dark:text-sky-300">
+                  <Layers className="h-5 w-5" aria-hidden />
+                </span>
                 <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
                   Progreso general
                 </h3>
               </div>
-              <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#16263F] to-blue-500 transition-all"
+                  className="h-full rounded-full bg-gradient-to-r from-[#16263F] via-blue-600 to-sky-400 transition-all shadow-sm"
                   style={{ width: `${overallProgressPct}%` }}
                 />
               </div>
@@ -858,12 +989,17 @@ export function ControlPanelHome({
               </p>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200 dark:border-slate-600/90 dark:border-slate-600/90 bg-white dark:bg-slate-900 p-5 shadow-md shadow-slate-200/40 dark:shadow-black/25">
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
-                  Conectados ahora
-                </h3>
-                <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                    <Users className="h-5 w-5" aria-hidden />
+                  </span>
+                  <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
+                    Conectados ahora
+                  </h3>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
                   {connectedUsers.length}
                 </span>
               </div>
@@ -913,7 +1049,7 @@ export function ControlPanelHome({
                           <p className="text-xs font-black text-[#16263F] dark:text-slate-100 truncate">
                             {u.userLabel}
                           </p>
-                          <p className="text-[10px] font-semibold text-emerald-700">
+                          <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                             {u.connected ? "Conectado" : "Desconectado"}
                           </p>
                         </div>
@@ -924,9 +1060,11 @@ export function ControlPanelHome({
               )}
             </div>
 
-            <div className="rounded-[2rem] border border-dashed border-slate-300 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-800/80 p-4">
-              <div className="flex items-center gap-2 text-[#16263F] dark:text-slate-100 mb-2">
-                <User className="h-4 w-4" />
+            <div className="rounded-[2rem] border border-dashed border-slate-300/90 bg-gradient-to-br from-slate-50 to-white p-4 dark:border-slate-600 dark:from-slate-900 dark:to-slate-950">
+              <div className="mb-2 flex items-center gap-2 text-[#16263F] dark:text-slate-100">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
+                  <User className="h-4 w-4" aria-hidden />
+                </span>
                 <span className="text-[10px] font-black uppercase tracking-wider">
                   Tip
                 </span>
@@ -938,6 +1076,7 @@ export function ControlPanelHome({
               </p>
             </div>
           </aside>
+        </div>
         </div>
       </div>
 
@@ -1033,9 +1172,9 @@ export function ControlPanelHome({
 
 function HeroChip({ label, value }: { label: string; value: string }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-sm">
-      <span className="text-blue-100/85">{label}</span>
-      <span className="tabular-nums">{value}</span>
+    <span className="inline-flex items-center gap-2 rounded-full border border-white/30 bg-white/12 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-wider text-white shadow-sm backdrop-blur-md">
+      <span className="text-blue-100/90">{label}</span>
+      <span className="tabular-nums text-white">{value}</span>
     </span>
   );
 }
@@ -1046,7 +1185,7 @@ function SparklineBars({ heights }: { heights: number[] }) {
       {heights.map((h, i) => (
         <div
           key={i}
-          className="w-2 rounded-t-md bg-white/35 transition-all"
+          className="w-2 rounded-t-md bg-gradient-to-t from-white/25 to-white/55 shadow-[0_0_12px_rgba(255,255,255,0.12)] transition-all"
           style={{ height: `${Math.max(12, h)}%` }}
         />
       ))}
@@ -1061,20 +1200,27 @@ function DonutRing({ percent }: { percent: number }) {
   return (
     <div className="relative h-[100px] w-[100px] shrink-0">
       <svg className="-rotate-90" width={100} height={100} viewBox="0 0 100 100" aria-hidden>
-        <circle cx="50" cy="50" r={r} fill="none" stroke="#e2e8f0" strokeWidth="10" />
         <circle
           cx="50"
           cy="50"
           r={r}
           fill="none"
-          stroke="#16263F"
+          strokeWidth="10"
+          className="stroke-slate-200 dark:stroke-slate-600"
+        />
+        <circle
+          cx="50"
+          cy="50"
+          r={r}
+          fill="none"
           strokeWidth="10"
           strokeLinecap="round"
           strokeDasharray={`${dash} ${c}`}
+          className="stroke-[#16263F] dark:stroke-sky-400"
         />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <Package className="h-6 w-6 text-[#16263F] dark:text-slate-100 opacity-80" aria-hidden />
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+        <Package className="h-6 w-6 text-[#16263F] opacity-80 dark:text-slate-100" aria-hidden />
         <span className="text-sm font-black text-[#16263F] dark:text-slate-100">{percent}%</span>
       </div>
     </div>
@@ -1091,12 +1237,12 @@ function MiniStat({
   value: string | number;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-800/90 p-2.5">
+    <div className="flex flex-col gap-0.5 rounded-xl border border-slate-100/90 bg-slate-50/95 p-2.5 dark:border-slate-700/90 dark:bg-slate-800/90">
       <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
         {icon}
         {label}
       </div>
-      <p className="text-lg font-black tabular-nums text-[#16263F] dark:text-slate-100 leading-none">{value}</p>
+      <p className="text-lg font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">{value}</p>
     </div>
   );
 }
@@ -1117,8 +1263,8 @@ function ActivityPresenceRow({
     )
     .join(" · ");
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-blue-100/80 bg-white/90 dark:bg-slate-800/90 dark:border-blue-900/40 px-3 py-2.5 shadow-sm">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+    <div className="flex items-center gap-3 rounded-xl border border-blue-100/90 bg-white/95 px-3 py-2.5 shadow-sm dark:border-blue-900/50 dark:bg-slate-800/95">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400">
         <Activity className="h-4 w-4" aria-hidden />
       </div>
       <div className="min-w-0 flex-1">

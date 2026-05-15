@@ -1,5 +1,12 @@
 # Configuración Supabase (Aldepositos)
 
+## Sesión en el navegador (cookies)
+
+La app usa `@supabase/ssr` con **`createBrowserClient`**: la sesión vive en **cookies** para que el **middleware de Next** pueda refrescar el token y proteger `/panel` y `/welcome` antes de servir la página.
+
+- Tras este cambio, los usuarios pueden tener que **iniciar sesión una vez más** (antes la sesión podía estar solo en `localStorage`).
+- En producción usá **HTTPS** para que las cookies de autenticación se envíen de forma segura.
+
 ## Variables de entorno
 
 En `.env.local` (y en Vercel → Project → Settings → Environment Variables):

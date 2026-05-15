@@ -41,6 +41,7 @@ import { isPublicAvatarUrl } from "@/lib/profileAvatar";
 import { fetchPerfilUsuario } from "@/lib/perfiles";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { withTaskContribution } from "@/lib/taskContributions";
+import { fetchWithTimeout } from "@/lib/clientFetch";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -118,9 +119,12 @@ export default function PanelPage() {
 
         if (accessToken && typeof window !== "undefined") {
           try {
-            const res = await fetch(
+            const res = await fetchWithTimeout(
               `${window.location.origin}/api/me/display-name`,
-              { headers: { Authorization: `Bearer ${accessToken}` } },
+              {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                timeoutMs: 20_000,
+              },
             );
             if (res.ok) {
               const payload = (await res.json()) as {

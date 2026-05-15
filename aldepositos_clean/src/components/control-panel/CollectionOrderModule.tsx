@@ -6,6 +6,7 @@ import {
   Download,
   FileSpreadsheet,
   HandHelping,
+  Loader2,
   Plus,
   Save,
   Send,
@@ -30,9 +31,14 @@ import {
 import { normalizeCollectionOrderLineFromImport } from "@/lib/collectionOrderUnitNormalization";
 import {
   countInventarioCsvRows,
+  countInventarioCsvRowsBulk,
   downloadInventarioCsv,
 } from "@/lib/exportInventarioCsv";
-import { downloadMagayaReferenciasExcel } from "@/lib/exportMagayaExcel";
+import { downloadInventarioExcelFromSections } from "@/lib/exportInventarioExcel";
+import {
+  downloadMagayaReferenciasExcel,
+  downloadMagayaReferenciasExcelFromSections,
+} from "@/lib/exportMagayaExcel";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
 import {
   CollectionOrderGeminiPanel,
@@ -109,6 +115,98 @@ function formatWeight(value: string | number | undefined): string {
   const n = parseFloat(String(value).replace(",", "."));
   if (!Number.isFinite(n)) return "";
   return n.toFixed(2);
+}
+
+/** Referencias con número de parte en la lista de órdenes (no cuenta filas vacías). */
+function listReferenciasCount(lines: CollectionOrderLine[]): number {
+  return lines.filter((l) => String(l.referencia ?? "").trim().length > 0).length;
+}
+
+/** Suma de bultos de todas las líneas de la orden (enteros, como en la tabla). */
+function listBultosTotal(lines: CollectionOrderLine[]): number {
+  let sum = 0;
+  for (const l of lines) {
+    const n = parseFloat(String(l.bultos ?? "").replace(",", "."));
+    if (Number.isFinite(n) && n > 0) sum += Math.round(n);
+  }
+  return sum;
+}
+
+/** Barra indeterminada + texto mientras la IA analiza el documento */
+function CollectionOrderAiAnalyzingStrip(props: {
+  label: string;
+  className?: string;
+  dense?: boolean;
+  /** Una sola fila: barra flexible + texto (menos alto). */
+  inlineRow?: boolean;
+}) {
+  const { label, className, dense, inlineRow } = props;
+  if (inlineRow) {
+    return (
+      <div
+        className={className}
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="collection-order-ai-progress-track min-w-0 flex-1">
+            <div className="collection-order-ai-progress-fill" />
+          </div>
+          <p className="flex shrink-0 items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-200">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            <span className="max-w-[14rem] truncate sm:max-w-[20rem]">{label}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={className}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="collection-order-ai-progress-track">
+        <div className="collection-order-ai-progress-fill" />
+      </div>
+      <p
+        className={
+          dense
+            ? "mt-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-200"
+            : "mt-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-700 dark:text-violet-200"
+        }
+      >
+        <Loader2
+          className={dense ? "h-3 w-3 shrink-0 animate-spin" : "h-3.5 w-3.5 shrink-0 animate-spin"}
+          aria-hidden
+        />
+        {label}
+      </p>
+    </div>
+  );
+}
+
+/** Una línea: barra corta + texto (lista de órdenes, poco espacio). */
+function CollectionOrderAiAnalyzingInline() {
+  return (
+    <div
+      className="inline-flex min-w-0 max-w-[11rem] shrink-0 flex-col gap-0.5 rounded-lg border border-violet-300/70 bg-violet-50/90 px-1.5 py-1 shadow-sm dark:border-violet-600/45 dark:bg-violet-950/50 sm:max-w-[13rem]"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      title={`${AI_ASSISTANT_DISPLAY_NAME} está analizando el documento`}
+    >
+      <div className="relative h-1 w-full min-w-[4.5rem] overflow-hidden rounded-full bg-violet-200/90 dark:bg-violet-900/60">
+        <div className="collection-order-ai-progress-fill" />
+      </div>
+      <span className="flex items-center gap-1 text-[8px] font-black uppercase leading-none tracking-wide text-violet-700 dark:text-violet-200">
+        <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" aria-hidden />
+        <span className="truncate">Analizando…</span>
+      </span>
+    </div>
+  );
 }
 
 function mergePendingTotalsIntoLines(
@@ -251,6 +349,8 @@ export function CollectionOrderModule({
    */
   const [focusedUndBultoRowId, setFocusedUndBultoRowId] = useState<string | null>(null);
   const [undBultoDraft, setUndBultoDraft] = useState<Record<string, string>>({});
+  /** Selección múltiple en la lista de órdenes (eliminar en lote). */
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
 
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -278,6 +378,7 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setSelectedOrderIds({});
   };
 
   const openEdit = (o: CollectionOrder) => {
@@ -289,6 +390,7 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setSelectedOrderIds({});
   };
 
   const backToList = () => {
@@ -298,6 +400,7 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setSelectedOrderIds({});
     void reloadOrders();
   };
 
@@ -306,10 +409,13 @@ export function CollectionOrderModule({
   };
 
   const patchGeminiJob = (orderId: string, patch: Partial<CollectionOrderGeminiJobState>) => {
-    setGeminiJobByOrderId((prev) => ({
-      ...prev,
-      [orderId]: { ...getGeminiJob(orderId), ...patch },
-    }));
+    setGeminiJobByOrderId((prev) => {
+      const current = prev[orderId] ?? makeEmptyGeminiJob();
+      return {
+        ...prev,
+        [orderId]: { ...current, ...patch },
+      };
+    });
   };
 
   const updateEditing = (patch: Partial<CollectionOrder>) => {
@@ -494,6 +600,95 @@ export function CollectionOrderModule({
       alert("No se pudo eliminar en Supabase.");
     }
   };
+
+  const deleteSelectedOrders = async () => {
+    const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
+    if (selected.length === 0) {
+      alert("Seleccioná al menos una orden.");
+      return;
+    }
+    const labels = selected.map((o) => `#${String(o.numero ?? "").trim() || o.id.slice(0, 8)}`);
+    const preview =
+      labels.length <= 8 ? labels.join(", ") : `${labels.slice(0, 8).join(", ")}… (+${labels.length - 8})`;
+    if (
+      !confirm(
+        `¿Eliminar ${selected.length} orden(es) de recolección?\n${preview}`,
+      )
+    ) {
+      return;
+    }
+    let failed = 0;
+    const deletedIds: string[] = [];
+    for (const o of selected) {
+      try {
+        await deleteCollectionOrderById(o.id);
+        deletedIds.push(o.id);
+      } catch (e) {
+        console.error(e);
+        failed += 1;
+      }
+    }
+    const deletedSet = new Set(deletedIds);
+    setOrders((prev) => prev.filter((x) => !deletedSet.has(x.id)));
+    setGeminiJobByOrderId((prev) => {
+      const next = { ...prev };
+      for (const id of deletedIds) delete next[id];
+      return next;
+    });
+    setSelectedOrderIds((prev) => {
+      const next = { ...prev };
+      for (const id of deletedIds) delete next[id];
+      return next;
+    });
+    if (editing && deletedSet.has(editing.id)) setEditing(null);
+    if (failed > 0) {
+      alert(`${failed} orden(es) no se pudieron eliminar. Revisá Supabase y reintentá.`);
+      void reloadOrders();
+    }
+  };
+
+  const downloadSelectedListMagaya = useCallback(async () => {
+    const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
+    if (selected.length === 0) {
+      alert("Seleccioná al menos una orden.");
+      return;
+    }
+    const sections = selected.map((o) => ({
+      measureRows: o.lines as unknown as Record<string, unknown>[],
+    }));
+    if (countInventarioCsvRowsBulk(sections) === 0) {
+      alert("Las órdenes seleccionadas no tienen líneas con datos para exportar.");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    await downloadMagayaReferenciasExcelFromSections({
+      sections,
+      filenameBase: `magaya-recoleccion-varias-${stamp}`,
+    });
+  }, [orders, selectedOrderIds]);
+
+  const downloadSelectedListInventarioExcel = useCallback(async () => {
+    const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
+    if (selected.length === 0) {
+      alert("Seleccioná al menos una orden.");
+      return;
+    }
+    const sections = selected.map((o) => ({
+      numeroDocumento: String(o.numero ?? "").trim() || o.id.slice(0, 8),
+      measureRows: o.lines as unknown as Record<string, unknown>[],
+    }));
+    if (countInventarioCsvRowsBulk(sections) === 0) {
+      alert("Las órdenes seleccionadas no tienen líneas con datos para exportar.");
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    await downloadInventarioExcelFromSections({
+      sections,
+      variant: "detailed",
+      filenameBase: `recoleccion-inventario-${stamp}`,
+      sheetName: "Inventario",
+    });
+  }, [orders, selectedOrderIds]);
 
   const onExcelImport: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const file = e.target.files?.[0];
@@ -733,6 +928,18 @@ export function CollectionOrderModule({
 
   /* ——— Lista ——— */
   if (!editing) {
+    const listSelectedCount = orders.filter((o) => selectedOrderIds[o.id] === true).length;
+    const toggleListSelectAll = () => {
+      if (orders.length === 0) return;
+      if (listSelectedCount === orders.length) {
+        setSelectedOrderIds({});
+        return;
+      }
+      const next: Record<string, boolean> = {};
+      for (const o of orders) next[o.id] = true;
+      setSelectedOrderIds(next);
+    };
+
     return (
       <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-4 md:px-0 md:py-6 dark:from-indigo-950/20">
         <header className="mb-6 shrink-0 rounded-3xl border border-indigo-300/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-5 text-white shadow-2xl shadow-indigo-500/30 dark:border-indigo-900/40 md:p-7">
@@ -769,67 +976,146 @@ export function CollectionOrderModule({
             </p>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-            {orders.map((o) => (
-              (() => {
-                const job = geminiJobByOrderId[o.id];
-                const analyzing = job?.busy === true;
-                return (
-              <div
-                key={o.id}
-                className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-600 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between"
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-600 dark:bg-slate-900">
+              <button
+                type="button"
+                onClick={toggleListSelectAll}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
               >
-                <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
-                    Orden #{String(o.numero ?? "S/N")}
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">
-                    {o.lines.filter(lineHasData).length} línea(s) ·{" "}
-                    <span
-                      className={
-                        o.status === "sent"
-                          ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
-                          : "rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300"
+                {listSelectedCount === orders.length ? "Quitar selección" : "Seleccionar todo"}
+              </button>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                Seleccionadas: {listSelectedCount}
+              </span>
+              <button
+                type="button"
+                disabled={listSelectedCount === 0}
+                onClick={() => void downloadSelectedListMagaya()}
+                title="Un solo Excel Magaya (hoja «Magaya»): órdenes en bloques con color alternado."
+                className="rounded-xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-100 to-orange-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:from-amber-200 hover:to-orange-100 disabled:opacity-40 dark:border-amber-500/40 dark:from-amber-950/50 dark:to-orange-950/30 dark:text-amber-100 dark:hover:from-amber-900/60 dark:hover:to-orange-950/40"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Magaya
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={listSelectedCount === 0}
+                onClick={() => void downloadSelectedListInventarioExcel()}
+                title="Mismas columnas que «Descargar CSV» en cada orden (detallado). Archivo Excel con franjas de color suaves por orden; el formato .csv no puede llevar colores."
+                className="rounded-xl border-2 border-cyan-400/80 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-900 shadow-sm hover:bg-cyan-100 disabled:opacity-40 dark:border-cyan-500/50 dark:bg-cyan-950/35 dark:text-cyan-100 dark:hover:bg-cyan-950/55"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Inventario
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled={listSelectedCount === 0}
+                onClick={() => void deleteSelectedOrders()}
+                className="ml-auto rounded-xl border-2 border-red-200 bg-red-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-40 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+              >
+                Eliminar seleccionadas
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            {orders.map((o) => {
+              const job = geminiJobByOrderId[o.id];
+              const analyzing = job?.busy === true;
+              const refCount = listReferenciasCount(o.lines);
+              const bultosTot = listBultosTotal(o.lines);
+              const refWord = refCount === 1 ? "referencia" : "referencias";
+              return (
+                <div
+                  key={o.id}
+                  className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 pl-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-600 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
+                  <label className="relative z-[1] flex shrink-0 cursor-pointer items-center self-start pt-0.5 sm:self-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds[o.id] === true}
+                      onChange={(ev) =>
+                        setSelectedOrderIds((p) => ({
+                          ...p,
+                          [o.id]: ev.target.checked,
+                        }))
                       }
-                    >
-                      {o.status === "sent" ? "Enviada al almacén" : "Borrador"}
-                    </span>
-                    {analyzing && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-violet-700 dark:border-violet-900/40 dark:bg-violet-950/30 dark:text-violet-300">
-                          {AI_ASSISTANT_DISPLAY_NAME}: analizando…
+                      className="h-4 w-4 rounded border-slate-300 accent-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                      aria-label={`Seleccionar orden ${String(o.numero ?? "").trim() || o.id.slice(0, 8)}`}
+                    />
+                  </label>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
+                        Orden #{String(o.numero ?? "S/N")}
+                      </p>
+                      {analyzing && <CollectionOrderAiAnalyzingInline />}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-flex items-baseline gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-800/90"
+                        title="Referencias con número de parte"
+                      >
+                        <span className="text-base font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">
+                          {refCount}
                         </span>
-                      </>
-                    )}
-                    {o.linkedRaNumbers && o.linkedRaNumbers.length > 0 && (
-                      <> · RA: {o.linkedRaNumbers.join(", ")}</>
-                    )}
-                  </p>
+                        <span className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          {refWord}
+                        </span>
+                      </span>
+                      <span
+                        className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 shadow-sm dark:border-violet-500/35 dark:bg-violet-950/45 dark:shadow-violet-950/20"
+                        title="Total de bultos en la orden"
+                      >
+                        <span className="text-[10px] font-black uppercase tracking-wide text-violet-600 dark:text-violet-300">
+                          Bultos
+                        </span>
+                        <span className="text-xl font-black tabular-nums leading-none text-violet-600 dark:text-violet-200">
+                          {bultosTot}
+                        </span>
+                      </span>
+                      <span
+                        className={
+                          o.status === "sent"
+                            ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
+                            : "rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300"
+                        }
+                      >
+                        {o.status === "sent" ? "Enviada al almacén" : "Borrador"}
+                      </span>
+                      {o.linkedRaNumbers && o.linkedRaNumbers.length > 0 && (
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          RA: {o.linkedRaNumbers.join(", ")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(o)}
+                      className="rounded-xl border-2 border-slate-200 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Abrir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteOrder(o)}
+                      className="rounded-xl border-2 border-red-100 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => openEdit(o)}
-                    className="rounded-xl border-2 border-slate-200 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Abrir
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void deleteOrder(o)}
-                    className="rounded-xl border-2 border-red-100 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400"
-                  >
-                    Eliminar
-                  </button>
-                </div>
-              </div>
-                );
-              })()
-            ))}
-          </div>
+              );
+            })}
+            </div>
+          </>
         )}
       </div>
     );
@@ -847,11 +1133,14 @@ export function CollectionOrderModule({
     const f = args.file;
     if (!text && !f) return;
 
-    patchGeminiJob(orderId, { errorBanner: null, busy: true });
-
     const userVisible = [text, f ? `📎 ${f.name}` : ""].filter(Boolean).join("\n");
     const nextHistory = [...geminiJob.history, { role: "user", text: userVisible } as const];
-    patchGeminiJob(orderId, { history: nextHistory, pendingFileName: f ? f.name : null });
+    patchGeminiJob(orderId, {
+      errorBanner: null,
+      busy: true,
+      history: nextHistory,
+      pendingFileName: f ? f.name : null,
+    });
 
     const contextHint =
       e.lines.map((r) => String(r.referencia ?? "").trim()).filter(Boolean).length > 0
@@ -1028,7 +1317,6 @@ export function CollectionOrderModule({
 
   return (
     <>
-      <div className="flex h-full min-h-0 w-full max-w-[1600px] mx-auto flex-1 flex-col overflow-hidden bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-2 md:px-0 md:py-3 dark:from-indigo-950/20">
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-[#1f3467]/20 bg-gradient-to-r from-white via-slate-50 to-white p-2 shadow-lg shadow-indigo-100/60 backdrop-blur-sm dark:border-indigo-900/40 dark:bg-slate-900/90 dark:shadow-black/20">
           <button
             type="button"
@@ -1076,9 +1364,17 @@ export function CollectionOrderModule({
             disabled={saveBusy}
             onClick={() => setGeminiOpen(true)}
             title={`${AI_ASSISTANT_DISPLAY_NAME}: PDF, imagen o texto (Magaya: modelo, país, talla, composición…)`}
-            className="flex items-center gap-2 rounded-xl border-2 border-violet-500/85 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-500/50 dark:from-violet-700 dark:to-indigo-700"
+            className={`flex items-center gap-2 rounded-xl border-2 border-violet-500/85 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-500/50 dark:from-violet-700 dark:to-indigo-700 ${
+              geminiJob.busy
+                ? "animate-pulse ring-2 ring-amber-200 ring-offset-2 ring-offset-white dark:ring-amber-300/80 dark:ring-offset-slate-900"
+                : ""
+            }`}
           >
-            <Sparkles className="h-4 w-4 shrink-0 text-amber-200" aria-hidden />
+            {geminiJob.busy ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-200" aria-hidden />
+            ) : (
+              <Sparkles className="h-4 w-4 shrink-0 text-amber-200" aria-hidden />
+            )}
             {AI_ASSISTANT_DISPLAY_NAME}
           </button>
           <button
@@ -1090,6 +1386,19 @@ export function CollectionOrderModule({
             <Send className="h-4 w-4" /> Pasar al RA
           </button>
         </div>
+
+        {geminiJob.busy && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-violet-400/90 bg-violet-50/95 px-2.5 py-1.5 shadow-md dark:border-violet-600 dark:bg-violet-950/50"
+          >
+            <CollectionOrderAiAnalyzingStrip
+              inlineRow
+              label={`${AI_ASSISTANT_DISPLAY_NAME} · analizando documento…`}
+            />
+          </div>
+        )}
 
         <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
           Paso 1 · Número de orden · Paso 2 · Líneas · Paso 3 · Pasar al RA
@@ -1537,7 +1846,6 @@ export function CollectionOrderModule({
             </div>
           </div>
         </div>
-      </div>
 
       <InventoryCsvExportModal
         open={csvOpen}

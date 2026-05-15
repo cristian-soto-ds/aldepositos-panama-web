@@ -18,6 +18,45 @@
   animation: fadeIn 0.5s ease-out forwards;
 }
 
+/* Barra indeterminada — IA analizando documento (órdenes de recolección) */
+@keyframes collection-order-ai-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.collection-order-ai-progress-track {
+  position: relative;
+  height: 0.5rem;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 9999px;
+  background-color: rgb(221 214 254 / 0.9);
+}
+
+:root.panel-dark .collection-order-ai-progress-track {
+  background-color: rgb(76 29 149 / 0.45);
+}
+
+.collection-order-ai-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 38%;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    rgb(124 58 237),
+    rgb(217 70 239),
+    rgb(99 102 241)
+  );
+  animation: collection-order-ai-indeterminate 1.35s ease-in-out infinite;
+}
+
 /* Ocultar barra de scroll pero permitir scroll */
 .hide-scrollbar::-webkit-scrollbar {
   display: none;

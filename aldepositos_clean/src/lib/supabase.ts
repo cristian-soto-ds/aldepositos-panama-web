@@ -1,9 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import type { Task } from "@/lib/types/task";
 
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+/**
+ * Valores por defecto tipo Supabase local: evitan que `createBrowserClient` reciba
+ * `undefined` al importar el módulo (p. ej. build sin .env), que puede tumbar el servidor.
+ * En runtime real debes definir NEXT_PUBLIC_SUPABASE_* en `.env.local`.
+ */
+const BROWSER_SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321";
+const BROWSER_SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
+
+/** Cliente navegador con sesión en cookies (compatible con middleware SSR). */
+export const supabase = createBrowserClient(
+  BROWSER_SUPABASE_URL,
+  BROWSER_SUPABASE_ANON_KEY,
 );
 
 function isTask(value: unknown): value is Task {

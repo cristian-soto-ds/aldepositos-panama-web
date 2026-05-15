@@ -5,7 +5,8 @@
  */
 
 const PDF_TEXT_MIN_CHARS = 320;
-const PDF_TEXT_MAX_CHARS = 72_000;
+/** Límite alto: la API parte en fragmentos (ver `geminiCollectionOrderChunkedExtract`) para no truncar proformas largas. */
+const PDF_TEXT_MAX_CHARS = 650_000;
 
 /**
  * Extrae texto plano útil para el modelo, o `null` si no conviene usar vía rápida.

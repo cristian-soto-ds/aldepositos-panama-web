@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Brain,
   FileUp,
   Loader2,
   MessageSquarePlus,
   Send,
   Sparkles,
   Table2,
+  Trash2,
   X,
 } from "lucide-react";
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
@@ -16,6 +18,12 @@ import {
   type GeminiUsageSummary,
 } from "@/lib/geminiClientUsage";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
+import {
+  deleteGeminiLearningNote,
+  insertGeminiLearningNote,
+  listGeminiLearningNotes,
+  type GeminiLearningNote,
+} from "@/lib/geminiLearningNotes";
 
 type ChatTurn = { role: "user" | "model"; text: string };
 
@@ -61,6 +69,48 @@ export function CollectionOrderGeminiPanel({
   const { input, history, busy, errorBanner, lastLines, usageSummary } = job;
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [learningNotes, setLearningNotes] = useState<GeminiLearningNote[]>([]);
+  const [learningLoading, setLearningLoading] = useState(false);
+  const [learningError, setLearningError] = useState<string | null>(null);
+  const [newLearningText, setNewLearningText] = useState("");
+  const [learningSaveBusy, setLearningSaveBusy] = useState(false);
+
+  const reloadLearning = useCallback(async () => {
+    setLearningError(null);
+    try {
+      const rows = await listGeminiLearningNotes();
+      setLearningNotes(rows);
+    } catch (e) {
+      setLearningError(e instanceof Error ? e.message : "No se pudieron cargar las reglas.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLearningLoading(true);
+    setLearningError(null);
+    void listGeminiLearningNotes()
+      .then((rows) => {
+        if (!cancelled) setLearningNotes(rows);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setLearningError(
+            e instanceof Error
+              ? e.message
+              : "No se pudo cargar la memoria. ¿Aplicaste la migración SQL `008_gemini_learning_notes`?",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLearningLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     // Mantener el panel "en blanco" al cerrarse visualmente pero preservar jobs por orden.
@@ -136,6 +186,23 @@ export function CollectionOrderGeminiPanel({
           </button>
         </header>
 
+        {busy && (
+          <div
+            className="shrink-0 border-b border-violet-200 bg-gradient-to-r from-violet-50 via-fuchsia-50 to-indigo-50 px-4 py-2.5 dark:border-violet-900/50 dark:from-violet-950/55 dark:via-fuchsia-950/35 dark:to-indigo-950/40"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="collection-order-ai-progress-track">
+              <div className="collection-order-ai-progress-fill" />
+            </div>
+            <p className="mt-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-800 dark:text-violet-200">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+              Analizando documento…
+            </p>
+          </div>
+        )}
+
         <p className="shrink-0 border-b border-violet-100 bg-gradient-to-r from-violet-50/95 to-indigo-50/90 px-4 py-3 text-[11px] font-medium leading-relaxed text-violet-950 dark:border-violet-900/40 dark:from-violet-950/40 dark:to-indigo-950/30 dark:text-violet-100">
           Sube un <strong>PDF</strong> (con texto seleccionable, suele responder más rápido) o{" "}
           <strong>imagen</strong> (packing list, factura, etiqueta), o{" "}
@@ -158,6 +225,105 @@ export function CollectionOrderGeminiPanel({
             </ul>
           </div>
         )}
+
+        <details className="group shrink-0 border-b border-amber-200/90 bg-gradient-to-r from-amber-50/95 to-orange-50/80 px-4 py-2 dark:border-amber-900/45 dark:from-amber-950/35 dark:to-orange-950/25">
+          <summary className="cursor-pointer list-none py-0.5 text-[10px] font-black uppercase tracking-widest text-amber-950 marker:content-none dark:text-amber-100 [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex items-center gap-2">
+              <Brain className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
+              Memoria · reglas que {AI_ASSISTANT_DISPLAY_NAME} recordará
+            </span>
+          </summary>
+          <p className="mt-2 text-[10px] font-medium leading-snug text-amber-950/90 dark:text-amber-100/90">
+            Cada regla se envía al servidor en las próximas extracciones (junto con el documento). No
+            sustituye al PDF: guía cómo leer tablas, proveedores, columnas DZ, etc.
+          </p>
+          {learningError && (
+            <p className="mt-2 text-[10px] font-semibold text-red-700 dark:text-red-300">
+              {learningError}
+            </p>
+          )}
+          {learningLoading ? (
+            <p className="mt-2 flex items-center gap-2 text-[10px] font-bold text-amber-800 dark:text-amber-200">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              Cargando reglas…
+            </p>
+          ) : (
+            <ul className="mt-2 max-h-28 space-y-1.5 overflow-y-auto text-[10px] leading-snug text-amber-950 dark:text-amber-50">
+              {learningNotes.length === 0 ? (
+                <li className="italic text-amber-800/80 dark:text-amber-200/80">
+                  Aún no hay reglas guardadas.
+                </li>
+              ) : (
+                learningNotes.map((n) => (
+                  <li
+                    key={n.id}
+                    className="flex items-start justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5 dark:bg-slate-900/50"
+                  >
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{n.body}</span>
+                    <button
+                      type="button"
+                      disabled={learningSaveBusy}
+                      onClick={() =>
+                        void deleteGeminiLearningNote(n.id)
+                          .then(() => reloadLearning())
+                          .catch((e) =>
+                            setLearningError(
+                              e instanceof Error ? e.message : "No se pudo eliminar la regla.",
+                            ),
+                          )
+                      }
+                      className="shrink-0 rounded-lg p-1 text-red-600 hover:bg-red-50 disabled:opacity-40 dark:hover:bg-red-950/40"
+                      aria-label="Eliminar regla"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+          <textarea
+            value={newLearningText}
+            onChange={(e) => setNewLearningText(e.target.value.slice(0, 2000))}
+            disabled={learningSaveBusy || busy}
+            rows={2}
+            placeholder="Ej.: En proformas de proveedor X, la columna «DZ» son docenas → convertir a piezas…"
+            className="mt-2 w-full resize-none rounded-lg border border-amber-200/90 bg-white px-2 py-1.5 text-[11px] text-amber-950 outline-none focus:border-amber-500 dark:border-amber-800 dark:bg-slate-950 dark:text-amber-50"
+          />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-bold text-amber-800/70 dark:text-amber-200/70">
+              {newLearningText.length}/2000
+            </span>
+            <button
+              type="button"
+              disabled={
+                learningSaveBusy || busy || !newLearningText.trim() || newLearningText.length > 2000
+              }
+              onClick={() => {
+                void (async () => {
+                  setLearningSaveBusy(true);
+                  setLearningError(null);
+                  try {
+                    await insertGeminiLearningNote(newLearningText);
+                    setNewLearningText("");
+                    await reloadLearning();
+                  } catch (e) {
+                    setLearningError(
+                      e instanceof Error
+                        ? e.message
+                        : "No se pudo guardar. ¿Migración `008_gemini_learning_notes` en Supabase?",
+                    );
+                  } finally {
+                    setLearningSaveBusy(false);
+                  }
+                })();
+              }}
+              className="rounded-lg bg-amber-700 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-amber-800 disabled:opacity-50 dark:bg-amber-600 dark:hover:bg-amber-500"
+            >
+              {learningSaveBusy ? "Guardando…" : "Guardar regla"}
+            </button>
+          </div>
+        </details>
 
         <div
           ref={scrollRef}
@@ -217,9 +383,14 @@ export function CollectionOrderGeminiPanel({
             </div>
           ))}
           {busy && (
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Analizando…
+            <div className="rounded-2xl border border-violet-200/90 bg-violet-50/95 p-3 shadow-sm dark:border-violet-800/55 dark:bg-violet-950/40">
+              <div className="collection-order-ai-progress-track">
+                <div className="collection-order-ai-progress-fill" />
+              </div>
+              <p className="mt-2 flex items-center gap-2 text-xs font-bold text-violet-800 dark:text-violet-200">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+                {AI_ASSISTANT_DISPLAY_NAME} está leyendo el documento…
+              </p>
             </div>
           )}
         </div>

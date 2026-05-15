@@ -91,6 +91,17 @@ function jsonLooseRepair(s: string): string {
     .trim();
 }
 
+/** Quita comas finales típicas que rompen JSON.parse (objetos/arrays). */
+function stripTrailingCommasInJsonish(s: string): string {
+  let out = s;
+  for (let i = 0; i < 8; i++) {
+    const next = out.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
 /** Intenta parsear la respuesta del modelo hasta obtener reply + lines */
 export function parseCollectionGeminiModelText(
   raw: string | undefined | null,
@@ -109,22 +120,31 @@ export function parseCollectionGeminiModelText(
     return true;
   });
 
+  const trailingCommaVariants = (s: string) => {
+    const t = stripTrailingCommasInJsonish(s);
+    return t === s ? [s] : [s, t];
+  };
+
   for (const attempt of unique) {
-    try {
-      const shaped = normalizeParsedShape(JSON.parse(attempt));
-      if (shaped) return { parsed: shaped, strategy: "direct" };
-    } catch {
-      /* next */
+    for (const variant of trailingCommaVariants(attempt)) {
+      try {
+        const shaped = normalizeParsedShape(JSON.parse(variant));
+        if (shaped) return { parsed: shaped, strategy: "direct" };
+      } catch {
+        /* next */
+      }
     }
   }
 
   const extracted = extractBalancedJsonObject(stripMarkdownJsonFence(raw));
   if (extracted) {
-    try {
-      const shaped = normalizeParsedShape(JSON.parse(extracted));
-      if (shaped) return { parsed: shaped, strategy: "extract_object" };
-    } catch {
-      /* fail */
+    for (const variant of trailingCommaVariants(extracted)) {
+      try {
+        const shaped = normalizeParsedShape(JSON.parse(variant));
+        if (shaped) return { parsed: shaped, strategy: "extract_object" };
+      } catch {
+        /* fail */
+      }
     }
   }
 

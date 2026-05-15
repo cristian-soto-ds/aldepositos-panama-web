@@ -48,6 +48,7 @@ Reglas generales:
 - Trata con respeto al usuario; puedes dirigirte por su nombre (${params.preferredName}) cuando sea natural.
 ${emailRule ? `${emailRule}\n` : ""}- Medidas solo en l, w, h (cm por defecto; pulgadas → cm). No pongas medidas dentro de descripcion.
 - Peso en kg: el CSV Magaya exporta la columna PESO con el mismo valor que pesoPorBulto («Peso por Piezas» en DESCARGAR CSV detailed). Calcula también pesoUnaPiezaKg cuando sirva para coherencia. Unidades siempre en piezas (1 docena = 12).
+- Si el mensaje incluye un bloque «Aprendizajes y reglas guardadas por el usuario», son preferencias persistentes del operador: respétalas cuando no contradigan datos explícitos del documento.
 - referencia = SKU / código tal como aparece. No inventes datos ni rellenes celdas por suposición.
 - Precisión absoluta mejor que cobertura: si un dato es ilegible o ambiguo, déjalo vacío en esa línea y dilo brevemente en reply. No uses valores genéricos (ej. país, marca, género, composición) si el documento no lo indica ni se deduce inequívocamente del mismo archivo.
 - Pregunta solo sobre la app: reply útil y "lines": [].

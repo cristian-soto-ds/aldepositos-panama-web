@@ -130,6 +130,68 @@ function buildLineCells(
   ];
 }
 
+/**
+ * Mismos datos que el CSV pero con tipos numéricos para Excel (evita «número almacenado como texto»).
+ */
+export function buildInventarioExcelRowValues(
+  numeroDocumento: string,
+  row: Record<string, unknown>,
+  variant: InventarioCsvModule,
+): (string | number)[] {
+  const numero = numeroDocumento.trim();
+  const reempaque = row.reempaque === true;
+  const bultos = parseNum(row.bultos);
+  const l = reempaque ? 0 : parseNum(row.l);
+  const w = reempaque ? 0 : parseNum(row.w);
+  const h = reempaque ? 0 : parseNum(row.h);
+
+  let cantidad = 0;
+  let pesoPorPiezas = 0;
+  if (variant === "detailed") {
+    const undB = parseNum(row.unidadesPorBulto);
+    cantidad = bultos * undB;
+    pesoPorPiezas = parseNum(row.pesoPorBulto);
+  } else {
+    const undB = parseNum(row.unidadesPorBulto);
+    cantidad = undB > 0 ? bultos * undB : 0;
+    pesoPorPiezas = parseNum(row.weight);
+  }
+
+  const pesoTotal = bultos * pesoPorPiezas;
+  const vol = volumenM3ForRow(row, bultos, l, w, h, reempaque);
+
+  const numeroCell: string | number = (() => {
+    if (numero === "") return "";
+    const normalized = numero.replace(",", ".");
+    if (/^-?\d+(\.\d+)?$/.test(normalized)) {
+      const n = Number(normalized);
+      return Number.isFinite(n) ? n : numero;
+    }
+    return numero;
+  })();
+
+  return [
+    numeroCell,
+    String(row.referencia ?? "").trim(),
+    String(row.descripcion ?? "").trim(),
+    bultos,
+    cantidad,
+    l,
+    h,
+    w,
+    pesoPorPiezas,
+    pesoTotal,
+    vol,
+    CSV_UNIDAD_FIJA,
+    CSV_TIPO_EMBALAJE_FIJO,
+  ];
+}
+
+/** Encabezados de columna del CSV / Excel inventario. */
+export function getInventarioCsvHeaderLabels(): string[] {
+  return [...HEADERS];
+}
+
 export function buildInventarioCsv(
   numeroDocumento: string,
   measureRows: Record<string, unknown>[],
@@ -227,6 +289,47 @@ export function downloadInventarioCsv(params: {
     params.measureRows,
     params.variant,
   );
+  const bytes = encodeCsvWindows1252(body);
+  const blob = new Blob([bytes as BlobPart], {
+    type: "text/csv;charset=windows-1252",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${params.filenameBase.replace(/[/\\?%*:|"<>]/g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Un solo CSV: mismos encabezados; columna «Número» = `numeroDocumento` de cada bloque. */
+export function buildInventarioCsvBulk(
+  sections: { numeroDocumento: string; measureRows: Record<string, unknown>[] }[],
+  variant: InventarioCsvModule,
+): string {
+  const headerLine = HEADERS.map(escapeCsvCell).join(",");
+  const lines: string[] = [headerLine];
+  for (const sec of sections) {
+    const num = sec.numeroDocumento.trim();
+    for (const row of sec.measureRows) {
+      if (!rowHasExportableData(row)) continue;
+      lines.push(buildLineCells(num, row, variant).map(escapeCsvCell).join(","));
+    }
+  }
+  return withExcelSeparatorHint(lines.join("\r\n"));
+}
+
+export function countInventarioCsvRowsBulk(
+  sections: { measureRows: Record<string, unknown>[] }[],
+): number {
+  return sections.reduce((n, s) => n + countInventarioCsvRows(s.measureRows), 0);
+}
+
+export function downloadInventarioCsvBulk(params: {
+  sections: { numeroDocumento: string; measureRows: Record<string, unknown>[] }[];
+  variant: InventarioCsvModule;
+  filenameBase: string;
+}): void {
+  const body = buildInventarioCsvBulk(params.sections, params.variant);
   const bytes = encodeCsvWindows1252(body);
   const blob = new Blob([bytes as BlobPart], {
     type: "text/csv;charset=windows-1252",

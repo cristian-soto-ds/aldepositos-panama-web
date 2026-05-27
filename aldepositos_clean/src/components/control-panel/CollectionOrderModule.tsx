@@ -10,9 +10,9 @@ import {
   Plus,
   Save,
   Send,
-  Sparkles,
   Trash2,
 } from "lucide-react";
+import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
@@ -153,8 +153,9 @@ function CollectionOrderAiAnalyzingStrip(props: {
           <div className="collection-order-ai-progress-track min-w-0 flex-1">
             <div className="collection-order-ai-progress-fill" />
           </div>
-          <p className="flex shrink-0 items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-200">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+          <p className="flex shrink-0 items-center gap-1.5 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200">
+            <GeminiSparkIcon size={14} className="shrink-0" />
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-slate-500" aria-hidden />
             <span className="max-w-[14rem] truncate sm:max-w-[20rem]">{label}</span>
           </p>
         </div>
@@ -174,8 +175,8 @@ function CollectionOrderAiAnalyzingStrip(props: {
       <p
         className={
           dense
-            ? "mt-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-200"
-            : "mt-1.5 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-violet-700 dark:text-violet-200"
+            ? "mt-1 flex items-center gap-1.5 text-[9px] font-semibold tracking-wide text-slate-700 dark:text-slate-200"
+            : "mt-1.5 flex items-center gap-2 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200"
         }
       >
         <Loader2
@@ -192,16 +193,17 @@ function CollectionOrderAiAnalyzingStrip(props: {
 function CollectionOrderAiAnalyzingInline() {
   return (
     <div
-      className="inline-flex min-w-0 max-w-[11rem] shrink-0 flex-col gap-0.5 rounded-lg border border-violet-300/70 bg-violet-50/90 px-1.5 py-1 shadow-sm dark:border-violet-600/45 dark:bg-violet-950/50 sm:max-w-[13rem]"
+      className="inline-flex min-w-0 max-w-[11rem] shrink-0 flex-col gap-0.5 rounded-lg border border-slate-200 bg-white px-1.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-900 sm:max-w-[13rem]"
       role="status"
       aria-live="polite"
       aria-busy="true"
       title={`${AI_ASSISTANT_DISPLAY_NAME} está analizando el documento`}
     >
-      <div className="relative h-1 w-full min-w-[4.5rem] overflow-hidden rounded-full bg-violet-200/90 dark:bg-violet-900/60">
+      <div className="relative h-1 w-full min-w-[4.5rem] overflow-hidden rounded-full bg-slate-200/90 dark:bg-slate-700/60">
         <div className="collection-order-ai-progress-fill" />
       </div>
-      <span className="flex items-center gap-1 text-[8px] font-black uppercase leading-none tracking-wide text-violet-700 dark:text-violet-200">
+      <span className="flex items-center gap-1 text-[8px] font-semibold leading-none tracking-wide text-slate-600 dark:text-slate-300">
+        <GeminiSparkIcon size={10} className="shrink-0" />
         <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" aria-hidden />
         <span className="truncate">Analizando…</span>
       </span>
@@ -1029,13 +1031,28 @@ export function CollectionOrderModule({
               const refCount = listReferenciasCount(o.lines);
               const bultosTot = listBultosTotal(o.lines);
               const refWord = refCount === 1 ? "referencia" : "referencias";
+              const orderLabel = String(o.numero ?? "").trim() || o.id.slice(0, 8);
               return (
                 <div
                   key={o.id}
-                  className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 pl-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-600 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openEdit(o)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter" || ev.key === " ") {
+                      ev.preventDefault();
+                      openEdit(o);
+                    }
+                  }}
+                  aria-label={`Abrir orden #${orderLabel}`}
+                  className="group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 pl-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:hover:border-indigo-500/50 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
-                  <label className="relative z-[1] flex shrink-0 cursor-pointer items-center self-start pt-0.5 sm:self-center">
+                  <label
+                    className="relative z-[1] flex shrink-0 cursor-pointer items-center self-start pt-0.5 sm:self-center"
+                    onClick={(ev) => ev.stopPropagation()}
+                    onKeyDown={(ev) => ev.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       checked={selectedOrderIds[o.id] === true}
@@ -1045,8 +1062,9 @@ export function CollectionOrderModule({
                           [o.id]: ev.target.checked,
                         }))
                       }
+                      onClick={(ev) => ev.stopPropagation()}
                       className="h-4 w-4 rounded border-slate-300 accent-indigo-600 focus:ring-2 focus:ring-indigo-500"
-                      aria-label={`Seleccionar orden ${String(o.numero ?? "").trim() || o.id.slice(0, 8)}`}
+                      aria-label={`Seleccionar orden ${orderLabel}`}
                     />
                   </label>
                   <div className="min-w-0 flex-1">
@@ -1095,18 +1113,17 @@ export function CollectionOrderModule({
                       )}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(o)}
-                      className="rounded-xl border-2 border-slate-200 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <span className="rounded-xl border-2 border-slate-200 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:border-indigo-200 group-hover:bg-indigo-50/50 group-hover:text-indigo-700 dark:border-slate-600 dark:text-slate-400 dark:group-hover:border-indigo-500/40 dark:group-hover:bg-indigo-950/30 dark:group-hover:text-indigo-200">
                       Abrir
-                    </button>
+                    </span>
                     <button
                       type="button"
-                      onClick={() => void deleteOrder(o)}
-                      className="rounded-xl border-2 border-red-100 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        void deleteOrder(o);
+                      }}
+                      className="relative z-[1] rounded-xl border-2 border-red-100 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400"
                     >
                       Eliminar
                     </button>
@@ -1363,17 +1380,15 @@ export function CollectionOrderModule({
             type="button"
             disabled={saveBusy}
             onClick={() => setGeminiOpen(true)}
-            title={`${AI_ASSISTANT_DISPLAY_NAME}: PDF, imagen o texto (Magaya: modelo, país, talla, composición…)`}
-            className={`flex items-center gap-2 rounded-xl border-2 border-violet-500/85 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-sm hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 dark:border-violet-500/50 dark:from-violet-700 dark:to-indigo-700 ${
-              geminiJob.busy
-                ? "animate-pulse ring-2 ring-amber-200 ring-offset-2 ring-offset-white dark:ring-amber-300/80 dark:ring-offset-slate-900"
-                : ""
+            title={`${AI_ASSISTANT_DISPLAY_NAME}: PDF, imagen o texto`}
+            className={`alde-ia-trigger flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-[#1e1f20] dark:text-slate-100 dark:hover:bg-[#282a2c] ${
+              geminiJob.busy ? "alde-ia-trigger--busy" : ""
             }`}
           >
             {geminiJob.busy ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-200" aria-hidden />
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" aria-hidden />
             ) : (
-              <Sparkles className="h-4 w-4 shrink-0 text-amber-200" aria-hidden />
+              <GeminiSparkIcon size={18} className="shrink-0" />
             )}
             {AI_ASSISTANT_DISPLAY_NAME}
           </button>
@@ -1391,7 +1406,7 @@ export function CollectionOrderModule({
           <div
             role="status"
             aria-live="polite"
-            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-violet-400/90 bg-violet-50/95 px-2.5 py-1.5 shadow-md dark:border-violet-600 dark:bg-violet-950/50"
+            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-slate-200 bg-[#e8f0fe]/95 px-2.5 py-1.5 shadow-md dark:border-slate-600 dark:bg-[#131314]/90"
           >
             <CollectionOrderAiAnalyzingStrip
               inlineRow

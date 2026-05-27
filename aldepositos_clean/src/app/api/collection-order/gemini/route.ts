@@ -105,7 +105,7 @@ function readChunkConfig() {
   );
   const maxChunks = Math.max(
     1,
-    Math.min(30, Number(process.env.GEMINI_PDF_MAX_CHUNKS?.trim()) || 14),
+    Math.min(40, Number(process.env.GEMINI_PDF_MAX_CHUNKS?.trim()) || 14),
   );
   return { chunkSize, overlap, minToSplit, maxChunks };
 }

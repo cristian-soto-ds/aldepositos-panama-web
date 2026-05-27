@@ -34,11 +34,11 @@
   width: 100%;
   overflow: hidden;
   border-radius: 9999px;
-  background-color: rgb(221 214 254 / 0.9);
+  background-color: rgb(226 232 240 / 0.95);
 }
 
 :root.panel-dark .collection-order-ai-progress-track {
-  background-color: rgb(76 29 149 / 0.45);
+  background-color: rgb(51 65 85 / 0.55);
 }
 
 .collection-order-ai-progress-fill {
@@ -50,11 +50,57 @@
   border-radius: 9999px;
   background: linear-gradient(
     90deg,
-    rgb(124 58 237),
-    rgb(217 70 239),
-    rgb(99 102 241)
+    #4285f4,
+    #9b72cb,
+    #d96570,
+    #f4b400,
+    #34a853
   );
   animation: collection-order-ai-indeterminate 1.35s ease-in-out infinite;
+}
+
+/* Alde.IA — botón y envío con acento Gemini */
+.alde-ia-trigger--busy {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px rgba(66, 133, 244, 0.45);
+}
+
+:root.panel-dark .alde-ia-trigger--busy {
+  box-shadow:
+    0 0 0 2px #131314,
+    0 0 0 4px rgba(155, 114, 203, 0.55);
+}
+
+.alde-ia-send {
+  background: linear-gradient(135deg, #4285f4, #9b72cb 45%, #d96570 70%, #34a853);
+}
+
+.alde-ia-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.alde-ia-send:active:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.alde-ia-composer {
+  border: 1px solid rgb(226 232 240 / 0.95);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+:root.panel-dark .alde-ia-composer {
+  border-color: rgb(71 85 105 / 0.85);
+}
+
+.alde-ia-composer:focus-within {
+  border-color: transparent;
+  box-shadow:
+    0 1px 6px rgba(60, 64, 67, 0.12),
+    0 0 0 1px rgba(66, 133, 244, 0.35),
+    0 0 0 3px rgba(155, 114, 203, 0.12);
 }
 
 /* Ocultar barra de scroll pero permitir scroll */

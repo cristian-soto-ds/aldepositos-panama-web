@@ -58,6 +58,7 @@ import {
 } from "@/lib/collectionLineUtils";
 import { supabase } from "@/lib/supabase";
 import { prepareFilePayloadForGemini } from "@/lib/geminiClientImagePrep";
+import { fetchWithTimeout } from "@/lib/clientFetch";
 import {
   recordGeminiRequestSuccess,
 } from "@/lib/geminiClientUsage";
@@ -1220,18 +1221,27 @@ export function CollectionOrderModule({
       };
 
       const callApi = () =>
-        fetch("/api/collection-order/gemini", {
+        fetchWithTimeout("/api/collection-order/gemini", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(bodyPayload),
+          // En producción algunos gateways cortan antes; damos margen razonable para PDFs largos.
+          timeoutMs: 110_000,
         });
 
+      const retryable = (s: number) => [408, 429, 502, 503, 504].includes(s);
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
       let res = await callApi();
-      if ([429, 502, 503].includes(res.status)) {
-        await new Promise((r) => setTimeout(r, 1700));
+      if (retryable(res.status)) {
+        await sleep(1700);
+        res = await callApi();
+      }
+      if (retryable(res.status)) {
+        await sleep(3000);
         res = await callApi();
       }
 
@@ -1246,11 +1256,19 @@ export function CollectionOrderModule({
         } | null;
       };
       try {
+        const ct = res.headers.get("content-type") || "";
+        if (!ct.toLowerCase().includes("application/json")) {
+          throw new Error("non_json_response");
+        }
         data = (await res.json()) as typeof data;
       } catch {
+        const hint =
+          res.status === 504
+            ? "Se agotó el tiempo de espera (504). Probá con un PDF más liviano o dividido, o reintenta en unos segundos."
+            : "La respuesta no fue JSON (posible gateway/proxy). Reintenta en unos segundos.";
         patchGeminiJob(orderId, {
           errorBanner: {
-            text: `El servidor respondió ${res.status} pero el cuerpo no es JSON. Revisa logs o la URL de la API.`,
+            text: `Error ${res.status}. ${hint}`,
             code: res.status,
           },
           busy: false,

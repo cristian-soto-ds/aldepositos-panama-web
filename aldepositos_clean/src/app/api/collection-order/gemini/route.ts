@@ -51,7 +51,8 @@ function usageFromGenAiResponse(response: unknown): GeminiTokenUsage | null {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// PDFs largos + reintentos del modelo pueden exceder el default del hosting.
+export const maxDuration = 300;
 
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const HISTORY_TURNS = 4;

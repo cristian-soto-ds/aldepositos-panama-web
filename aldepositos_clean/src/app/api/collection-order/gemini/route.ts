@@ -88,6 +88,78 @@ const ALLOWED_MIME = new Set([
   "image/webp",
 ]);
 
+type GeminiRouteBody = {
+  message?: string;
+  history?: { role: "user" | "model"; text: string }[];
+  file?: { base64: string; mimeType: string };
+  /** Texto del PDF extraído en el navegador (evita subir base64 en JSON). */
+  pdfText?: string;
+  orderNumber?: string;
+  contextHint?: string;
+  viewerDisplayName?: string;
+};
+
+const PDF_TEXT_MAX_CHARS = 650_000;
+
+async function parseGeminiRequestBody(
+  request: NextRequest,
+): Promise<
+  { ok: true; body: GeminiRouteBody } | { ok: false; response: NextResponse }
+> {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "Formulario inválido." }, { status: 400 }),
+      };
+    }
+    const payloadRaw = form.get("payload");
+    if (typeof payloadRaw !== "string" || !payloadRaw.trim()) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "Falta payload en la subida del archivo." },
+          { status: 400 },
+        ),
+      };
+    }
+    let body: GeminiRouteBody;
+    try {
+      body = JSON.parse(payloadRaw) as GeminiRouteBody;
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "JSON inválido en payload." }, { status: 400 }),
+      };
+    }
+    const upload = form.get("file");
+    if (upload instanceof Blob && upload.size > 0) {
+      const buf = Buffer.from(await upload.arrayBuffer());
+      const mimeType =
+        upload instanceof File && upload.type
+          ? upload.type
+          : "application/octet-stream";
+      body.file = { base64: buf.toString("base64"), mimeType };
+    }
+    return { ok: true, body };
+  }
+
+  try {
+    const body = (await request.json()) as GeminiRouteBody;
+    return { ok: true, body };
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "JSON inválido." }, { status: 400 }),
+    };
+  }
+}
+
 function readChunkConfig() {
   const chunkSize = Math.max(
     8_000,
@@ -175,22 +247,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Sesión inválida." }, { status: 401 });
   }
 
-  let body: {
-    message?: string;
-    history?: { role: "user" | "model"; text: string }[];
-    file?: { base64: string; mimeType: string };
-    orderNumber?: string;
-    contextHint?: string;
-    viewerDisplayName?: string;
-  };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
-  }
+  const parsed = await parseGeminiRequestBody(request);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.body;
 
   const message = String(body.message ?? "").trim();
-  if (!message && !body.file) {
+  const pdfTextFromClient = String(body.pdfText ?? "").trim();
+  if (!message && !body.file && !pdfTextFromClient) {
     return NextResponse.json(
       { error: "Envía un mensaje o un archivo." },
       { status: 400 },
@@ -256,7 +319,15 @@ export async function POST(request: NextRequest) {
   let pdfVisionSkippedForSpeed = false;
   let extractedPdfText: string | null = null;
   const mime = body.file ? String(body.file.mimeType ?? "").toLowerCase() : "";
-  if (
+
+  if (pdfTextFromClient && process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1") {
+    extractedPdfText =
+      pdfTextFromClient.length > PDF_TEXT_MAX_CHARS
+        ? pdfTextFromClient.slice(0, PDF_TEXT_MAX_CHARS) +
+          "\n\n[…contenido truncado — prioriza líneas ya visibles arriba…]"
+        : pdfTextFromClient;
+    pdfVisionSkippedForSpeed = true;
+  } else if (
     body.file?.base64 &&
     mime === "application/pdf" &&
     process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1"

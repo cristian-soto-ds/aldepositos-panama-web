@@ -57,8 +57,8 @@ import {
   unidadesTotalesFromLine,
 } from "@/lib/collectionLineUtils";
 import { supabase } from "@/lib/supabase";
-import { prepareFilePayloadForGemini } from "@/lib/geminiClientImagePrep";
-import { fetchWithTimeout } from "@/lib/clientFetch";
+import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
+import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
 import {
   recordGeminiRequestSuccess,
 } from "@/lib/geminiClientUsage";
@@ -1172,8 +1172,8 @@ export function CollectionOrderModule({
     try {
       const filePromise =
         f != null
-          ? prepareFilePayloadForGemini(f, f.type || "application/octet-stream")
-          : Promise.resolve(undefined as undefined);
+          ? prepareGeminiAttachment(f, f.type || "application/octet-stream")
+          : Promise.resolve(undefined);
       const [sessionOutcome, fileOutcome] = await Promise.allSettled([
         supabase.auth.getSession(),
         filePromise,
@@ -1208,42 +1208,17 @@ export function CollectionOrderModule({
         28_000,
       );
 
-      const bodyPayload = {
+      const res = await postCollectionOrderGemini(token, {
         message: outboundMessage,
         history: nextHistory.map((t) => ({
           role: t.role,
           text: String(t.text ?? "").slice(0, 6500),
         })),
-        file: fileOutcome.value,
+        attachment: fileOutcome.value,
         orderNumber: String(e.numero ?? "").trim() || undefined,
         contextHint,
         viewerDisplayName: String(userDisplayName ?? "").trim() || undefined,
-      };
-
-      const callApi = () =>
-        fetchWithTimeout("/api/collection-order/gemini", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(bodyPayload),
-          // En producción algunos gateways cortan antes; damos margen razonable para PDFs largos.
-          timeoutMs: 110_000,
-        });
-
-      const retryable = (s: number) => [408, 429, 502, 503, 504].includes(s);
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-      let res = await callApi();
-      if (retryable(res.status)) {
-        await sleep(1700);
-        res = await callApi();
-      }
-      if (retryable(res.status)) {
-        await sleep(3000);
-        res = await callApi();
-      }
+      });
 
       let data: {
         error?: string;
@@ -1298,10 +1273,14 @@ export function CollectionOrderModule({
       // Auto-aplicar y autoguardar siempre.
       applyGeminiLinesToOrder(lines);
     } catch (err) {
+      const text =
+        err instanceof DOMException && err.name === "TimeoutError"
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Error de red (revisa tu conexión).";
       patchGeminiJob(orderId, {
-        errorBanner: {
-          text: err instanceof Error ? err.message : "Error de red (revisa tu conexión).",
-        },
+        errorBanner: { text },
         busy: false,
       });
     }

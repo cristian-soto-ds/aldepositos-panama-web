@@ -525,9 +525,6 @@ body.reekon-immersive-active {
   height: 0;
 }
 @media (max-width: 767px) {
-  .table-scroll-hint {
-    position: relative;
-  }
   .table-scroll-hint::before {
     content: "Desliza →";
     position: sticky;
@@ -536,11 +533,11 @@ body.reekon-immersive-active {
     z-index: 5;
     display: block;
     width: fit-content;
-    margin-bottom: 0.35rem;
-    padding: 0.2rem 0.55rem;
-    font-size: 0.625rem;
+    margin-bottom: 0.25rem;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.5625rem;
     font-weight: 800;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: #64748b;
     background: rgba(248, 250, 252, 0.95);

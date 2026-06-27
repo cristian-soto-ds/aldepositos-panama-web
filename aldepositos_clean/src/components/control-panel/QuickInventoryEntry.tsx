@@ -834,8 +834,8 @@ export function QuickInventoryEntry({
     return (
       <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">
         <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
-          <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 md:px-0">
+          <div className="shrink-0 space-y-3 sm:space-y-4 md:space-y-6 mb-3 sm:mb-4 md:mb-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div>
                 <h2 className="text-fluid-title flex items-center gap-2 font-bold text-[#16263F] dark:text-slate-100 md:gap-3">
                   {moduleType === "airway" ? (
@@ -863,16 +863,16 @@ export function QuickInventoryEntry({
               </button>
             </div>
 
-            <div className="flex flex-wrap bg-slate-100/80 p-1 rounded-xl w-full border border-slate-200 dark:border-slate-600 dark:bg-slate-800/50 mx-2 md:mx-0">
+            <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-600 dark:bg-slate-800/50">
               <button
                 type="button"
                 onClick={() => {
                   setViewMode("pending");
                   setClientFilter("Todos");
                 }}
-                className={`flex-1 min-w-[100px] px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
                   viewMode === "pending"
-                    ? "bg-white dark:bg-slate-900 shadow-sm text-blue-600 dark:text-blue-400"
+                    ? "bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 }`}
               >
@@ -884,13 +884,14 @@ export function QuickInventoryEntry({
                   setViewMode("priority");
                   setClientFilter("Todos");
                 }}
-                className={`flex-1 min-w-[140px] px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
                   viewMode === "priority"
-                    ? "bg-red-500 shadow-sm text-white"
+                    ? "bg-red-500 text-white shadow-sm"
                     : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                 }`}
               >
-                Prioridad contenedor
+                <span className="sm:hidden">Prioridad</span>
+                <span className="hidden sm:inline">Prioridad contenedor</span>
               </button>
               <button
                 type="button"
@@ -898,9 +899,9 @@ export function QuickInventoryEntry({
                   setViewMode("completed");
                   setClientFilter("Todos");
                 }}
-                className={`flex-1 min-w-[100px] px-4 py-2.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
                   viewMode === "completed"
-                    ? "bg-white dark:bg-slate-900 shadow-sm text-emerald-600"
+                    ? "bg-white text-emerald-600 shadow-sm dark:bg-slate-900"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 }`}
               >
@@ -909,11 +910,11 @@ export function QuickInventoryEntry({
             </div>
 
             {clients.length > 0 && (
-              <div className="flex gap-2 md:gap-3 overflow-x-auto pb-2 px-2 md:px-0 hide-scrollbar">
+              <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar md:gap-3 md:pb-2">
             <button
               type="button"
               onClick={() => setClientFilter("Todos")}
-              className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
+              className={`shrink-0 rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
                 clientFilter === "Todos"
                   ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
                   : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
@@ -926,7 +927,7 @@ export function QuickInventoryEntry({
                 key={c}
                 type="button"
                 onClick={() => setClientFilter(c)}
-                className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
+                className={`shrink-0 rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
                   clientFilter === c
                     ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
                     : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
@@ -939,8 +940,8 @@ export function QuickInventoryEntry({
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pr-2 pb-20">
-            <div className="grid grid-cols-1 gap-3 md:gap-4 px-2 md:px-0">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pb-16 sm:pb-20">
+            <div className="grid grid-cols-1 gap-3 md:gap-4">
               {displayedTasks.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
                   No hay órdenes{" "}
@@ -955,163 +956,172 @@ export function QuickInventoryEntry({
                 displayedTasks.map((t) => (
               <div
                 key={t.id}
-                className={`p-5 md:p-6 rounded-2xl border shadow-sm hover:shadow-lg hover:border-blue-200 dark:hover:border-blue-800 transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between group relative gap-4 ${
+                role="button"
+                tabIndex={0}
+                onClick={() => handleSelectTask(t)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleSelectTask(t);
+                  }
+                }}
+                className={`group relative flex cursor-pointer flex-col gap-3 rounded-2xl border p-4 shadow-sm transition-all hover:border-blue-200 hover:shadow-lg dark:hover:border-blue-800 sm:p-5 md:p-6 ${
                   viewMode === "priority"
-                    ? "bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800"
-                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                    ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
+                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
                 }`}
               >
-                <div className="absolute top-4 right-4 z-20 flex gap-2 items-center">
-                  <div className="relative">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <h3
+                      className={`text-xl font-bold leading-none tracking-tight sm:text-2xl md:text-3xl ${
+                        viewMode === "priority"
+                          ? "text-red-700 dark:text-red-300"
+                          : "text-[#16263F] dark:text-slate-100"
+                      }`}
+                    >
+                      RA {t.ra}
+                    </h3>
+                    {t.status === "in_progress" && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                        En curso
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className={`flex shrink-0 flex-col items-center rounded-xl border px-3 py-1.5 text-center shadow-sm ${
+                      viewMode === "priority"
+                        ? "border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+                        : "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
+                    }`}
+                  >
+                    <span className="text-[9px] font-semibold leading-none">Bultos</span>
+                    <span className="text-lg font-bold tabular-nums leading-none sm:text-xl md:text-2xl">
+                      {t.expectedBultos}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 border-t border-slate-100 pt-3 dark:border-slate-700 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0">
+                  <div className="min-w-0">
+                    <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                      Proveedor
+                    </p>
+                    <p className="text-sm font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:text-xs md:text-sm">
+                      {t.provider}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                      Marca / tracking
+                    </p>
+                    <p className="text-sm font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:text-xs md:text-sm">
+                      {t.brand}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-700"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <p className="text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                    Toca para capturar →
+                  </p>
+                  <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTransferOpenId((prev) => (prev === t.id ? null : t.id));
+                        }}
+                        className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-500 dark:hover:bg-emerald-950/30"
+                        title="Transferir a otro módulo"
+                      >
+                        <ArrowRightLeft className="icon-sm" />
+                      </button>
+                      {transferOpenId === t.id && (
+                        <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+                          {moduleType === "quick" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTransferTask(t, "detailed");
+                                  setTransferOpenId(null);
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                              >
+                                → Ingreso Detallado
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTransferTask(t, "airway");
+                                  setTransferOpenId(null);
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                              >
+                                → Guía Aérea
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTransferTask(t, "quick");
+                                  setTransferOpenId(null);
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                              >
+                                → Ingreso Rápido
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onTransferTask(t, "detailed");
+                                  setTransferOpenId(null);
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                              >
+                                → Ingreso Detallado
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setTransferOpenId((prev) => (prev === t.id ? null : t.id));
+                        openEditModal(t);
                       }}
-                      className="text-slate-400 dark:text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 p-2 rounded-xl transition-colors"
-                      title="Transferir a otro módulo"
+                      className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-slate-500 dark:hover:bg-blue-950/45 dark:hover:text-blue-400"
                     >
-                      <ArrowRightLeft size={16} />
+                      <Edit className="icon-sm" />
                     </button>
-                    {transferOpenId === t.id && (
-                      <div className="absolute right-0 top-full mt-1 py-1 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-600 shadow-lg z-30 min-w-[180px]">
-                        {moduleType === "quick" ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "detailed");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
-                            >
-                              → Ingreso Detallado
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "airway");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
-                            >
-                              → Guía Aérea
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "quick");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
-                            >
-                              → Ingreso Rápido
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "detailed");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
-                            >
-                              → Ingreso Detallado
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(t);
-                    }}
-                    className="text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:bg-blue-950/45 p-2 rounded-xl transition-colors"
-                  >
-                    <Edit size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteTask(t.id);
-                    }}
-                    className="text-slate-400 dark:text-slate-500 hover:text-red-500 hover:bg-red-50 p-2 rounded-xl transition-colors"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-
-                <div
-                  className="flex-1 w-full"
-                  onClick={() => handleSelectTask(t)}
-                >
-                  <div className="flex justify-between items-start mb-3 pr-16 md:pr-20">
-                    <div className="flex items-center gap-3">
-                      <h3
-                        className={`text-2xl md:text-3xl font-bold tracking-tight truncate leading-none ${
-                          viewMode === "priority"
-                            ? "text-red-700 dark:text-red-300"
-                            : "text-[#16263F] dark:text-slate-100"
-                        }`}
-                      >
-                        RA {t.ra}
-                      </h3>
-                      {t.status === "in_progress" && (
-                        <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold dark:bg-amber-950/50 dark:text-amber-200">
-                          En curso
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      className={`px-3 py-1.5 rounded-xl text-center border min-w-[3.5rem] shadow-sm flex flex-col items-center gap-0.5 ${
-                        viewMode === "priority"
-                          ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800"
-                          : "bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-950/40 dark:text-violet-200 dark:border-violet-800"
-                      }`}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteTask(t.id);
+                      }}
+                      className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500"
                     >
-                      <span className="text-[9px] font-semibold leading-none">
-                        Bultos
-                      </span>
-                      <span className="text-xl md:text-2xl font-bold leading-none tabular-nums">
-                        {t.expectedBultos}
-                      </span>
-                    </div>
+                      <Trash2 className="icon-sm" />
+                    </button>
+                    <span className="hidden items-center justify-center rounded-xl bg-slate-50 p-2 text-slate-400 sm:flex dark:bg-slate-800/60 dark:text-slate-500">
+                      <ArrowRight className="icon-sm" />
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-4 border-t border-slate-100 dark:border-slate-700 pt-3">
-                    <div>
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mb-0.5">
-                        Proveedor
-                      </p>
-                      <p className="text-xs md:text-sm font-semibold text-[#16263F] dark:text-slate-100 truncate">
-                        {t.provider}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 mb-0.5">
-                        Marca / tracking
-                      </p>
-                      <p className="text-xs md:text-sm font-semibold text-[#16263F] dark:text-slate-100 truncate">
-                        {t.brand}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-[11px] font-medium text-blue-600 dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                    Clic para capturar medidas →
-                  </p>
-                </div>
-                <div className="w-full md:w-14 h-12 md:h-14 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700 flex items-center justify-center text-slate-400 dark:text-slate-500 group-hover:bg-slate-100 group-hover:text-[#16263F] dark:text-slate-100 transition-all shrink-0 hidden sm:flex">
-                  <ArrowRight className="w-5 h-5" />
                 </div>
               </div>
             ))
@@ -1203,63 +1213,66 @@ export function QuickInventoryEntry({
   return (
     <>
     <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade">
-      <div className="shrink-0 mb-2 px-2 md:px-0">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={clearTask}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-[#16263F] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Volver al listado
-            </button>
-            <button
-              type="button"
-              onClick={() => setCsvExportOpen(true)}
-              title="Descargar CSV compatible con Excel"
-              className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-900 transition hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-900/50"
-            >
-              <Download className="h-4 w-4" />
-              Exportar CSV
-            </button>
-          </div>
+      <div className="mb-2 shrink-0 space-y-2 px-0.5 md:px-0">
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={clearTask}
+            className="inline-flex touch-target items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-[#16263F] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100 sm:gap-2 sm:px-3"
+          >
+            <ArrowLeft className="icon-sm" />
+            <span className="truncate">Volver</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setCsvExportOpen(true)}
+            title="Descargar CSV compatible con Excel"
+            className="inline-flex touch-target items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-2 py-2.5 text-xs font-semibold text-sky-900 transition hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-900/50 sm:gap-2 sm:px-3"
+          >
+            <Download className="icon-sm" />
+            <span className="truncate">CSV</span>
+          </button>
+        </div>
 
           {t && (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-800/50">
+              <div className="inline-flex flex-1 items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:flex-none">
                 <button
                   type="button"
                   onClick={() => setCaptureLayoutWithPersist("table")}
-                  className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-semibold transition sm:px-3 sm:text-xs ${
+                  className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
                     captureLayout === "table"
                       ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
                       : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
                   }`}
                 >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Tabla</span>
+                  <LayoutGrid className="icon-sm" />
+                  <span className="sm:inline">Tabla</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setCaptureLayoutWithPersist("reekon")}
-                  className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-medium text-slate-500 transition hover:text-slate-800 dark:text-slate-400 sm:px-3 sm:text-xs"
+                  className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
+                    captureLayout === "reekon"
+                      ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
+                      : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+                  }`}
                 >
-                  <Smartphone className="h-3.5 w-3.5" />
+                  <Smartphone className="icon-sm" />
                   Reekon
                 </button>
               </div>
-              <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-[#16263F] shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+              <span className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#16263F] shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:flex-none sm:text-sm">
                 {moduleType === "airway" ? (
-                  <Plane className="h-4 w-4 text-orange-500" />
+                  <Plane className="icon-sm text-orange-500" />
                 ) : (
-                  <Box className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <Box className="icon-sm text-blue-600 dark:text-blue-400" />
                 )}
                 RA-{t.ra}
               </span>
               <span
                 key={autosaveTick}
-                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold ${
+                className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-2.5 py-2 text-[11px] font-semibold sm:gap-1.5 sm:px-3 sm:text-xs ${
                   autosaveState === "saving"
                     ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
                     : autosaveState === "saved"
@@ -1268,31 +1281,52 @@ export function QuickInventoryEntry({
                         ? "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
                         : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300"
                 }`}
+                title={
+                  autosaveState === "saving"
+                    ? "Guardando…"
+                    : autosaveState === "saved"
+                      ? "Guardado"
+                      : autosaveState === "error"
+                        ? "Error al guardar"
+                        : "Listo"
+                }
               >
                 {autosaveState === "saving" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="icon-sm animate-spin" />
                 ) : autosaveState === "saved" ? (
-                  <Cloud className="h-3.5 w-3.5" />
+                  <Cloud className="icon-sm" />
                 ) : autosaveState === "error" ? (
-                  <CloudOff className="h-3.5 w-3.5" />
+                  <CloudOff className="icon-sm" />
                 ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <CheckCircle2 className="icon-sm" />
                 )}
-                {autosaveState === "saving"
-                  ? "Guardando…"
-                  : autosaveState === "saved"
-                    ? "Guardado"
-                    : autosaveState === "error"
-                      ? "Error al guardar"
-                      : "Listo"}
+                <span className="hidden sm:inline">
+                  {autosaveState === "saving"
+                    ? "Guardando…"
+                    : autosaveState === "saved"
+                      ? "Guardado"
+                      : autosaveState === "error"
+                        ? "Error"
+                        : "Listo"}
+                </span>
               </span>
             </div>
           )}
-        </div>
+
+        {t && captureLayout === "table" && (
+          <button
+            type="button"
+            onClick={() => setCaptureLayoutWithPersist("reekon")}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] font-semibold text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100 sm:hidden"
+          >
+            <Smartphone className="icon-sm" />
+            Usar vista Reekon — mejor para celular
+          </button>
+        )}
       </div>
 
       {t && (
-        <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-700 dark:bg-slate-900 md:p-3">
+        <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:gap-2 sm:rounded-2xl sm:p-2 md:p-3">
           <InventoryReceptionCompact
             friendly
             leadingIcon={
@@ -1319,58 +1353,55 @@ export function QuickInventoryEntry({
           />
 
           <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600">
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/90 px-3 py-2 dark:border-slate-600 dark:bg-slate-800/50">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Ruler className="h-4 w-4 text-slate-500 dark:text-slate-400" aria-hidden />
-                  <div>
-                    <p className="text-sm font-bold text-[#16263F] dark:text-slate-100">
-                      Captura de medidas
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {referenceMode === "with"
-                        ? "Referencias del RA, bultos, peso y dimensiones en cm"
-                        : "Numeración consecutiva — solo bultos y dimensiones"}
-                    </p>
-                  </div>
+            <div className="flex shrink-0 flex-col gap-2 border-b border-slate-200 bg-slate-50/90 px-2 py-2 dark:border-slate-600 dark:bg-slate-800/50 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <Ruler className="icon-sm shrink-0 text-slate-500 dark:text-slate-400" aria-hidden />
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-[#16263F] dark:text-slate-100">
+                    Captura de medidas
+                  </p>
+                  <p className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
+                    {referenceMode === "with"
+                      ? "Referencias del RA, bultos, peso y dimensiones en cm"
+                      : "Numeración consecutiva — solo bultos y dimensiones"}
+                  </p>
                 </div>
-                <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-600 dark:bg-slate-900">
-                  <span className="hidden text-[10px] font-semibold text-slate-500 dark:text-slate-400 sm:inline">
-                    Referencias
-                  </span>
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800">
+              </div>
+              <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
+                <div className="inline-flex w-full items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 py-1 dark:border-slate-600 dark:bg-slate-900 sm:w-auto">
+                  <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800 sm:w-auto">
                     <button
                       type="button"
                       onClick={() => switchReferenceMode("with")}
-                      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition sm:px-3 sm:py-1.5 sm:text-xs ${
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition sm:flex-none sm:px-3 sm:text-xs ${
                         referenceMode === "with"
                           ? "bg-[#16263F] text-white shadow-sm"
                           : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
                       }`}
                     >
-                      Con referencias
+                      Con refs
                     </button>
                     <button
                       type="button"
                       onClick={() => switchReferenceMode("without")}
-                      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition sm:px-3 sm:py-1.5 sm:text-xs ${
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition sm:flex-none sm:px-3 sm:text-xs ${
                         referenceMode === "without"
                           ? "bg-[#16263F] text-white shadow-sm"
                           : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
                       }`}
                     >
-                      Sin referencias
+                      Sin refs
                     </button>
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                <span className="inline-flex items-center gap-1">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                  {completedRows} completas
-                </span>
-                <span className="text-slate-300 dark:text-slate-600">·</span>
-                <span>{measureRows.length} líneas</span>
+                <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-[11px]">
+                  <span className="inline-flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500 sm:h-3.5 sm:w-3.5" />
+                    {completedRows} ok
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <span>{measureRows.length} líneas</span>
+                </div>
               </div>
             </div>
 
@@ -1602,7 +1633,7 @@ export function QuickInventoryEntry({
             </div>
           </div>
 
-          <div className="isolate z-10 shrink-0 space-y-2 border-t border-slate-200 pt-3 dark:border-slate-600">
+          <div className="isolate z-10 shrink-0 space-y-1.5 border-t border-slate-200 pt-2 dark:border-slate-600 sm:space-y-2 sm:pt-3">
             <input
               ref={referenciasExcelRef}
               type="file"
@@ -1611,34 +1642,34 @@ export function QuickInventoryEntry({
               onChange={onReferenciasExcelSelected}
             />
             {captureLayout === "table" && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={addRow}
-                className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 py-3 text-xs font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 md:text-sm"
+                className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
               >
-                <Plus className="h-4 w-4" /> Agregar línea
+                <Plus className="icon-sm" /> Agregar
               </button>
               <button
                 type="button"
                 disabled={referenciasImportBusy}
                 onClick={() => referenciasExcelRef.current?.click()}
-                className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 py-3 text-xs font-semibold text-emerald-800 transition-all hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200 md:text-sm"
+                className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-emerald-300 bg-emerald-50/50 py-2 text-[11px] font-semibold text-emerald-800 transition-all hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
               >
-                <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                Importar desde Excel
+                <FileSpreadsheet className="icon-sm text-emerald-600 dark:text-emerald-400" />
+                Excel
               </button>
             </div>
             )}
             <button
               type="button"
               onClick={saveOrder}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#0f172a] active:scale-[0.99] md:py-4"
+              className="flex w-full touch-target items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#0f172a] active:scale-[0.99] sm:py-3 md:py-4"
             >
-              <Check className="h-5 w-5" />
+              <Check className="icon-md" />
               Guardar orden
             </button>
-            <p className="text-center text-[11px] text-slate-400 dark:text-slate-500">
+            <p className="hidden text-center text-[11px] text-slate-400 dark:text-slate-500 sm:block">
               Los cambios se guardan automáticamente mientras capturas
             </p>
           </div>

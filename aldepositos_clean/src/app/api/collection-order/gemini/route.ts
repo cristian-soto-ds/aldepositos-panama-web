@@ -31,7 +31,6 @@ import {
   MAX_BINARY_UPLOAD_BYTES,
   readGeminiChunkBaseConfig,
   resolveChunkConfigForDocument,
-  SERVER_MAX_DURATION_S,
   shouldChunkDocumentText,
   type DocumentProcessingMeta,
 } from "@/lib/geminiDocumentLimits";
@@ -61,7 +60,8 @@ function usageFromGenAiResponse(response: unknown): GeminiTokenUsage | null {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = SERVER_MAX_DURATION_S;
+/** Debe coincidir con SERVER_MAX_DURATION_S en geminiDocumentLimits.ts (literal requerido por Next.js). */
+export const maxDuration = 300;
 
 const MAX_FILE_BYTES = MAX_BINARY_UPLOAD_BYTES;
 const HISTORY_TURNS = 4;

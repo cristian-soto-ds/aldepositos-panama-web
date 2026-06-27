@@ -12,9 +12,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen font-sans bg-slate-50 flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-blue-200/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-slate-300/30 rounded-full blur-3xl pointer-events-none" />
+    <div className="safe-area-insets relative flex min-h-dvh min-h-screen items-center justify-center overflow-hidden bg-slate-50 font-sans">
+      <div className="pointer-events-none absolute left-[-10%] top-[-10%] h-[min(600px,90vw)] w-[min(600px,90vw)] rounded-full bg-blue-200/20 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-[-10%] right-[-10%] h-[min(600px,90vw)] w-[min(600px,90vw)] rounded-full bg-slate-300/30 blur-3xl" />
 
       <div className="relative z-10 w-full max-w-md">
         <LoginForm onSuccess={handleSuccess} />

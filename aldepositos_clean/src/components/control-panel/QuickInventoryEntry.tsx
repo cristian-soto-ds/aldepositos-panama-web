@@ -23,6 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
+import { tableScrollHostClass } from "@/lib/responsiveUi";
 import {
   applyConsecutiveReferences,
   buildReferenceSnapshot,
@@ -836,20 +837,20 @@ export function QuickInventoryEntry({
           <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 px-2 md:px-0">
               <div>
-                <h2 className="text-xl md:text-2xl font-bold text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
+                <h2 className="text-fluid-title flex items-center gap-2 font-bold text-[#16263F] dark:text-slate-100 md:gap-3">
                   {moduleType === "airway" ? (
                     <>
-                      <Plane className="text-orange-500 w-5 h-5 md:w-7 md:h-7" />
+                      <Plane className="icon-lg text-orange-500" />
                       Guía aérea
                     </>
                   ) : (
                     <>
-                      <Box className="text-[#16263F] dark:text-slate-100 w-5 h-5 md:w-7 md:h-7" />
+                      <Box className="icon-lg text-[#16263F] dark:text-slate-100" />
                       Ingreso rápido
                     </>
                   )}
                 </h2>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 md:text-sm">
+                <p className="text-fluid-subtitle mt-1 text-slate-500 dark:text-slate-400">
                   Selecciona una orden para capturar medidas y bultos
                 </p>
               </div>
@@ -1373,8 +1374,8 @@ export function QuickInventoryEntry({
               </div>
             </div>
 
-            <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
+            <div className="inventory-table-scroll-host table-scroll-hint flex min-h-0 flex-1 basis-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
+            <div className={`${tableScrollHostClass} inventory-measures-scroll`}>
             <table
               className={`w-full border-collapse text-left text-sm md:min-w-full ${tableMinWidthClass}`}
             >

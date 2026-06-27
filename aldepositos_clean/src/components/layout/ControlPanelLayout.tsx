@@ -19,6 +19,7 @@ import {
   BookMarked,
   HandHelping,
   MoreHorizontal,
+  type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
@@ -37,6 +38,10 @@ type ControlPanelLayoutProps = {
   preferences?: UserPreferences;
   showOptionsModule?: boolean;
 };
+
+function NavIcon({ Icon }: { Icon: LucideIcon }) {
+  return <Icon className="icon-nav" aria-hidden />;
+}
 
 export function ControlPanelLayout({
   children,
@@ -79,48 +84,60 @@ export function ControlPanelLayout({
     };
   }, [userMenuOpen]);
 
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [sidebarOpen]);
+
   return (
-    <div className={`h-dvh min-h-screen flex flex-col md:flex-row font-sans text-gray-800 dark:text-slate-200 overflow-hidden ${
-      preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
-    }`}>
+    <div
+      className={`flex h-dvh min-h-screen flex-col overflow-hidden font-sans text-gray-800 md:flex-row dark:text-slate-200 ${
+        preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+      }`}
+    >
       {sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          aria-hidden
         />
       )}
 
       <aside
-        className={`fixed md:relative z-50 w-[86vw] max-w-72 md:w-72 ${
+        className={`fixed z-50 flex h-full min-h-screen w-[min(86vw,20rem)] max-w-xs flex-col shadow-2xl transition-transform duration-300 md:relative md:w-60 md:max-w-none md:translate-x-0 lg:w-72 ${
           preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
-        } h-full min-h-screen flex flex-col shadow-2xl transition-transform duration-300 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-        }`}
+        } ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >
-        <div className="p-6 md:p-8 flex flex-col items-center border-b border-white/5 relative">
+        <div className="safe-area-top relative flex flex-col items-center border-b border-white/5 p-5 md:p-6 lg:p-8">
           <button
+            type="button"
             onClick={() => setSidebarOpen(false)}
-            className="absolute top-4 right-4 md:hidden text-gray-400 hover:text-white"
+            className="touch-target absolute right-2 top-2 flex items-center justify-center text-gray-400 hover:text-white md:hidden"
+            aria-label="Cerrar menú"
           >
-            <X size={20} />
+            <X className="icon-md" />
           </button>
           <BrandLogoMark variant="sidebar" priority />
           <div className="text-center">
-            <p className="font-black text-xl md:text-2xl tracking-tighter leading-none text-white">
+            <p className="text-fluid-title font-black leading-none tracking-tighter text-white">
               ALDEPOSITOS
             </p>
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-[0.2em] mt-1 opacity-80">
+            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-gray-400 opacity-80 sm:text-[10px]">
               Zona Libre Panamá
             </p>
           </div>
         </div>
 
-        <nav className="flex-1 p-4 md:p-6 space-y-2 md:space-y-4 overflow-y-auto hide-scrollbar">
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+        <nav className="hide-scrollbar flex-1 space-y-1.5 overflow-y-auto p-3 sm:space-y-2 sm:p-4 md:space-y-3 md:p-5 lg:p-6">
+          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
             Ingreso de carga
           </p>
           <NavItem
-            icon={<Box size={20} />}
+            icon={<NavIcon Icon={Box} />}
             text="Ingreso Rápido"
             active={currentView === "quick-entry"}
             onClick={() => {
@@ -129,7 +146,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<FileText size={20} />}
+            icon={<NavIcon Icon={FileText} />}
             text="Ingreso Detallado"
             active={currentView === "detailed-entry"}
             onClick={() => {
@@ -138,7 +155,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<Plane size={20} />}
+            icon={<NavIcon Icon={Plane} />}
             text="Guía Aérea"
             active={currentView === "airway"}
             onClick={() => {
@@ -147,7 +164,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<HandHelping size={20} />}
+            icon={<NavIcon Icon={HandHelping} />}
             text="Orden de Recolección"
             active={currentView === "collection-orders"}
             onClick={() => {
@@ -156,13 +173,13 @@ export function ControlPanelLayout({
             }}
           />
 
-          <div className="my-4 border-b border-white/5" />
+          <div className="my-3 border-b border-white/5 md:my-4" />
 
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
             Logística y control
           </p>
           <NavItem
-            icon={<PackageSearch size={20} />}
+            icon={<NavIcon Icon={PackageSearch} />}
             text="Contenedores"
             active={currentView === "container-reports"}
             onClick={() => {
@@ -171,7 +188,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<Activity size={20} />}
+            icon={<NavIcon Icon={Activity} />}
             text="Monitoreo Live"
             active={currentView === "monitor"}
             onClick={() => {
@@ -180,7 +197,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<BookMarked size={20} />}
+            icon={<NavIcon Icon={BookMarked} />}
             text="Catálogo de Referencias"
             active={currentView === "reference-catalog"}
             onClick={() => {
@@ -189,13 +206,13 @@ export function ControlPanelLayout({
             }}
           />
 
-          <div className="my-4 border-b border-white/5" />
+          <div className="my-3 border-b border-white/5 md:my-4" />
 
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
             Salida
           </p>
           <NavItem
-            icon={<Truck size={20} />}
+            icon={<NavIcon Icon={Truck} />}
             text="Entrega de Carga"
             active={currentView === "dispatch"}
             onClick={() => {
@@ -204,13 +221,13 @@ export function ControlPanelLayout({
             }}
           />
 
-          <div className="my-4 border-b border-white/5" />
+          <div className="my-3 border-b border-white/5 md:my-4" />
 
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest px-4 mb-2">
+          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
             Administración y rendimiento
           </p>
           <NavItem
-            icon={<LayoutDashboard size={20} />}
+            icon={<NavIcon Icon={LayoutDashboard} />}
             text="Panel Principal"
             active={currentView === "dashboard"}
             onClick={() => {
@@ -219,7 +236,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<ClipboardList size={20} />}
+            icon={<NavIcon Icon={ClipboardList} />}
             text="Reportes"
             active={currentView === "reports"}
             onClick={() => {
@@ -228,7 +245,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<BarChart3 size={20} />}
+            icon={<NavIcon Icon={BarChart3} />}
             text="Productividad"
             active={currentView === "productivity"}
             onClick={() => {
@@ -238,7 +255,7 @@ export function ControlPanelLayout({
           />
           {showOptionsModule && (
             <NavItem
-              icon={<Settings size={20} />}
+              icon={<NavIcon Icon={Settings} />}
               text="Opciones de Usuario"
               active={currentView === "options"}
               onClick={() => {
@@ -249,25 +266,25 @@ export function ControlPanelLayout({
           )}
         </nav>
 
-        <div className="p-4 md:p-6 border-t border-white/5 bg-black/20">
+        <div className="safe-area-bottom border-t border-white/5 bg-black/20 p-3 md:p-4 lg:p-6">
           <div
             ref={userMenuRef}
-            className="relative flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3"
+            className="relative flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/5 p-2.5 sm:gap-3 sm:p-3"
           >
-            <div className="w-9 h-9 rounded-full overflow-hidden border border-white/10 bg-white/5 flex items-center justify-center shrink-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/5 sm:h-10 sm:w-10">
               {avatarSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarSrc} alt="Avatar" className="w-full h-full object-cover" />
+                <img src={avatarSrc} alt="Avatar" className="h-full w-full object-cover" />
               ) : (
-                <UserRound size={16} className="text-slate-200" />
+                <UserRound className="icon-sm text-slate-200" />
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-black text-white truncate">
+              <p className="truncate text-[11px] font-black text-white sm:text-[12px]">
                 {userDisplayName || "Operador"}
               </p>
               {userEmail && (
-                <p className="text-[11px] font-semibold text-slate-300/90 truncate">
+                <p className="truncate text-[10px] font-semibold text-slate-300/90 sm:text-[11px]">
                   {userEmail}
                 </p>
               )}
@@ -275,15 +292,15 @@ export function ControlPanelLayout({
             <button
               type="button"
               onClick={() => setUserMenuOpen((v) => !v)}
-              className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-slate-200 hover:bg-white/10"
+              className="touch-target flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10 sm:p-2"
               aria-label="Opciones de usuario"
               aria-expanded={userMenuOpen}
             >
-              <MoreHorizontal size={18} />
+              <MoreHorizontal className="icon-sm" />
             </button>
 
             {userMenuOpen && (
-              <div className="absolute bottom-full right-0 mb-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0d1627] shadow-2xl">
+              <div className="absolute bottom-full right-0 mb-2 w-[min(14rem,80vw)] overflow-hidden rounded-2xl border border-white/10 bg-[#0d1627] shadow-2xl">
                 <button
                   type="button"
                   onClick={() => {
@@ -292,7 +309,7 @@ export function ControlPanelLayout({
                   }}
                   className="flex w-full items-center gap-2 px-4 py-3 text-left text-[11px] font-black uppercase tracking-widest text-red-300 hover:bg-white/5"
                 >
-                  <LogOut size={16} /> Cerrar sesión
+                  <LogOut className="icon-sm" /> Cerrar sesión
                 </button>
               </div>
             )}
@@ -300,26 +317,32 @@ export function ControlPanelLayout({
         </div>
       </aside>
 
-      <div className={`flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden ${
-        preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
-      }`}>
-        <header className={`md:hidden text-white p-4 flex justify-between items-center shadow-md z-30 shrink-0 ${
-          preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
-        }`}>
-          <div className="flex items-center gap-3 min-w-0">
+      <div
+        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${
+          preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+        }`}
+      >
+        <header
+          className={`app-shell-header safe-area-top safe-area-x z-30 flex shrink-0 items-center justify-between text-white shadow-md md:hidden ${
+            preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-2.5 py-2 sm:gap-3">
             <BrandLogoMark variant="headerCompact" />
-            <span className="font-black tracking-tighter uppercase text-lg">
+            <span className="truncate text-base font-black uppercase tracking-tighter sm:text-lg">
               Aldepósitos
             </span>
           </div>
           <button
+            type="button"
             onClick={() => setSidebarOpen(true)}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            className="touch-target flex items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+            aria-label="Abrir menú"
           >
-            <Menu className="w-6 h-6" />
+            <Menu className="icon-lg" />
           </button>
         </header>
-        <main className="flex-1 min-h-0 overflow-hidden flex flex-col p-3 sm:p-4 md:p-8 relative">
+        <main className="panel-main-content safe-area-bottom relative min-h-0 flex-1 overflow-hidden p-2 sm:p-3 md:p-6 lg:p-8">
           {children}
         </main>
       </div>
@@ -337,18 +360,18 @@ type NavItemProps = {
 function NavItem({ icon, text, active, onClick }: NavItemProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`w-full flex items-center gap-3 md:gap-4 px-4 md:px-6 py-3 md:py-4 rounded-2xl transition-all duration-300 text-left ${
+      className={`flex w-full min-h-[var(--touch-min)] items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-all duration-300 sm:min-h-0 sm:gap-3 sm:rounded-2xl sm:px-4 sm:py-3 md:gap-4 md:px-5 md:py-3.5 lg:px-6 lg:py-4 ${
         active
-          ? "bg-blue-600 text-white font-black shadow-xl md:scale-[1.05]"
+          ? "bg-blue-600 font-black text-white shadow-xl md:scale-[1.03]"
           : "text-slate-400 hover:bg-white/5 hover:text-white"
       }`}
     >
-      {icon}{" "}
-      <span className="text-[11px] md:text-sm uppercase tracking-widest font-bold leading-tight break-words">
+      {icon}
+      <span className="text-[10px] font-bold uppercase leading-tight tracking-wider break-words sm:text-[11px] md:text-xs md:tracking-widest lg:text-sm">
         {text}
       </span>
     </button>
   );
 }
-

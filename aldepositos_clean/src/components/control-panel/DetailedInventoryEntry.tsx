@@ -1070,8 +1070,8 @@ export function DetailedInventoryEntry({
               totalsSectionTitle="Resumen tabla"
             />
 
-            <div className="inventory-table-scroll-host flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-[inset_0_0_0_1px_rgb(241,245,249)] dark:shadow-[inset_0_0_0_1px_rgb(30,41,59)]">
-              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto inventory-measures-scroll">
+            <div className="inventory-table-scroll-host table-scroll-hint flex min-h-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[inset_0_0_0_1px_rgb(241,245,249)] dark:border-slate-600 dark:bg-slate-900 dark:shadow-[inset_0_0_0_1px_rgb(30,41,59)]">
+              <div className="table-scroll-host inventory-measures-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto">
               <table className={`w-full border-collapse text-left text-sm ${detailedMode === "reempaque" ? "min-w-[1500px]" : "min-w-[1240px]"}`}>
                 <thead className="sticky top-0 z-20 border-b border-slate-200 dark:border-slate-600 bg-white/95 text-[9px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300 shadow-sm backdrop-blur-sm md:text-[10px] supports-[backdrop-filter]:bg-white/90">
                   <tr>

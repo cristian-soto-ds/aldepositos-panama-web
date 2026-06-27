@@ -99,11 +99,11 @@ export function ManualEntryModal({
   const isEditing = !!initialData;
 
   return (
-    <div className="fixed inset-0 bg-[#16263F]/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-3xl md:rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh]">
+    <div className="modal-overlay flex animate-fade items-end justify-center bg-[#16263F]/60 backdrop-blur-sm sm:items-center">
+      <div className="modal-panel flex w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-900 sm:rounded-[2rem]">
         <div className="bg-[#16263F] p-5 md:p-6 text-white shrink-0 flex justify-between items-center">
           <h3 className="text-lg md:text-xl font-black tracking-tight flex items-center gap-2 md:gap-3">
-            <Edit3 className="text-blue-400 w-5 h-5" />{" "}
+            <Edit3 className="icon-md text-blue-400" />{" "}
             {isEditing ? "Editar RA" : "Crear RA Manual"}
           </h3>
           <button
@@ -111,7 +111,7 @@ export function ManualEntryModal({
             onClick={onClose}
             className="text-slate-400 dark:text-slate-500 hover:text-white transition-colors"
           >
-            <X size={24} />
+            <X className="icon-lg" />
           </button>
         </div>
 

@@ -496,8 +496,8 @@ export default function PanelPage() {
       showOptionsModule={showOptionsModule}
     >
       {tasksLoading && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/70 backdrop-blur-sm">
-          <p className="text-sm font-black text-[#16263F] uppercase tracking-widest">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/70 backdrop-blur-sm panel-loading-overlay safe-area-insets">
+          <p className="text-fluid-subtitle px-4 text-center font-black uppercase tracking-widest text-[#16263F]">
             Cargando órdenes…
           </p>
         </div>

@@ -33,7 +33,7 @@ export function DeleteRaConfirmModal({
 
   return (
     <div
-      className="fixed inset-0 z-[320] flex items-center justify-center bg-slate-900/55 p-4 backdrop-blur-[2px]"
+      className="modal-overlay flex items-end justify-center bg-slate-900/55 backdrop-blur-[2px] sm:items-center"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel();
@@ -43,7 +43,7 @@ export function DeleteRaConfirmModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-ra-title"
-        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-600 dark:bg-slate-900"
+        className="modal-panel w-full max-w-md overflow-hidden border border-slate-200 bg-white shadow-2xl dark:border-slate-600 dark:bg-slate-900"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between border-b border-slate-100 bg-gradient-to-r from-rose-50 to-amber-50 px-5 py-4 dark:border-slate-700 dark:from-rose-950/40 dark:to-amber-950/30">

@@ -471,7 +471,7 @@ export function LiveMonitor({
                 </div>
               </div>
 
-              <div className="overflow-x-auto border-t border-slate-100 dark:border-slate-700">
+              <div className="table-scroll-hint table-scroll-host overflow-x-auto border-t border-slate-100 dark:border-slate-700">
                 <table className="w-full text-sm text-left min-w-[980px] md:min-w-full">
                   <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-sm text-slate-500 dark:text-slate-400 uppercase text-[9px] md:text-[10px] font-black tracking-widest border-b border-slate-200 dark:border-slate-600 shadow-[0_1px_0_0_rgba(226,232,240,0.8)]">
                     <tr>

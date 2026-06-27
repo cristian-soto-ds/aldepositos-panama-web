@@ -216,8 +216,8 @@ export function ReferenceCatalogModule() {
         </button>
       </div>
 
-      <div className="inventory-table-scroll-host flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <div className="min-h-0 flex-1 overflow-auto">
+      <div className="inventory-table-scroll-host table-scroll-hint flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="table-scroll-host min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[960px] border-collapse text-left text-xs md:text-sm">
             <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 text-[9px] font-black uppercase tracking-widest text-slate-600 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-800/95 dark:text-slate-400">
               <tr>

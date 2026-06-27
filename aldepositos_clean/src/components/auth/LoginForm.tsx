@@ -36,7 +36,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
   };
 
   return (
-    <div className="bg-white rounded-[2rem] shadow-2xl p-8 md:p-12 relative overflow-hidden animate-fade-in border border-white">
+    <div className="relative animate-fade-in overflow-hidden rounded-2xl border border-white bg-white p-6 shadow-2xl sm:rounded-[2rem] sm:p-8 md:p-12">
       <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-[#16263F]/5 to-transparent pointer-events-none" />
 
       <div className="relative z-10 flex flex-col items-center text-center mb-10">
@@ -47,10 +47,10 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
           />
           <BrandLogoMark variant="loginHero" priority />
         </div>
-        <h1 className="text-3xl font-black text-[#16263F] tracking-tighter leading-none mb-2">
+        <h1 className="text-fluid-title mb-2 font-black leading-none tracking-tighter text-[#16263F]">
           ALDEPOSITOS
         </h1>
-        <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.3em] uppercase">
+        <h2 className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400 sm:text-[11px] sm:tracking-[0.3em]">
           Panamá
         </h2>
       </div>
@@ -61,13 +61,13 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
             Usuario
           </label>
           <div className="relative group">
-            <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-[#16263F] transition-colors" />
+            <User className="icon-md absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#16263F]" />
             <input
               type="text"
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#16263F] focus:border-[#16263F] outline-none transition-all font-medium text-[#16263F]"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3.5 pl-11 pr-4 text-base font-medium text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:bg-white focus:ring-2 focus:ring-[#16263F] sm:py-4 sm:pl-12"
               placeholder="Ingresa tu usuario"
             />
           </div>
@@ -78,13 +78,13 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
             Contraseña
           </label>
           <div className="relative group">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-[#16263F] transition-colors" />
+            <Lock className="icon-md absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#16263F]" />
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-12 pr-12 py-4 bg-slate-50/50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#16263F] focus:border-[#16263F] outline-none transition-all font-medium text-[#16263F]"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3.5 pl-11 pr-12 text-base font-medium text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:bg-white focus:ring-2 focus:ring-[#16263F] sm:py-4 sm:pl-12"
               placeholder="••••••••"
             />
           </div>
@@ -99,13 +99,13 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
         <button
           type="submit"
           disabled={isLoading || !username || !password}
-          className="w-full bg-[#16263F] text-white font-bold py-4 rounded-xl shadow-lg shadow-[#16263F]/30 hover:bg-[#0f1b2d] hover:shadow-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 mt-8 disabled:opacity-70 disabled:cursor-not-allowed uppercase tracking-widest text-[11px]"
+          className="mt-8 flex w-full touch-target items-center justify-center gap-2 rounded-xl bg-[#16263F] py-3.5 text-[11px] font-bold uppercase tracking-widest text-white shadow-lg shadow-[#16263F]/30 transition-all hover:bg-[#0f1b2d] hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70 sm:py-4"
         >
           {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
+            <Loader2 className="icon-md animate-spin" />
           ) : (
             <>
-              Iniciar Sesión <ArrowRight className="w-4 h-4" />
+              Iniciar Sesión <ArrowRight className="icon-sm" />
             </>
           )}
         </button>

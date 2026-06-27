@@ -1012,7 +1012,7 @@ export function DispatchEntry({
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto custom-scrollbar bg-slate-50/50 dark:bg-slate-800/50">
+            <div className="table-scroll-hint flex-1 overflow-auto custom-scrollbar bg-slate-50/50 dark:bg-slate-800/50">
               {loadedTasks.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 p-8 text-center">
                   <Box className="w-16 h-16 mb-4 opacity-30" />

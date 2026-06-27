@@ -23,6 +23,12 @@ export type QuickMeasureRow = {
 export type ReferenceCaptureMode = "with" | "without";
 export type CaptureLayout = "table" | "reekon";
 
+export const CAPTURE_LAYOUTS = ["table", "reekon"] as const satisfies readonly CaptureLayout[];
+
+export function isCaptureLayout(value: unknown): value is CaptureLayout {
+  return value === "table" || value === "reekon";
+}
+
 export const CAPTURE_LAYOUT_STORAGE_KEY = "quick_capture_layout_v1";
 
 export function isConsecutiveReference(ref: string): boolean {

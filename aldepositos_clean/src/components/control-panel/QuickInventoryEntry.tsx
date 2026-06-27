@@ -28,6 +28,7 @@ import {
   applyConsecutiveReferences,
   buildReferenceSnapshot,
   CAPTURE_LAYOUT_STORAGE_KEY,
+  isCaptureLayout,
   renumberConsecutiveReferences,
   restoreSourceReferences,
   taskHasImportedReferences,
@@ -115,6 +116,43 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 const CATALOG_DEBOUNCE_MS = 500;
 const QUICK_AUTOSAVE_MS = 700;
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
+
+function CaptureLayoutToggle({
+  layout,
+  onChange,
+}: {
+  layout: CaptureLayout;
+  onChange: (layout: CaptureLayout) => void;
+}) {
+  return (
+    <div className="inline-flex flex-1 items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:flex-none">
+      <button
+        type="button"
+        onClick={() => onChange("table")}
+        className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
+          layout === "table"
+            ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
+            : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+        }`}
+      >
+        <LayoutGrid className="icon-sm" />
+        <span className="sm:inline">Tabla</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("reekon")}
+        className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
+          layout === "reekon"
+            ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
+            : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
+        }`}
+      >
+        <Smartphone className="icon-sm" />
+        Reekon
+      </button>
+    </div>
+  );
+}
 
 function hasQuickRequiredData(rows: MeasureRow[]): boolean {
   if (rows.length === 0) return false;
@@ -373,7 +411,7 @@ export function QuickInventoryEntry({
         inventoryDraftKey(task.id, moduleType),
       );
       const savedLayout = window.localStorage.getItem(CAPTURE_LAYOUT_STORAGE_KEY);
-      if (savedLayout === "table" || savedLayout === "reekon") {
+      if (isCaptureLayout(savedLayout)) {
         layoutToUse = savedLayout;
       }
       if (rawDraft) {
@@ -392,7 +430,7 @@ export function QuickInventoryEntry({
           if (parsed.referenceMode === "with" || parsed.referenceMode === "without") {
             refModeToUse = parsed.referenceMode;
           }
-          if (parsed.captureLayout === "table" || parsed.captureLayout === "reekon") {
+          if (isCaptureLayout(parsed.captureLayout)) {
             layoutToUse = parsed.captureLayout;
           }
         } catch {
@@ -1236,32 +1274,10 @@ export function QuickInventoryEntry({
 
           {t && (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex flex-1 items-center rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:flex-none">
-                <button
-                  type="button"
-                  onClick={() => setCaptureLayoutWithPersist("table")}
-                  className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
-                    captureLayout === "table"
-                      ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
-                      : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-                  }`}
-                >
-                  <LayoutGrid className="icon-sm" />
-                  <span className="sm:inline">Tabla</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCaptureLayoutWithPersist("reekon")}
-                  className={`inline-flex flex-1 touch-target items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-semibold transition sm:flex-none sm:gap-1.5 sm:px-3 sm:text-xs ${
-                    captureLayout === "reekon"
-                      ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-slate-100"
-                      : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-                  }`}
-                >
-                  <Smartphone className="icon-sm" />
-                  Reekon
-                </button>
-              </div>
+              <CaptureLayoutToggle
+                layout={captureLayout}
+                onChange={setCaptureLayoutWithPersist}
+              />
               <span className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#16263F] shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:flex-none sm:text-sm">
                 {moduleType === "airway" ? (
                   <Plane className="icon-sm text-orange-500" />
@@ -1313,7 +1329,7 @@ export function QuickInventoryEntry({
             </div>
           )}
 
-        {t && captureLayout === "table" && (
+        {t && (
           <button
             type="button"
             onClick={() => setCaptureLayoutWithPersist("reekon")}
@@ -1641,7 +1657,6 @@ export function QuickInventoryEntry({
               className="hidden"
               onChange={onReferenciasExcelSelected}
             />
-            {captureLayout === "table" && (
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
               <button
                 type="button"
@@ -1660,7 +1675,6 @@ export function QuickInventoryEntry({
                 Excel
               </button>
             </div>
-            )}
             <button
               type="button"
               onClick={saveOrder}

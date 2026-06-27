@@ -1,5 +1,6 @@
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import type { GeminiTokenUsage } from "@/lib/geminiClientUsage";
+import { splitTextByPdfPages } from "@/lib/geminiPdfPageText";
 
 /** Normaliza campos string como en la ruta API. */
 export function trimGeminiLine(row: CollectionGeminiLine): CollectionGeminiLine {
@@ -52,6 +53,19 @@ export function splitTextIntoChunks(
     if (start >= t.length - 1) break;
   }
   return chunks;
+}
+
+/**
+ * Parte el documento por páginas PDF (si hay marcadores) o por tamaño con solapamiento.
+ */
+export function splitTextIntoDocumentChunks(
+  text: string,
+  chunkSize: number,
+  overlap: number,
+): string[] {
+  const byPage = splitTextByPdfPages(text);
+  if (byPage && byPage.length > 1) return byPage;
+  return splitTextIntoChunks(text, chunkSize, overlap);
 }
 
 function preferFilled(a: string | undefined, b: string | undefined): string {

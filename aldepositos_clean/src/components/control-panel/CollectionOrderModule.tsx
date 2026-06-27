@@ -1187,8 +1187,13 @@ export function CollectionOrderModule({
         return;
       }
       if (fileOutcome.status === "rejected") {
+        const reason = fileOutcome.reason;
+        const detail =
+          reason instanceof Error && reason.message
+            ? reason.message
+            : "No se pudo leer o optimizar el archivo adjunto.";
         patchGeminiJob(orderId, {
-          errorBanner: { text: "No se pudo leer o optimizar el archivo adjunto." },
+          errorBanner: { text: detail },
           busy: false,
         });
         return;
@@ -1407,7 +1412,11 @@ export function CollectionOrderModule({
           >
             <CollectionOrderAiAnalyzingStrip
               inlineRow
-              label={`${AI_ASSISTANT_DISPLAY_NAME} · analizando documento…`}
+              label={
+                geminiJob.pendingFileName
+                  ? `${AI_ASSISTANT_DISPLAY_NAME} · analizando ${geminiJob.pendingFileName} (puede tardar hasta 5 min en documentos extensos)…`
+                  : `${AI_ASSISTANT_DISPLAY_NAME} · analizando documento…`
+              }
             />
           </div>
         )}

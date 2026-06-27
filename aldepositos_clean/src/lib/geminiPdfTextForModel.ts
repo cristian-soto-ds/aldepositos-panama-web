@@ -4,9 +4,16 @@
  * PDF escaneados devuelven poco texto → el caller debe volver al modo visión (binario).
  */
 
-const PDF_TEXT_MIN_CHARS = 320;
-/** Límite alto: la API parte en fragmentos (ver `geminiCollectionOrderChunkedExtract`) para no truncar proformas largas. */
-const PDF_TEXT_MAX_CHARS = 650_000;
+import { formatPdfPageBlock, joinPdfPageBlocks } from "@/lib/geminiPdfPageText";
+import { PDF_TEXT_MIN_CHARS } from "@/lib/geminiDocumentLimits";
+
+function normalizePdfText(raw: string): string {
+  return raw
+    .replace(/\u0000/g, "")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 /**
  * Extrae texto plano útil para el modelo, o `null` si no conviene usar vía rápida.
@@ -20,11 +27,19 @@ export async function extractPdfTextForGeminiFastPath(
     const parser = new PDFParse({ data: new Uint8Array(buf) });
     try {
       const tr = await parser.getText();
-      let text = String(tr.text ?? "")
-        .replace(/\u0000/g, "")
-        .replace(/[ \t\f\v]+/g, " ")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+      const pageBlocks: string[] = [];
+
+      if (Array.isArray(tr.pages) && tr.pages.length > 0) {
+        for (const page of tr.pages) {
+          const block = formatPdfPageBlock(page.num, normalizePdfText(page.text ?? ""));
+          if (block) pageBlocks.push(block);
+        }
+      }
+
+      let text =
+        pageBlocks.length > 0
+          ? joinPdfPageBlocks(pageBlocks)
+          : normalizePdfText(String(tr.text ?? ""));
 
       /** Heurística simple: OCR/escaneo suele producir pocas palabras repetidas */
       const wordish = text.split(/\s+/).filter((w) => w.length > 1).length;
@@ -35,11 +50,6 @@ export async function extractPdfTextForGeminiFastPath(
         return null;
       }
 
-      if (text.length > PDF_TEXT_MAX_CHARS) {
-        text =
-          text.slice(0, PDF_TEXT_MAX_CHARS) +
-          "\n\n[…contenido truncado para tiempo de respuesta — prioriza líneas ya visibles arriba…]";
-      }
       return text;
     } finally {
       await parser.destroy();

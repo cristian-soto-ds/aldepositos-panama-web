@@ -102,6 +102,50 @@ function stripTrailingCommasInJsonish(s: string): string {
   return out;
 }
 
+/** Recupera filas completas aunque el JSON venga truncado por límite de tokens. */
+function extractCompleteLineObjectsFromTruncatedJson(
+  raw: string,
+): CollectionGeminiLine[] | null {
+  const fenced = stripMarkdownJsonFence(raw);
+  const linesMatch = /"lines"\s*:\s*\[/i.exec(fenced);
+  if (!linesMatch) return null;
+
+  let pos = linesMatch.index + linesMatch[0].length;
+  const lines: CollectionGeminiLine[] = [];
+
+  while (pos < fenced.length) {
+    while (pos < fenced.length && /[\s,]/.test(fenced[pos] ?? "")) pos++;
+    if (pos >= fenced.length || fenced[pos] === "]") break;
+    if (fenced[pos] !== "{") break;
+
+    const objStr = extractBalancedJsonObject(fenced.slice(pos));
+    if (!objStr) break;
+
+    try {
+      const parsed = JSON.parse(stripTrailingCommasInJsonish(objStr)) as unknown;
+      if (parsed && typeof parsed === "object") {
+        lines.push(parsed as CollectionGeminiLine);
+      }
+    } catch {
+      break;
+    }
+    pos += objStr.length;
+  }
+
+  return lines.length > 0 ? lines : null;
+}
+
+function extractReplyFromPartialJson(raw: string): string {
+  const fenced = stripMarkdownJsonFence(raw);
+  const replyMatch = /"reply"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(fenced);
+  if (!replyMatch) return "";
+  try {
+    return JSON.parse(`"${replyMatch[1]}"`) as string;
+  } catch {
+    return replyMatch[1]?.replace(/\\"/g, '"') ?? "";
+  }
+}
+
 /** Intenta parsear la respuesta del modelo hasta obtener reply + lines */
 export function parseCollectionGeminiModelText(
   raw: string | undefined | null,
@@ -146,6 +190,17 @@ export function parseCollectionGeminiModelText(
         /* fail */
       }
     }
+  }
+
+  const partialLines = extractCompleteLineObjectsFromTruncatedJson(raw);
+  if (partialLines) {
+    return {
+      parsed: {
+        reply: extractReplyFromPartialJson(raw),
+        lines: partialLines,
+      },
+      strategy: "truncated_lines",
+    };
   }
 
   return null;

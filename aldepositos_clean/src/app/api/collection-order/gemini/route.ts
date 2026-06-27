@@ -20,14 +20,24 @@ import {
 import type { GeminiTokenUsage } from "@/lib/geminiClientUsage";
 import {
   mergeDedupedGeminiLines,
-  splitTextIntoChunks,
+  splitTextIntoDocumentChunks,
   sumGeminiUsage,
   trimGeminiLine,
 } from "@/lib/geminiCollectionOrderChunkedExtract";
 import { postProcessGeminiExtractedLines } from "@/lib/collectionOrderGeminiPostProcess";
+import {
+  mapInBatches,
+  DEFAULT_MAX_CHUNKS,
+  MAX_BINARY_UPLOAD_BYTES,
+  readGeminiChunkBaseConfig,
+  resolveChunkConfigForDocument,
+  SERVER_MAX_DURATION_S,
+  shouldChunkDocumentText,
+  type DocumentProcessingMeta,
+} from "@/lib/geminiDocumentLimits";
 import { extractPdfTextForGeminiFastPath } from "@/lib/geminiPdfTextForModel";
-import { parseCollectionGeminiModelText } from "@/lib/geminiCollectionOrderResponseParse";
 import { fetchLearningBlockForGeminiPrompt } from "@/lib/geminiLearningNotes";
+import { parseCollectionGeminiModelText } from "@/lib/geminiCollectionOrderResponseParse";
 import {
   MARKDOWN_TABLE_EXTRACTION_PROMPT,
   tryParseMarkdownTableToLines,
@@ -51,10 +61,9 @@ function usageFromGenAiResponse(response: unknown): GeminiTokenUsage | null {
 }
 
 export const runtime = "nodejs";
-// PDFs largos + reintentos del modelo pueden exceder el default del hosting.
-export const maxDuration = 300;
+export const maxDuration = SERVER_MAX_DURATION_S;
 
-const MAX_FILE_BYTES = 6 * 1024 * 1024;
+const MAX_FILE_BYTES = MAX_BINARY_UPLOAD_BYTES;
 const HISTORY_TURNS = 4;
 const HISTORY_TURN_MAX_CHARS = 5_000;
 const HISTORY_TURNS_CHUNK_MODE = 2;
@@ -62,8 +71,20 @@ const HISTORY_TURN_MAX_CHARS_CHUNK = 2_800;
 
 /** Proformas largas: salida JSON amplia por fragmento. */
 const REPLY_MAX_OUTPUT_TOKENS = 8192;
+/** Por página/fragmento: priorizar todas las filas de la tabla. */
+const CHUNK_MAX_OUTPUT_TOKENS = 16_384;
 /** Tabla markdown (modo Gemini web): más filas sin trozar JSON. */
 const MARKDOWN_MAX_OUTPUT_TOKENS = 16_384;
+
+const FACTURA_TABULAR_CHUNK_HINT = `Formato FACTURA / packing (puntomoda y similares, Zona Libre):
+- UNA fila JSON por cada línea de producto con Referencia/SKU (ej. B-21496XM, JN-7117M, B-18536PMR).
+- Columna "No. Bulto" → campo bultos (número de bulto físico de esa fila). Si no aparece, usa "1".
+- Columna "Peso" → pesoPorBulto (kg por bulto).
+- "Cantidad" en DOZ/docenas (ej. 4.0000 DOZ) → 48 piezas (×12). EMP en descripción suele ser docenas por empaque.
+- descripcion: tipo de prenda sin medidas ni género (ej. SUETER, JEANS CORTO, BLUSA). género en campo genero si dice DAMA/MAMA/etc.
+- modelo: MISS CALIFORNIA u otra MARCA del bloque. paisOrigen: CHINA si dice ORIGEN: CHINA.
+- NO omitas filas por brevedad. Incluye TODAS las referencias visibles en este fragmento/página.
+- Ignora filas de totales (SUBTOTAL, TOTAL, GASTOS) y filas sin referencia que solo tengan cubicaje/peso resumen.`;
 const JSON_RETRY_PROMPT =
   "Corrige formato: tu salida debe ser únicamente un objeto JSON válido con propiedades \"reply\" (string) y \"lines\" (array de filas), sin texto ni ``` markdown antes/después ni comentarios. Si antes quedaste sin espacio, acorta \"reply\" a 2–3 frases y completa todas las filas detectables del documento en \"lines\".";
 
@@ -98,8 +119,6 @@ type GeminiRouteBody = {
   contextHint?: string;
   viewerDisplayName?: string;
 };
-
-const PDF_TEXT_MAX_CHARS = 650_000;
 
 async function parseGeminiRequestBody(
   request: NextRequest,
@@ -158,29 +177,6 @@ async function parseGeminiRequestBody(
       response: NextResponse.json({ error: "JSON inválido." }, { status: 400 }),
     };
   }
-}
-
-function readChunkConfig() {
-  const chunkSize = Math.max(
-    8_000,
-    Number(process.env.GEMINI_PDF_TEXT_CHUNK_CHARS?.trim()) || 38_000,
-  );
-  const overlap = Math.max(
-    200,
-    Math.min(
-      Math.floor(chunkSize / 3),
-      Number(process.env.GEMINI_PDF_TEXT_CHUNK_OVERLAP?.trim()) || 2_400,
-    ),
-  );
-  const minToSplit = Math.max(
-    4_000,
-    Number(process.env.GEMINI_PDF_TEXT_CHUNK_MIN?.trim()) || 14_000,
-  );
-  const maxChunks = Math.max(
-    1,
-    Math.min(40, Number(process.env.GEMINI_PDF_MAX_CHUNKS?.trim()) || 14),
-  );
-  return { chunkSize, overlap, minToSplit, maxChunks };
 }
 
 function verifyUser(request: NextRequest) {
@@ -253,6 +249,7 @@ export async function POST(request: NextRequest) {
 
   const message = String(body.message ?? "").trim();
   const pdfTextFromClient = String(body.pdfText ?? "").trim();
+  let fileSizeBytes: number | undefined;
   if (!message && !body.file && !pdfTextFromClient) {
     return NextResponse.json(
       { error: "Envía un mensaje o un archivo." },
@@ -266,7 +263,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Tipo de archivo no permitido. Usa PDF, PNG, JPEG o WebP (máx. ~6 MB).",
+            "Tipo de archivo no permitido. Usa PDF, PNG, JPEG o WebP (máx. ~15 MB).",
         },
         { status: 400 },
       );
@@ -279,10 +276,11 @@ export async function POST(request: NextRequest) {
     }
     if (size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { error: "El archivo supera el tamaño máximo (6 MB)." },
+        { error: `El archivo supera el tamaño máximo (${Math.round(MAX_FILE_BYTES / (1024 * 1024))} MB).` },
         { status: 400 },
       );
     }
+    fileSizeBytes = size;
   }
 
   const learningBlock = await fetchLearningBlockForGeminiPrompt(
@@ -305,7 +303,21 @@ export async function POST(request: NextRequest) {
     email: user.email ?? undefined,
   });
 
-  const { chunkSize, overlap, minToSplit, maxChunks } = readChunkConfig();
+  const chunkBase = readGeminiChunkBaseConfig();
+  let chunkSize = chunkBase.chunkSize;
+  let overlap = chunkBase.overlap;
+  let minToSplit = chunkBase.minToSplit;
+  let maxChunks = chunkBase.envMaxChunks ?? DEFAULT_MAX_CHUNKS;
+  let processingMeta: DocumentProcessingMeta | null = null;
+
+  const applyDocumentChunkConfig = (text: string) => {
+    const resolved = resolveChunkConfigForDocument({ text, fileSizeBytes });
+    chunkSize = resolved.config.chunkSize;
+    overlap = resolved.config.overlap;
+    minToSplit = resolved.config.minToSplit;
+    maxChunks = resolved.config.maxChunks;
+    processingMeta = resolved.meta;
+  };
 
   const preambleBase = [
     `Quién escribe (sesión): ${preferredName}.`,
@@ -321,11 +333,7 @@ export async function POST(request: NextRequest) {
   const mime = body.file ? String(body.file.mimeType ?? "").toLowerCase() : "";
 
   if (pdfTextFromClient && process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1") {
-    extractedPdfText =
-      pdfTextFromClient.length > PDF_TEXT_MAX_CHARS
-        ? pdfTextFromClient.slice(0, PDF_TEXT_MAX_CHARS) +
-          "\n\n[…contenido truncado — prioriza líneas ya visibles arriba…]"
-        : pdfTextFromClient;
+    extractedPdfText = pdfTextFromClient;
     pdfVisionSkippedForSpeed = true;
   } else if (
     body.file?.base64 &&
@@ -350,13 +358,16 @@ export async function POST(request: NextRequest) {
   const generateJsonResponse = async (
     contents: GenContent[],
     hasBinaryMedia: boolean,
+    opts: { chunkMode?: boolean } = {},
   ): Promise<{
     parsed: CollectionGeminiApiResponse;
     response: unknown;
     raw: string;
   }> => {
+    const chunkMode = opts.chunkMode === true;
     const skipLoose =
       process.env.GEMINI_SKIP_LOOSE_JSON_FALLBACK?.trim() === "1";
+    const maxOutputTokens = chunkMode ? CHUNK_MAX_OUTPUT_TOKENS : REPLY_MAX_OUTPUT_TOKENS;
 
     const structuredBase = {
       systemInstruction,
@@ -364,7 +375,7 @@ export async function POST(request: NextRequest) {
       responseSchema: collectionGeminiResponseSchema,
       temperature: 0.1,
       topP: 0.85,
-      maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+      maxOutputTokens,
       ...(hasBinaryMedia ? { mediaResolution } : {}),
     };
 
@@ -409,7 +420,7 @@ export async function POST(request: NextRequest) {
         responseMimeType: "application/json" as const,
         temperature: 0.08,
         topP: 0.9,
-        maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+        maxOutputTokens,
         ...(hasBinaryMedia ? { mediaResolution } : {}),
       };
       response = await ai.models.generateContent({
@@ -424,7 +435,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!decoded && !skipLoose) {
+    if (!decoded && !skipLoose && !chunkMode) {
       const textContents = [
         ...contents,
         { role: "user", parts: [{ text: TEXT_JSON_FALLBACK_PROMPT }] },
@@ -433,7 +444,7 @@ export async function POST(request: NextRequest) {
         systemInstruction,
         temperature: 0.05,
         topP: 0.95,
-        maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
+        maxOutputTokens,
         ...(hasBinaryMedia ? { mediaResolution } : {}),
       };
       response = await ai.models.generateContent({
@@ -448,12 +459,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (decoded) {
+    if (decoded && decoded.parsed.lines.length > 0) {
+      return { parsed: decoded.parsed, response, raw };
+    }
+    if (decoded && !chunkMode) {
       return { parsed: decoded.parsed, response, raw };
     }
 
     const skipMarkdown =
-      process.env.GEMINI_SKIP_MARKDOWN_TABLE_FALLBACK?.trim() === "1";
+      process.env.GEMINI_SKIP_MARKDOWN_TABLE_FALLBACK?.trim() === "1" || chunkMode;
 
     let linesFromMd = tryParseMarkdownTableToLines(raw);
     if (linesFromMd.length === 0 && !skipMarkdown) {
@@ -494,6 +508,10 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    if (decoded) {
+      return { parsed: decoded.parsed, response, raw };
+    }
+
     logGeminiServerError("collection-order/gemini", new Error("json_parse_failed"), {
       model,
       rawSnippet: typeof raw === "string" ? raw.slice(0, 400) : null,
@@ -516,21 +534,75 @@ export async function POST(request: NextRequest) {
       if (r) replyParts.push(r);
     };
 
-    // ——— PDF texto largo: varias pasadas ———
-    if (pdfVisionSkippedForSpeed && extractedPdfText && extractedPdfText.length >= minToSplit) {
-      let chunks = splitTextIntoChunks(extractedPdfText, chunkSize, overlap);
+    const CHUNK_CONCURRENCY = 3;
+
+    const runChunkedExtraction = async (args: {
+      sourceLabel: string;
+      text: string;
+      introLines: string[];
+      historyContents: GenContent[];
+    }) => {
+      let chunks = splitTextIntoDocumentChunks(args.text, chunkSize, overlap);
       const totalPlanned = chunks.length;
       const truncated = chunks.length > maxChunks;
       if (truncated) chunks = chunks.slice(0, maxChunks);
 
-      const intro = [
-        ...preambleBase,
-        "Este PDF tiene texto seleccionable. Se procesa en fragmentos consecutivos para extraer todas las líneas sin truncar el documento.",
-        "En cada fragmento: extrae SOLO las filas de producto/referencia visibles en ese texto; no inventes filas de otras partes del PDF.",
-        'En "reply" máximo 2 frases por fragmento (español, operativo).',
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+      const intro = args.introLines.filter(Boolean).join("\n\n");
+      const failedChunks: number[] = [];
+
+      await mapInBatches(chunks, CHUNK_CONCURRENCY, async (chunk, i) => {
+        const chunkBody = [
+          `--- Fragmento ${i + 1}/${chunks.length} del ${args.sourceLabel} ---`,
+          "Si una fila queda cortada al inicio o al final del fragmento, solo complétala si el dato está explícito en este mismo fragmento.",
+          chunk,
+        ].join("\n\n");
+
+        const userText = [intro, chunkBody].join("\n\n");
+        const contents: GenContent[] = [
+          ...args.historyContents,
+          { role: "user", parts: [{ text: userText }] },
+        ];
+
+        try {
+          const { parsed, response } = await generateJsonResponse(contents, false, {
+            chunkMode: true,
+          });
+          pushChunkResult(parsed, response);
+        } catch (e) {
+          failedChunks.push(i + 1);
+          logGeminiServerError("collection-order/gemini/chunk", e, {
+            model,
+            chunk: i + 1,
+            total: chunks.length,
+          });
+        }
+      });
+
+      return { totalPlanned, truncated, failedChunks };
+    };
+
+    const buildChunkedReply = (args: {
+      truncated: boolean;
+      totalPlanned: number;
+      failedChunks: number[];
+      truncatedNote: string;
+    }) => {
+      let reply = replyParts.join("\n\n");
+      if (args.truncated) {
+        reply += `\n\n[Nota: ${args.truncatedNote} (${maxChunks}/${args.totalPlanned} fragmentos). ` +
+          "Si faltan líneas al final, volvé a enviar solo las últimas páginas o dividí el documento.]";
+      }
+      if (args.failedChunks.length > 0) {
+        reply +=
+          `\n\n[Advertencia: no se pudieron interpretar ${args.failedChunks.length} fragmento(s): ${args.failedChunks.join(", ")}. ` +
+          "Revisá si faltan referencias de esas secciones.]";
+      }
+      return reply;
+    };
+
+    // ——— PDF texto largo: varias pasadas ———
+    if (pdfVisionSkippedForSpeed && extractedPdfText && shouldChunkDocumentText(extractedPdfText, minToSplit)) {
+      applyDocumentChunkConfig(extractedPdfText);
 
       const historyContents = historyToContents(
         body.history,
@@ -538,57 +610,47 @@ export async function POST(request: NextRequest) {
         HISTORY_TURN_MAX_CHARS_CHUNK,
       );
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunkBody = [
-          `--- Fragmento ${i + 1}/${chunks.length} del PDF (texto) ---`,
-          "Si una fila queda cortada al inicio o al final del fragmento, solo complétala si el dato está explícito en este mismo fragmento.",
-          chunks[i],
-        ].join("\n\n");
-
-        const userText = [intro, chunkBody].join("\n\n");
-        const contents: GenContent[] = [
-          ...historyContents,
-          { role: "user", parts: [{ text: userText }] },
-        ];
-
-        const { parsed, response } = await generateJsonResponse(contents, false);
-        pushChunkResult(parsed, response);
-      }
+      const chunkMeta = await runChunkedExtraction({
+        sourceLabel: "PDF (texto)",
+        text: extractedPdfText,
+        introLines: [
+          ...preambleBase,
+          FACTURA_TABULAR_CHUNK_HINT,
+          "Este PDF tiene texto seleccionable. Se procesa por páginas o fragmentos para extraer TODAS las líneas sin omitir páginas finales.",
+          "En cada fragmento: extrae SOLO las filas de producto/referencia visibles en ese texto; no inventes filas de otras partes del PDF.",
+          'En "reply" máximo 1 frase por fragmento (español, operativo). Prioriza completar "lines".',
+        ],
+        historyContents,
+      });
 
       mergedLines = mergeDedupedGeminiLines(mergedLines);
       const usage = sumGeminiUsage(allUsages);
-      let reply = replyParts.join("\n\n");
-      if (truncated) {
-        reply +=
-          `\n\n[Nota: el PDF superó el máximo de fragmentos en una solicitud (${maxChunks}/${totalPlanned} fragmentos). ` +
-          `Si faltan líneas al final, volvé a enviar solo las últimas páginas o dividí el PDF en dos archivos.]`;
+      const reply = buildChunkedReply({
+        ...chunkMeta,
+        truncatedNote: "el PDF superó el máximo de fragmentos en una solicitud",
+      });
+
+      if (mergedLines.length === 0 && chunkMeta.failedChunks.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "No se pudieron extraer líneas del documento. Reintenta con «Nuevo chat» o dividí el PDF en partes más pequeñas.",
+          },
+          { status: 502 },
+        );
       }
 
       return NextResponse.json({
         reply,
         usage,
         lines: mergedLines,
+        processing: processingMeta,
       });
     }
 
     // ——— Texto largo sin archivo (pega Excel grande) ———
-    if (!body.file && message.length >= minToSplit) {
-      let chunks = splitTextIntoChunks(message, chunkSize, overlap);
-      const totalPlanned = chunks.length;
-      const truncated = chunks.length > maxChunks;
-      if (truncated) chunks = chunks.slice(0, maxChunks);
-
-      const intro = [
-        `Quién escribe (sesión): ${preferredName}.`,
-        body.orderNumber
-          ? `Número de orden de recolección (contexto): ${body.orderNumber}.`
-          : "",
-        mergedContextHint ? `Contexto adicional:\n${mergedContextHint}` : "",
-        "El mensaje se envía en fragmentos por tamaño. En cada fragmento extrae SOLO las filas visibles ahí.",
-        'En "reply" máximo 2 frases por fragmento.',
-      ]
-        .filter(Boolean)
-        .join("\n\n");
+    if (!body.file && shouldChunkDocumentText(message, minToSplit)) {
+      applyDocumentChunkConfig(message);
 
       const historyContents = historyToContents(
         body.history,
@@ -596,39 +658,68 @@ export async function POST(request: NextRequest) {
         HISTORY_TURN_MAX_CHARS_CHUNK,
       );
 
-      for (let i = 0; i < chunks.length; i++) {
-        const chunkBody = [
-          `--- Fragmento ${i + 1}/${chunks.length} del mensaje ---`,
-          chunks[i],
-        ].join("\n\n");
-        const userText = [intro, chunkBody].join("\n\n");
-        const contents: GenContent[] = [
-          ...historyContents,
-          { role: "user", parts: [{ text: userText }] },
-        ];
-        const { parsed, response } = await generateJsonResponse(contents, false);
-        pushChunkResult(parsed, response);
-      }
+      const chunkMeta = await runChunkedExtraction({
+        sourceLabel: "mensaje",
+        text: message,
+        introLines: [
+          `Quién escribe (sesión): ${preferredName}.`,
+          body.orderNumber
+            ? `Número de orden de recolección (contexto): ${body.orderNumber}.`
+            : "",
+          mergedContextHint ? `Contexto adicional:\n${mergedContextHint}` : "",
+          "El mensaje se envía en fragmentos por tamaño. En cada fragmento extrae SOLO las filas visibles ahí.",
+          'En "reply" máximo 2 frases por fragmento.',
+        ],
+        historyContents,
+      });
 
       mergedLines = mergeDedupedGeminiLines(mergedLines);
       const usage = sumGeminiUsage(allUsages);
-      let reply = replyParts.join("\n\n");
-      if (truncated) {
-        reply +=
-          `\n\n[Nota: el texto superó el máximo de fragmentos (${maxChunks}/${totalPlanned}). ` +
-          `Enviá el resto en un segundo mensaje o dividí la tabla.]`;
+      const reply = buildChunkedReply({
+        ...chunkMeta,
+        truncatedNote: "el texto superó el máximo de fragmentos",
+      });
+
+      if (mergedLines.length === 0 && chunkMeta.failedChunks.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "No se pudieron extraer líneas del texto pegado. Enviá el contenido en partes más pequeñas.",
+          },
+          { status: 502 },
+        );
       }
-      return NextResponse.json({ reply, usage, lines: mergedLines });
+
+      return NextResponse.json({
+        reply,
+        usage,
+        lines: mergedLines,
+        processing: processingMeta,
+      });
     }
 
     // ——— Una sola pasada (PDF corto, imagen, PDF binario, mensaje corto) ———
+    const analysisText = extractedPdfText ?? message;
+    if (analysisText.trim()) {
+      applyDocumentChunkConfig(analysisText);
+    } else if (fileSizeBytes) {
+      applyDocumentChunkConfig(" ");
+    }
+
     let preambleLines = [...preambleBase];
     if (pdfVisionSkippedForSpeed && extractedPdfText) {
       preambleLines = [
         ...preambleLines,
         "Este PDF se procesó como texto seleccionable (respuesta más rápida). Extrae líneas como siempre; si ves tablas algo rotas en el texto, infiere orden de columnas desde continuidad y encabezados.",
+        "Si el PDF tiene varias páginas (marcadores --- PÁGINA N ---), procesa TODAS; no omitas la última página.",
         "--- Contenido del PDF ---",
         extractedPdfText,
+      ];
+    } else if (body.file?.base64 && mime === "application/pdf") {
+      preambleLines = [
+        ...preambleLines,
+        "PDF adjunto como archivo: si tiene varias páginas, extrae líneas de TODAS las páginas, no solo la primera.",
+        FACTURA_TABULAR_CHUNK_HINT,
       ];
     }
 
@@ -667,6 +758,7 @@ export async function POST(request: NextRequest) {
       reply,
       usage,
       lines,
+      processing: processingMeta,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

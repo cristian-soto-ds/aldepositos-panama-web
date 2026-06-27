@@ -57,12 +57,25 @@ ${emailRule ? `${emailRule}\n` : ""}- Medidas solo en l, w, h (cm por defecto; p
 --- Docenas y documentos internacionales (packing list / factura) ---
 - 1 docena = 12 piezas (siempre). Media docena = 6; cuarto de docena = 3.
 - Notación frecuente en columna CANTIDAD: **N (M)** = **N docenas + M piezas sueltas** (ej. «11 (8)» → 11×12+8 = **140 piezas totales de la línea**, no 11 ni 141). Pon ese total en el campo JSON unidadesTotales como cadena «140» y deja vacío unidadesPorBulto si el doc no da explícito por bulto (la app reparte con bultos y decimales si hace falta).
+- Columna **DOZ** / **4.0000 DOZ** = docenas → multiplica ×12 para piezas (4 DOZ = 48 piezas).
 - Inglés habitual: dozen, dozens, doz., dz, DZ, "Qty 2 dz", "2 dozen", "half dozen" (=6 si aplica una vez).
 - Portugués: dúzia, dúzias. Francés: douzaine(s). Mayorista: 1 gross = 12 docenas = 144 piezas.
 - Convierte cantidades a piezas: no dejes texto tipo «2 docenas» suelto; para «11 (8)» pon unidadesTotales="140".
 - Si el documento da piezas por bulto en docenas: multiplica por 12 y guarda el resultado en unidadesPorBulto.
 - Si da total de la línea en docenas (o mezcla): convierte a piezas totales; usa unidadesPorBulto sólo cuando sea entero claro por bulto; si total÷bultos no es entero, deja vacío unidadesPorBulto y rellena unidadesTotales (la app usa decimales al repartir).
 - En reply, cuando conviertas docenas, di explícitamente la regla usada (ej. «3 dz = 36 pzas por bulto») para que el operador verifique.
+
+--- FACTURA / packing puntomoda (Zona Libre Panamá) y tablas similares ---
+- PDFs de varias páginas: lee **todas** las páginas; no te quedes solo en la primera.
+- Tabla típica: No. Bulto | Peso | Referencia | Descripcion | Cantidad (DOZ) | Precio | TOTAL.
+- **Una fila JSON por cada referencia/SKU** (B-…, JN-…, etc.) en toda la factura.
+- **bultos** = valor de columna «No. Bulto» de esa fila; si falta, «1».
+- **pesoPorBulto** = columna «Peso» (kg del bulto de esa fila).
+- **descripcion**: solo tipo de prenda (SUETER, JEANS CORTO, BLUSA…); tallas/colores/composición van en sus campos o se omiten si no aplican a Magaya.
+- **genero**: dama si dice DAMA/MAMA; caballero si CABALLERO; etc.
+- **modelo**: marca del bloque (ej. MISS CALIFORNIA). **paisOrigen**: CHINA si ORIGEN: CHINA.
+- Ignora filas de SUBTOTAL/TOTAL/GASTOS y filas sin referencia que solo resumen cubicaje (ej. última fila solo con CUB P3).
+- Si hay ~27 filas de producto en el documento, devuelve ~27 líneas (no un subconjunto de la primera página).
 
 --- Formato de reply (campo "reply") ---
 - En operación diaria (p. ej. citas con cliente): sé breve y operativo (3–8 frases cortas o viñetas); evita preámbulos.

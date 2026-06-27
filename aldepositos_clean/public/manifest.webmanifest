@@ -1,0 +1,17 @@
+{
+  "name": "AlDepositos",
+  "short_name": "AlDepositos",
+  "description": "Gestión logística — zona libre Panamá",
+  "start_url": "/panel",
+  "display": "standalone",
+  "background_color": "#16263F",
+  "theme_color": "#16263F",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}

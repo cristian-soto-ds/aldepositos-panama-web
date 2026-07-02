@@ -9,53 +9,61 @@ import {
 
 type InventoryLiveOperatorsProps = {
   operators: LiveOperatorOnRa[];
-  /** Fila compacta dentro de la tarjeta de lista. */
-  compact?: boolean;
 };
 
-export function InventoryLiveOperators({
-  operators,
-  compact = false,
-}: InventoryLiveOperatorsProps) {
+function operatorSubtitle(op: LiveOperatorOnRa): string {
+  const key = String(op.userKey ?? "").trim();
+  if (key.includes("@")) return key;
+  return PRESENCE_MODULE_LABELS[op.module];
+}
+
+export function InventoryLiveOperators({ operators }: InventoryLiveOperatorsProps) {
   if (operators.length === 0) return null;
 
   return (
-    <div
-      className={`flex flex-wrap items-center gap-x-2 gap-y-1 border border-sky-200/90 bg-sky-50/90 dark:border-sky-800/50 dark:bg-sky-950/30 ${
-        compact ? "rounded-lg px-2 py-1.5" : "rounded-xl px-2.5 py-2"
-      }`}
-      title={operators
-        .map((op) => `${op.name} (${PRESENCE_MODULE_LABELS[op.module]})`)
-        .join(", ")}
-    >
-      <span className="inline-flex shrink-0 items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-sky-700 dark:text-sky-300">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-        </span>
-        En línea
-      </span>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+    <div className="space-y-1.5">
+      <p className="text-[9px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+        En línea ahora
+      </p>
+      <div className="flex flex-col gap-1.5">
         {operators.map((op) => (
-          <span
+          <div
             key={`${op.userKey}-${op.module}`}
-            className="inline-flex max-w-full items-center gap-1 text-[10px] font-bold text-sky-950 dark:text-sky-100 sm:text-[11px]"
+            className="flex items-center gap-2.5 rounded-2xl border border-slate-200/90 bg-slate-50/95 p-2 dark:border-slate-600/80 dark:bg-slate-800/50 sm:gap-3 sm:p-2.5"
+            title={`${op.name} · ${PRESENCE_MODULE_LABELS[op.module]}`}
           >
-            {op.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={op.avatarUrl}
-                alt=""
-                className="h-4 w-4 shrink-0 rounded-full object-cover ring-1 ring-sky-200"
+            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full border border-slate-200/90 bg-white dark:border-slate-600 dark:bg-slate-900 sm:h-10 sm:w-10">
+              {op.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={op.avatarUrl}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-slate-400 dark:text-slate-500">
+                  <UserRound className="h-4 w-4 sm:h-[18px] sm:w-[18px]" aria-hidden />
+                </div>
+              )}
+              <span
+                className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-slate-50 bg-emerald-500 dark:border-slate-800"
+                aria-hidden
               />
-            ) : (
-              <UserRound className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-hidden />
-            )}
-            <span className="truncate">{op.name}</span>
-            <span className="shrink-0 font-semibold text-sky-600/90 dark:text-sky-400">
-              ({PRESENCE_MODULE_LABELS[op.module]})
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[11px] font-black text-[#16263F] dark:text-slate-100 sm:text-xs">
+                {op.name}
+              </p>
+              <p className="truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400 sm:text-[11px]">
+                {operatorSubtitle(op)}
+              </p>
+            </div>
+
+            <span className="shrink-0 rounded-xl border border-slate-200/90 bg-white px-2 py-1 text-[8px] font-black uppercase tracking-wide text-slate-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 sm:text-[9px]">
+              {PRESENCE_MODULE_LABELS[op.module]}
             </span>
-          </span>
+          </div>
         ))}
       </div>
     </div>

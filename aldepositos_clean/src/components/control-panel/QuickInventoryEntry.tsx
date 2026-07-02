@@ -479,7 +479,7 @@ export function QuickInventoryEntry({
   }, [moduleTasks, groupedTasks, clientFilter, clients]);
 
   const calculateTotals = () => {
-    if (!selectedTask) return { bultos: 0, cbm: "0.00", weight: 0 };
+    if (!selectedTask) return { bultos: 0, cbm: 0, weight: 0 };
 
     const bultos = measureRows.reduce(
       (a, row) => a + (parseFloat(String(row.bultos)) || 0),
@@ -506,7 +506,7 @@ export function QuickInventoryEntry({
       }, 0),
     );
 
-    return { bultos, cbm: formatMeasure2(cbmNumber) || "0.00", weight };
+    return { bultos, cbm: roundUpMeasure(cbmNumber), weight };
   };
 
   const commitMeasureField = (
@@ -1085,7 +1085,7 @@ export function QuickInventoryEntry({
                   </div>
                 </div>
 
-                <InventoryLiveOperators operators={liveWorkers} compact />
+                <InventoryLiveOperators operators={liveWorkers} />
 
                 <div
                   className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-700"
@@ -1272,6 +1272,7 @@ export function QuickInventoryEntry({
           onSwitchToTable={() => setCaptureLayoutWithPersist("table")}
           onSave={saveOrder}
           autosaveState={autosaveState}
+          isSaving={autosaveState === "saving"}
         />
         <InventoryCsvExportModal
           open={csvExportOpen}

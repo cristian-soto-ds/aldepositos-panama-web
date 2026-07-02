@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ClipboardList,
   Download,
   FileCode,
   FileSpreadsheet,
@@ -30,6 +29,13 @@ import {
   upsertCollectionOrderInList,
 } from "@/lib/collectionOrders";
 import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
+import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
+import {
+  countOrdersForCollectionListTab,
+  orderHasLinkedRa,
+  ordersForCollectionListTab,
+  type CollectionOrderListTab,
+} from "@/lib/collectionOrderListTabs";
 import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders";
 import { useEditingFocusRef } from "@/hooks/useInventoryRealtimeSync";
 import {
@@ -67,8 +73,6 @@ import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
 import { filterNewHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
-import { CollectionOrderReceptionistView } from "@/components/control-panel/CollectionOrderReceptionistView";
-import type { ReceptionStatusId } from "@/lib/receptionLogistics/config";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   applyPesoTotalToLine,
@@ -360,8 +364,6 @@ export function CollectionOrderModule({
     useSupabaseCollectionOrders({ enabled: !!userEmail, userKey: userEmail });
 
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
-  const [receptionistView, setReceptionistView] = useState(false);
-  const [receptionBusyId, setReceptionBusyId] = useState<string | null>(null);
   const [htmImportOpen, setHtmImportOpen] = useState(false);
   const [htmImportBusy, setHtmImportBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -390,6 +392,7 @@ export function CollectionOrderModule({
   const [undBultoDraft, setUndBultoDraft] = useState<Record<string, string>>({});
   /** Selección múltiple en la lista de órdenes (eliminar en lote). */
   const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
+  const [listTab, setListTab] = useState<CollectionOrderListTab>("general");
 
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -527,7 +530,6 @@ export function CollectionOrderModule({
   }, [weightMode]);
 
   const openNew = () => {
-    setReceptionistView(false);
     setEditing(newDraftOrder());
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -538,7 +540,6 @@ export function CollectionOrderModule({
   };
 
   const openEdit = (o: CollectionOrder) => {
-    setReceptionistView(false);
     setEditing(
       normalizeCollectionOrderFields(
         JSON.parse(JSON.stringify(o)) as CollectionOrder,
@@ -553,7 +554,6 @@ export function CollectionOrderModule({
   };
 
   const backToList = () => {
-    setReceptionistView(false);
     setEditing(null);
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -1149,82 +1149,12 @@ export function CollectionOrderModule({
     }
   };
 
-  const handleSetReceptionStatus = useCallback(
-    async (orderId: string, status: ReceptionStatusId) => {
-      const order = orders.find((o) => o.id === orderId);
-      if (!order || order.receptionStatus === status) return;
-      setReceptionBusyId(orderId);
-      try {
-        const payload: CollectionOrder = {
-          ...order,
-          receptionStatus: status,
-          updatedAt: new Date().toISOString(),
-        };
-        await updateCollectionOrder(payload);
-        setOrders((prev) =>
-          sortCollectionOrdersByNumero(
-            prev.map((o) => (o.id === orderId ? payload : o)),
-          ),
-        );
-        await syncCollectionOrderToReceptionQueue(payload);
-      } catch (e) {
-        console.error(e);
-        alert("No se pudo actualizar el estado de recepción.");
-      } finally {
-        setReceptionBusyId(null);
-      }
-    },
-    [orders, setOrders],
-  );
-
-  const handleClearReceptionStatus = useCallback(
-    async (orderId: string) => {
-      const order = orders.find((o) => o.id === orderId);
-      if (!order?.receptionStatus) return;
-      setReceptionBusyId(orderId);
-      try {
-        const { receptionStatus: _removed, ...rest } = order;
-        const payload: CollectionOrder = {
-          ...rest,
-          updatedAt: new Date().toISOString(),
-        };
-        await updateCollectionOrder(payload);
-        setOrders((prev) =>
-          sortCollectionOrdersByNumero(
-            prev.map((o) => (o.id === orderId ? payload : o)),
-          ),
-        );
-        await syncCollectionOrderToReceptionQueue(payload);
-      } catch (e) {
-        console.error(e);
-        alert("No se pudo quitar la orden de recepción.");
-      } finally {
-        setReceptionBusyId(null);
-      }
-    },
-    [orders, setOrders],
-  );
-
   /* ——— Lista ——— */
   if (!editing) {
-    if (receptionistView) {
-      return (
-        <CollectionOrderReceptionistView
-          orders={orders}
-          loading={ordersLoading}
-          busyOrderId={receptionBusyId}
-          onBack={() => setReceptionistView(false)}
-          onSetReceptionStatus={(orderId, status) =>
-            void handleSetReceptionStatus(orderId, status)
-          }
-          onClearReceptionStatus={(orderId) =>
-            void handleClearReceptionStatus(orderId)
-          }
-        />
-      );
-    }
-
     const listSelectedCount = orders.filter((o) => selectedOrderIds[o.id] === true).length;
+    const generalCount = countOrdersForCollectionListTab(orders, "general");
+    const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
+    const displayedListOrders = ordersForCollectionListTab(orders, listTab);
     const listDominantCliente = (() => {
       const freq = new Map<string, number>();
       for (const o of orders) {
@@ -1280,14 +1210,6 @@ export function CollectionOrderModule({
               </button>
               <button
                 type="button"
-                onClick={() => setReceptionistView(true)}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-white/35 bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg backdrop-blur-sm transition hover:bg-white/20"
-              >
-                <ClipboardList className="h-5 w-5" aria-hidden />
-                Recepcionista
-              </button>
-              <button
-                type="button"
                 onClick={openNew}
                 className="flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-xs font-black uppercase tracking-widest text-[#1b2d58] shadow-xl transition hover:scale-[1.01] hover:bg-indigo-50"
               >
@@ -1297,12 +1219,27 @@ export function CollectionOrderModule({
           </div>
         </header>
 
+        <CollectionOrderListTabs
+          active={listTab}
+          generalCount={generalCount}
+          warehouseCount={warehouseCount}
+          onChange={setListTab}
+        />
+
         {ordersLoading ? (
           <p className="text-sm font-bold text-slate-500">Cargando…</p>
         ) : orders.length === 0 ? (
           <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900">
             <p className="font-bold text-slate-500 dark:text-slate-400">
               No hay órdenes aún. Creá una para empezar.
+            </p>
+          </div>
+        ) : displayedListOrders.length === 0 ? (
+          <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900">
+            <p className="font-bold text-slate-500 dark:text-slate-400">
+              {listTab === "general"
+                ? "No hay órdenes en recepción."
+                : "No hay órdenes en bodega pendientes de RA."}
             </p>
           </div>
         ) : (
@@ -1353,7 +1290,7 @@ export function CollectionOrderModule({
             </div>
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-            {orders.map((o) => {
+            {displayedListOrders.map((o) => {
               const job = geminiJobByOrderId[o.id];
               const analyzing = job?.busy === true;
               const refCount = listReferenciasCount(o.lines);
@@ -1362,6 +1299,8 @@ export function CollectionOrderModule({
               const orderLabel = String(o.numero ?? "").trim() || o.id.slice(0, 8);
               const clienteLabel =
                 String(o.cliente ?? "").trim() || listDominantCliente;
+              const inWarehouse = listTab === "warehouse";
+              const hasRa = orderHasLinkedRa(o);
               return (
                 <div
                   key={o.id}
@@ -1402,6 +1341,11 @@ export function CollectionOrderModule({
                       <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
                         Orden #{String(o.numero ?? "S/N")}
                       </p>
+                      {inWarehouse ? (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                          En bodega
+                        </span>
+                      ) : null}
                       {analyzing && <CollectionOrderAiAnalyzingInline />}
                     </div>
                     {o.proveedor?.trim() && (
@@ -1437,6 +1381,17 @@ export function CollectionOrderModule({
                           {bultosTot}
                         </span>
                       </span>
+                      {inWarehouse ? (
+                        hasRa ? (
+                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+                            RA: {o.linkedRaNumbers!.join(", ")}
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                            Pendiente RA
+                          </span>
+                        )
+                      ) : null}
                       {o.status === "sent" && (
                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
                           Enviada al almacén
@@ -1458,8 +1413,14 @@ export function CollectionOrderModule({
                         {clienteLabel}
                       </span>
                     ) : null}
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-[#16263F] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500">
-                      Abrir
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
+                        inWarehouse && !hasRa
+                          ? "bg-amber-600 group-hover:bg-amber-700"
+                          : "bg-[#16263F] group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500"
+                      }`}
+                    >
+                      {inWarehouse && !hasRa ? "Asignar RA" : "Abrir"}
                       <ChevronRight className="h-3 w-3 opacity-80" aria-hidden />
                     </span>
                     <button

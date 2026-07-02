@@ -11,6 +11,7 @@ import {
   mergeCollectionOrdersIntoTrucks,
   receptionTruckIdForCollectionOrder,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import { RAMP_OCCUPANCY_META_ID } from "@/lib/receptionLogistics/rampOccupancy";
 import {
   fetchCollectionOrders,
   fetchCollectionOrderById,
@@ -83,8 +84,11 @@ export async function fetchReceptionTrucks(): Promise<ReceptionTruck[]> {
       .order("updated_at", { ascending: false });
 
     if (error) throw error;
-    const rows = (data ?? []) as { payload: unknown }[];
-    trucks = rows.map((r) => r.payload).filter(isTruck);
+    const rows = (data ?? []) as { id?: string; payload: unknown }[];
+    trucks = rows
+      .filter((r) => r.id !== RAMP_OCCUPANCY_META_ID)
+      .map((r) => r.payload)
+      .filter(isTruck);
   } catch {
     trucks = readLocalSnapshot().trucks;
   }

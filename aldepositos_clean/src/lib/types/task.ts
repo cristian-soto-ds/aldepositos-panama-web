@@ -43,6 +43,12 @@ export type Task = {
     displayName?: string;
     at: string;
   }>;
+  /** Operador que terminó medidas y peso en este RA. */
+  inventoryCompletedBy?: {
+    email: string;
+    displayName?: string;
+    at: string;
+  };
   /**
    * Id de la orden de recolección que envió medidas a este RA.
    * Impide que otra orden de recolección envíe al mismo RA.

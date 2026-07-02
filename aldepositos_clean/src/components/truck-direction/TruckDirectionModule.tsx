@@ -13,7 +13,6 @@ import {
   Monitor,
   Search,
   Truck,
-  UploadCloud,
   FileSpreadsheet,
 } from "lucide-react";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
@@ -22,17 +21,32 @@ import {
   RECEPTION_KANBAN_COLUMNS,
   RECEPTION_RECEIPT_ON_STATUS,
   RECEPTION_COLUMN_THEME,
+  RECEPTION_STATUS,
   RECEPTION_STATUS_LABELS,
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
-import { isCollectionOrderReceptionTruck } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import { updateReceptionTruckStatus } from "@/lib/receptionLogistics/repository";
 import {
-  importReceptionTrucks,
-  updateReceptionTruckStatus,
-} from "@/lib/receptionLogistics/repository";
+  DailyReceptionReportError,
+  generateAndDownloadDailyReceptionReport,
+} from "@/lib/receptionLogistics/generateDailyReceptionReport";
 import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
 import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
+import { ReceptionKanbanCardContent } from "@/components/truck-direction/ReceptionKanbanCardContent";
+import type { ReceptionCardDensity } from "@/components/truck-direction/ReceptionKanbanCardContent";
+import { useRampOccupancy } from "@/hooks/useRampOccupancy";
+import { RampOccupancyTvCard } from "@/components/reception/RampOccupancyControls";
+import {
+  isRampOccupancyRampId,
+  RAMP_OCCUPANCY_COPY,
+} from "@/lib/receptionLogistics/rampOccupancy";
+
+function queueDensity(count: number): ReceptionCardDensity {
+  if (count >= 6) return "dense";
+  if (count >= 3) return "compact";
+  return "normal";
+}
 
 function matchesSearch(truck: ReceptionTruck, q: string): boolean {
   const s = q.trim().toLowerCase();
@@ -44,11 +58,11 @@ function matchesSearch(truck: ReceptionTruck, q: string): boolean {
 
 export function TruckDirectionModule() {
   const { trucks, loading, reload } = useReceptionQueue();
+  const { occupancy: rampOccupancy } = useRampOccupancy();
   const [search, setSearch] = useState("");
-  const [importBusy, setImportBusy] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
   const dragTruckId = useRef<string | null>(null);
 
   const filtered = useMemo(
@@ -71,31 +85,27 @@ export function TruckDirectionModule() {
     return map;
   }, [filtered]);
 
-  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setImportBusy(true);
+  const onGenerateReport = useCallback(async () => {
+    setReportBusy(true);
     try {
-      const { parseReceptionOrdersFile } = await import(
-        "@/lib/receptionLogistics/parseOrdersFile"
+      const result = await generateAndDownloadDailyReceptionReport(trucks);
+      const geminiNote = result.withGemini
+        ? " Incluye hoja de resumen con Alde.IA."
+        : "";
+      alert(
+        `Reporte generado: ${result.rowCount} OR del día.${geminiNote}`,
       );
-      const { trucks: imported, error } = await parseReceptionOrdersFile(file);
-      if (error) {
-        alert(error);
+    } catch (e) {
+      if (e instanceof DailyReceptionReportError && e.code === "NO_ROWS") {
+        alert(e.message);
         return;
       }
-      if (imported.length === 0) {
-        alert("No se encontraron filas válidas en el archivo.");
-        return;
-      }
-      await importReceptionTrucks(imported);
-      await reload();
-      alert(`${imported.length} orden(es) cargadas en «En Fila».`);
+      console.error(e);
+      alert("No se pudo generar el reporte. Intentá de nuevo.");
     } finally {
-      setImportBusy(false);
+      setReportBusy(false);
     }
-  };
+  }, [trucks]);
 
   const handleDropOnColumn = useCallback(
     async (status: ReceptionStatusId) => {
@@ -156,25 +166,22 @@ export function TruckDirectionModule() {
               <Monitor className="h-4 w-4" />
               Modo TV
             </button>
-            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:brightness-110">
-            {importBusy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <UploadCloud className="h-4 w-4" />
-            )}
-            {RECEPTION_COPY.uploadLabel}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="hidden"
-              onChange={onFileChange}
-              disabled={importBusy}
-            />
-          </label>
+            <button
+              type="button"
+              onClick={() => void onGenerateReport()}
+              disabled={reportBusy}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:brightness-110 disabled:opacity-60"
+            >
+              {reportBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              {RECEPTION_COPY.reportLabel}
+            </button>
           </div>
         </div>
-        <p className="text-[11px] text-slate-400">{RECEPTION_COPY.uploadHint}</p>
+        <p className="text-[11px] text-slate-400">{RECEPTION_COPY.reportHint}</p>
 
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900">
           <Search className="h-4 w-4 shrink-0 text-slate-400" />
@@ -198,6 +205,12 @@ export function TruckDirectionModule() {
           {RECEPTION_KANBAN_COLUMNS.map((statusId) => {
             const theme = RECEPTION_COLUMN_THEME[statusId];
             const list = byStatus[statusId] ?? [];
+            const isQueueColumn = statusId === RECEPTION_STATUS.EN_FILA;
+            const isRampColumn = isRampOccupancyRampId(statusId);
+            const rampRetiroOccupied =
+              isRampColumn && rampOccupancy?.[statusId]?.occupied === true;
+            const density = isQueueColumn ? queueDensity(list.length) : "normal";
+            const isDenseQueue = density === "dense";
             return (
               <section
                 key={statusId}
@@ -216,15 +229,31 @@ export function TruckDirectionModule() {
                 >
                   {RECEPTION_STATUS_LABELS[statusId]}
                   <span className="ml-2 opacity-80">({list.length})</span>
+                  {rampRetiroOccupied ? (
+                    <p className="mt-1 text-[9px] font-bold normal-case tracking-wide text-white/90">
+                      {RAMP_OCCUPANCY_COPY.operatorBadge}
+                    </p>
+                  ) : null}
                 </div>
 
-                <ul className="custom-scrollbar flex flex-1 flex-col gap-2 overflow-y-auto p-2">
+                <ul
+                  className={`custom-scrollbar flex flex-1 flex-col overflow-y-auto p-2 ${
+                    isDenseQueue ? "gap-1" : density === "compact" ? "gap-1.5" : "gap-2"
+                  }`}
+                >
                   {list.length === 0 ? (
+                    rampRetiroOccupied && isRampColumn ? (
+                      <RampOccupancyTvCard
+                        rampId={statusId}
+                        stripeClass={theme.stripe}
+                      />
+                    ) : (
                     <li className="py-8 text-center text-xs text-slate-400">
                       {RECEPTION_COPY.emptyColumn}
                     </li>
+                    )
                   ) : (
-                    list.map((truck) => (
+                    list.map((truck, index) => (
                       <li
                         key={truck.id}
                         draggable={moveBusy !== truck.id}
@@ -234,39 +263,29 @@ export function TruckDirectionModule() {
                         onDragEnd={() => {
                           dragTruckId.current = null;
                         }}
-                        className={`cursor-grab rounded-xl border p-3 shadow-sm active:cursor-grabbing ${theme.card} ${
-                          moveBusy === truck.id ? "opacity-60" : ""
-                        }`}
+                        className={`cursor-grab border active:cursor-grabbing ${theme.card} ${
+                          isDenseQueue
+                            ? "rounded-lg px-2 py-1.5 shadow-none ring-0"
+                            : density === "compact"
+                              ? "rounded-xl p-2 shadow-sm"
+                              : "rounded-xl p-3.5 shadow-sm"
+                        } ${moveBusy === truck.id ? "opacity-60" : ""}`}
                       >
-                        <div className="flex items-start gap-2">
-                          <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
+                        <div
+                          className={`flex items-center gap-1.5 ${isDenseQueue ? "" : "items-start gap-2"}`}
+                        >
+                          <GripVertical
+                            className={`shrink-0 text-slate-300 ${
+                              isDenseQueue ? "h-3.5 w-3.5" : "mt-1 h-4 w-4"
+                            }`}
+                          />
                           <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <p className="text-sm font-black">{truck.plate}</p>
-                              {isCollectionOrderReceptionTruck(truck) ? (
-                                <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
-                                  Recolección
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                              RA {truck.ra}
-                            </p>
-                            <p className="mt-1 truncate text-[11px] text-slate-500">
-                              {truck.provider} · {truck.client}
-                            </p>
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              <span
-                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${theme.badge}`}
-                              >
-                                {truck.expectedBultos} bultos
-                              </span>
-                              {truck.warehouseReceiptNumber ? (
-                                <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
-                                  {truck.warehouseReceiptNumber}
-                                </span>
-                              ) : null}
-                            </div>
+                            <ReceptionKanbanCardContent
+                              truck={truck}
+                              bultosBadgeClassName={theme.badge}
+                              queuePosition={isQueueColumn ? index + 1 : undefined}
+                              density={density}
+                            />
                           </div>
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2 dark:border-slate-700 sm:hidden">

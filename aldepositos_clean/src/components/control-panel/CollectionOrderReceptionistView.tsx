@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -16,6 +16,18 @@ import {
   RECEPTION_COLUMN_THEME,
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
+import {
+  countOrdersForCollectionListTab,
+  orderHasLinkedRa,
+  ordersForCollectionListTab,
+  type CollectionOrderListTab,
+} from "@/lib/collectionOrderListTabs";
+import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
+import { RampOccupancyControls } from "@/components/reception/RampOccupancyControls";
+import type {
+  RampOccupancyRampId,
+  RampOccupancyState,
+} from "@/lib/receptionLogistics/rampOccupancy";
 
 const RECEPTION_ACTIONS: ReceptionStatusId[] = [
   RECEPTION_STATUS.EN_FILA,
@@ -38,7 +50,12 @@ type CollectionOrderReceptionistViewProps = {
   orders: CollectionOrder[];
   loading: boolean;
   busyOrderId: string | null;
-  onBack: () => void;
+  /** Módulo propio en el menú (sin botón volver). */
+  standalone?: boolean;
+  onBack?: () => void;
+  rampOccupancy?: RampOccupancyState | null;
+  rampOccupancyBusy?: RampOccupancyRampId | null;
+  onToggleRampOccupancy?: (rampId: RampOccupancyRampId) => void;
   onSetReceptionStatus: (orderId: string, status: ReceptionStatusId) => void;
   onClearReceptionStatus: (orderId: string) => void;
 };
@@ -74,10 +91,16 @@ export function CollectionOrderReceptionistView({
   orders,
   loading,
   busyOrderId,
+  standalone = false,
   onBack,
+  rampOccupancy = null,
+  rampOccupancyBusy = null,
+  onToggleRampOccupancy,
   onSetReceptionStatus,
   onClearReceptionStatus,
 }: CollectionOrderReceptionistViewProps) {
+  const [activeTab, setActiveTab] = useState<CollectionOrderListTab>("general");
+
   const listDominantCliente = useMemo(() => {
     const freq = new Map<string, number>();
     for (const o of orders) {
@@ -95,29 +118,43 @@ export function CollectionOrderReceptionistView({
     return best;
   }, [orders]);
 
+  const generalCount = countOrdersForCollectionListTab(orders, "general");
+  const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
+  const displayedOrders = useMemo(
+    () => ordersForCollectionListTab(orders, activeTab),
+    [orders, activeTab],
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col px-2 py-4 md:px-0 md:py-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-4 inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" aria-hidden />
-        Volver a órdenes
-      </button>
+      {!standalone && onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-4 inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Volver a órdenes
+        </button>
+      ) : null}
 
       <header className="mb-4 shrink-0 rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-lg md:p-5">
         <div className="flex items-center gap-2 text-indigo-100">
           <ClipboardList className="h-5 w-5" aria-hidden />
           <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-            Recepción
+            {standalone ? "Recepcionista" : "Recepción"}
           </span>
         </div>
-        <h2 className="mt-1 text-lg font-black md:text-xl">Vista recepcionista</h2>
+        <h2 className="mt-1 text-lg font-black md:text-xl">
+          {standalone ? "Recepcionista" : "Vista recepcionista"}
+        </h2>
         <p className="mt-1 text-sm font-medium text-indigo-100/90">
-          Mismas órdenes de recolección. Asigná fila, rampa o marcá como completado.
+          {activeTab === "general"
+            ? "Órdenes en fila o rampa. Asigná estado de recepción."
+            : "Mercancía en bodega. El operador debe asignar un RA a cada orden."}
         </p>
-        <div className="mt-4 flex flex-wrap gap-2">
+        {activeTab === "general" ? (
+          <div className="mt-4 flex flex-wrap gap-2">
           {RECEPTION_ACTIONS.map((status) => {
             const theme = RECEPTION_COLUMN_THEME[status];
             const Icon = RECEPTION_ACTION_ICONS[status];
@@ -135,7 +172,26 @@ export function CollectionOrderReceptionistView({
             Quitar = sacar del tablero
           </span>
         </div>
+        ) : null}
       </header>
+
+      <CollectionOrderListTabs
+        active={activeTab}
+        generalCount={generalCount}
+        warehouseCount={warehouseCount}
+        onChange={setActiveTab}
+      />
+
+      {standalone && activeTab === "general" && onToggleRampOccupancy ? (
+        <div className="mb-3 shrink-0">
+          <RampOccupancyControls
+            occupancy={rampOccupancy}
+            busyRamp={rampOccupancyBusy}
+            onToggle={onToggleRampOccupancy}
+            compact
+          />
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="text-sm font-bold text-slate-500">Cargando…</p>
@@ -145,9 +201,17 @@ export function CollectionOrderReceptionistView({
             No hay órdenes de recolección.
           </p>
         </div>
+      ) : displayedOrders.length === 0 ? (
+        <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900">
+          <p className="font-bold text-slate-500 dark:text-slate-400">
+            {activeTab === "general"
+              ? "No hay órdenes en recepción."
+              : "No hay órdenes en bodega pendientes de RA."}
+          </p>
+        </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          {orders.map((o) => {
+          {displayedOrders.map((o) => {
             const refCount = listReferenciasCount(o.lines);
             const bultosTot = orderDisplayBultos(o);
             const refWord = refCount === 1 ? "referencia" : "referencias";
@@ -155,6 +219,8 @@ export function CollectionOrderReceptionistView({
               String(o.cliente ?? "").trim() || listDominantCliente;
             const currentStatus = o.receptionStatus;
             const isBusy = busyOrderId === o.id;
+            const inWarehouse = activeTab === "warehouse";
+            const hasRa = orderHasLinkedRa(o);
 
             return (
               <div
@@ -178,7 +244,11 @@ export function CollectionOrderReceptionistView({
                     <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
                       Orden #{String(o.numero ?? "S/N")}
                     </p>
-                    {currentStatus ? (
+                    {inWarehouse ? (
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                        ● En bodega
+                      </span>
+                    ) : currentStatus ? (
                       <span
                         className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide shadow-sm ${RECEPTION_COLUMN_THEME[currentStatus].badge}`}
                       >
@@ -217,19 +287,57 @@ export function CollectionOrderReceptionistView({
                         {bultosTot}
                       </span>
                     </span>
+                    {inWarehouse ? (
+                      hasRa ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+                          RA: {o.linkedRaNumbers!.join(", ")}
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                          Pendiente RA
+                        </span>
+                      )
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:min-w-[280px]">
-                  {clienteLabel ? (
-                    <span
-                      className="truncate text-right text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm"
-                      title={`Cliente: ${clienteLabel}`}
-                    >
-                      {clienteLabel}
-                    </span>
-                  ) : null}
-                  <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+                  <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:min-w-[280px]">
+                    {clienteLabel ? (
+                      <span
+                        className="truncate text-right text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm"
+                        title={`Cliente: ${clienteLabel}`}
+                      >
+                        {clienteLabel}
+                      </span>
+                    ) : null}
+                    {inWarehouse ? (
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        <p className="text-right text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          {hasRa
+                            ? "RA asignado — listo para inventario"
+                            : "Esperando asignación de RA en orden de recolección"}
+                        </p>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => onClearReceptionStatus(o.id)}
+                          title="Devolver a recepción"
+                          className="inline-flex min-w-[4.25rem] flex-col items-center justify-center gap-0.5 rounded-xl border-2 border-red-300 bg-red-50 px-2 py-2 text-[8px] font-black uppercase leading-tight tracking-wide text-red-700 transition hover:border-red-400 hover:bg-red-100 disabled:opacity-50 sm:min-w-[4.75rem] sm:px-2.5 sm:py-2.5 sm:text-[9px]"
+                        >
+                          <span className="text-base leading-none" aria-hidden>
+                            ↩
+                          </span>
+                          <span>Devolver</span>
+                        </button>
+                        {isBusy ? (
+                          <Loader2
+                            className="h-4 w-4 shrink-0 animate-spin text-slate-400"
+                            aria-label="Guardando"
+                          />
+                        ) : null}
+                      </div>
+                    ) : (
+                    <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
                     {RECEPTION_ACTIONS.map((status) => {
                       const active = currentStatus === status;
                       const Icon = RECEPTION_ACTION_ICONS[status];
@@ -291,7 +399,8 @@ export function CollectionOrderReceptionistView({
                       />
                     ) : null}
                   </div>
-                </div>
+                    )}
+                  </div>
               </div>
             );
           })}

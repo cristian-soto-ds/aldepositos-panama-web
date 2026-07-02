@@ -173,6 +173,15 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
+            icon={<NavIcon Icon={ClipboardList} />}
+            text="Recepcionista"
+            active={currentView === "receptionist"}
+            onClick={() => {
+              setCurrentView("receptionist");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
             icon={<NavIcon Icon={Route} />}
             text="Dirección de Camiones"
             active={currentView === "truck-direction"}

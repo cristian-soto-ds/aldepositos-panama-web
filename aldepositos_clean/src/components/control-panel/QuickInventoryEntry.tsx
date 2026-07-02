@@ -55,8 +55,14 @@ import {
   getSharedWorkPresenceTabId,
   publishWorkPresence,
   clearWorkPresence,
+  subscribeWorkPresence,
+  type WorkPresenceEntry,
 } from "@/lib/panelPresence";
-import { presenceVisibleLabel } from "@/lib/viewerIdentity";
+import { peerPresenceVisibleName, presenceVisibleLabel } from "@/lib/viewerIdentity";
+import {
+  applyInventoryAttribution,
+  inventoryCompletedByLabel,
+} from "@/lib/taskContributors";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import {
   buildMeasurePatchFromCatalog,
@@ -252,6 +258,26 @@ export function QuickInventoryEntry({
     "pending" | "completed" | "priority"
   >("pending");
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
+  const [presenceList, setPresenceList] = useState<WorkPresenceEntry[]>([]);
+
+  useEffect(() => {
+    return subscribeWorkPresence(setPresenceList);
+  }, []);
+
+  const presenceByRa = useMemo(() => {
+    const targetModule = moduleType === "airway" ? "airway" : "quick";
+    const map = new Map<string, string[]>();
+    for (const e of presenceList) {
+      if (e.module !== targetModule) continue;
+      const raKey = String(e.ra || "").trim().toUpperCase();
+      if (!raKey) continue;
+      const name = peerPresenceVisibleName(e.userLabel, e.userKey);
+      const list = map.get(raKey) ?? [];
+      if (!list.includes(name)) list.push(name);
+      map.set(raKey, list);
+    }
+    return map;
+  }, [presenceList, moduleType]);
 
   useEffect(() => {
     const closeTransfer = () => setTransferOpenId(null);
@@ -865,16 +891,24 @@ export function QuickInventoryEntry({
       window.localStorage.removeItem(inventoryDraftKey(task.id, moduleType));
     }
 
-    const updatedTask: Task = {
-      ...task,
-      measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? totalsBultos : 0,
-      weightMode: QUICK_WEIGHT_MODE,
-      status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
-      originalExpectedBultos: originalExpected,
-      manualTotalWeight:
-        task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
-    };
+    const updatedTask: Task = applyInventoryAttribution(
+      {
+        ...task,
+        measureData: JSON.parse(JSON.stringify(persistedRows)),
+        currentBultos: hasCapture ? totalsBultos : 0,
+        weightMode: QUICK_WEIGHT_MODE,
+        status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight:
+          task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+      },
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture,
+        isCompleted,
+      },
+    );
 
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
@@ -949,18 +983,26 @@ export function QuickInventoryEntry({
       );
     }
 
-    const updatedTask: Task = {
-      ...selectedTask,
-      measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? totals.bultos : 0,
-      weightMode: QUICK_WEIGHT_MODE,
-      status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
-      originalExpectedBultos: originalExpected,
-      manualTotalWeight:
-        selectedTask.manualTotalWeight !== undefined
-          ? selectedTask.manualTotalWeight
-          : 0,
-    };
+    const updatedTask: Task = applyInventoryAttribution(
+      {
+        ...selectedTask,
+        measureData: JSON.parse(JSON.stringify(persistedRows)),
+        currentBultos: hasCapture ? totals.bultos : 0,
+        weightMode: QUICK_WEIGHT_MODE,
+        status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight:
+          selectedTask.manualTotalWeight !== undefined
+            ? selectedTask.manualTotalWeight
+            : 0,
+      },
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture,
+        isCompleted,
+      },
+    );
 
     onUpdateTask(updatedTask);
     if (typeof window !== "undefined") {
@@ -1098,7 +1140,12 @@ export function QuickInventoryEntry({
                   .
                 </div>
               ) : (
-                displayedTasks.map((t) => (
+                displayedTasks.map((t) => {
+                  const raKey = String(t.ra ?? "").trim().toUpperCase();
+                  const liveWorkers = presenceByRa.get(raKey) ?? [];
+                  const completedBy = inventoryCompletedByLabel(t);
+
+                  return (
               <div
                 key={t.id}
                 role="button"
@@ -1117,7 +1164,7 @@ export function QuickInventoryEntry({
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                     <h3
                       className={`shrink-0 text-lg font-black tabular-nums leading-none sm:text-xl ${
                         viewMode === "priority"
@@ -1127,11 +1174,31 @@ export function QuickInventoryEntry({
                     >
                       RA {t.ra}
                     </h3>
-                    {t.status === "in_progress" && (
+                    {liveWorkers.length > 0 ? (
+                      <span
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-bold text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+                        title={`Capturando ahora: ${liveWorkers.join(", ")}`}
+                      >
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
+                        </span>
+                        <span className="truncate">{liveWorkers.join(" · ")}</span>
+                      </span>
+                    ) : null}
+                    {t.status === "in_progress" && liveWorkers.length === 0 ? (
                       <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
                         En curso
                       </span>
-                    )}
+                    ) : null}
+                    {viewMode === "completed" && completedBy ? (
+                      <span
+                        className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
+                        title="Operador que terminó medidas y peso"
+                      >
+                        Por {completedBy}
+                      </span>
+                    ) : null}
                   </div>
                   <div
                     className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-1 text-center ${
@@ -1265,7 +1332,8 @@ export function QuickInventoryEntry({
                 </div>
                 </div>
               </div>
-            ))
+                  );
+                })
               )}
             </div>
           </div>

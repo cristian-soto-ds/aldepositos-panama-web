@@ -136,12 +136,12 @@ export const RECEPTION_TV_THEME = {
 export const RECEPTION_COPY = {
   operatorTitle: "Dirección de camiones",
   operatorSubtitle:
-    "Carga órdenes del día, busca camiones y mueve el tablero Kanban.",
+    "Tablero Kanban, reporte diario de OR y pantalla TV para bodega.",
   tvTitle: "Dirección de camiones — Pantalla",
   tvSubtitle: "Actualización en vivo para proveedores y supervisión",
-  uploadLabel: "Cargar órdenes del día",
-  uploadHint:
-    "Excel (.xlsx) o CSV con columnas: placa, proveedor, cliente, ra, bultos",
+  reportLabel: "Generar reporte",
+  reportHint:
+    "Excel del día: OR recibidas, hora de llegada, espera en fila, tiempo de descarga y resumen con Alde.IA.",
   searchPlaceholder: "Buscar por placa, RA, proveedor o cliente…",
   emptyColumn: "Sin camiones",
   receiptTitle: "Recibo de Almacén",

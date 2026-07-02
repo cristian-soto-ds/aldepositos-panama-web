@@ -98,6 +98,13 @@ const TruckDirectionModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const ReceptionistModule = dynamic(
+  () =>
+    import("@/components/control-panel/ReceptionistModule").then(
+      (m) => m.ReceptionistModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 const UserOptionsPanel = dynamic(
   () =>
     import("@/components/control-panel/UserOptionsPanel").then(
@@ -112,6 +119,7 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "detailed-entry",
   "airway",
   "collection-orders",
+  "receptionist",
   "truck-direction",
 ]);
 
@@ -651,6 +659,10 @@ export default function PanelPage() {
             userEmail={userEmail}
             userDisplayName={userDisplayName}
           />
+        )}
+
+        {visibleView === "receptionist" && (
+          <ReceptionistModule userEmail={userEmail} />
         )}
 
         {visibleView === "truck-direction" && <TruckDirectionModule />}

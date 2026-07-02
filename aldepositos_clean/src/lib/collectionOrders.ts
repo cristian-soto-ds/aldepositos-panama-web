@@ -24,15 +24,15 @@ export function parseCollectionOrderNumber(n: string | undefined): number {
   return Number.isFinite(val) ? val : 0;
 }
 
-/** Lista consecutiva por número de orden (ascendente). */
+/** Lista por número de orden (descendente: mayor a menor). */
 export function sortCollectionOrdersByNumero(
   orders: CollectionOrder[],
 ): CollectionOrder[] {
   return [...orders].sort((a, b) => {
     const na = parseCollectionOrderNumber(a.numero);
     const nb = parseCollectionOrderNumber(b.numero);
-    if (na !== nb) return na - nb;
-    return String(a.id).localeCompare(String(b.id));
+    if (na !== nb) return nb - na;
+    return String(b.id).localeCompare(String(a.id));
   });
 }
 

@@ -17,7 +17,6 @@ const files = [
   "src/components/control-panel/LiveMonitor.tsx",
   "src/components/control-panel/ContainerReportsModule.tsx",
   "src/components/control-panel/CompletedReportsModule.tsx",
-  "src/components/control-panel/ProductivityInsightsPanel.tsx",
   "src/components/control-panel/UserOptionsPanel.tsx",
   "src/components/control-panel/ModulePlaceholder.tsx",
   "src/components/modals/ManualEntryModal.tsx",

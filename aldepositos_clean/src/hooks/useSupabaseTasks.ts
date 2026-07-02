@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchTasks, subscribeTasksRealtime } from "@/lib/supabase";
+import {
+  fetchTasks,
+  subscribeTasksRealtime,
+  type TaskRealtimeChange,
+} from "@/lib/supabase";
+import { patchTasksList } from "@/lib/realtimePatch";
 import type { Task } from "@/lib/types/task";
 
 type UseSupabaseTasksOptions = {
@@ -12,7 +17,9 @@ type UseSupabaseTasksOptions = {
 /**
  * Estado de tareas sincronizado con `public.tasks`:
  * - carga inicial al habilitar
- * - recarga automática vía Supabase Realtime (INSERT / UPDATE / DELETE)
+ * - parche inmediato vía Supabase Realtime
+ * - recarga completa debounced como respaldo
+ * - refetch al volver a la pestaña
  */
 export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -33,6 +40,13 @@ export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
     }
   }, []);
 
+  const applyRealtimeChange = useCallback((change: TaskRealtimeChange) => {
+    setTasks((prev) => {
+      const patched = patchTasksList(prev, change);
+      return patched ?? prev;
+    });
+  }, []);
+
   useEffect(() => {
     if (!enabled) return;
     void reloadTasks();
@@ -40,9 +54,25 @@ export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
 
   useEffect(() => {
     if (!enabled) return;
-    return subscribeTasksRealtime(() => {
-      void reloadTasks();
+    return subscribeTasksRealtime({
+      onChange: applyRealtimeChange,
+      onReload: reloadTasks,
     });
+  }, [enabled, reloadTasks, applyRealtimeChange]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void reloadTasks();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, [enabled, reloadTasks]);
 
   return { tasks, setTasks, reloadTasks, tasksLoading };

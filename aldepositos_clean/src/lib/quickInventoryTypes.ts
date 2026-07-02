@@ -51,20 +51,85 @@ export function applyConsecutiveReferences<T extends QuickMeasureRow>(rows: T[])
   }));
 }
 
-export function restoreSourceReferences<T extends QuickMeasureRow>(
-  rows: T[],
-  snapshot: Record<string, string>,
-): T[] {
-  return rows.map((row) => ({
-    ...row,
-    referencia: snapshot[row.id] ?? String(row.referencia ?? ""),
-  }));
-}
-
 export function buildReferenceSnapshot(rows: QuickMeasureRow[]): Record<string, string> {
   return Object.fromEntries(
     rows.map((r) => [r.id, String(r.referencia ?? "")]),
   );
+}
+
+/**
+ * Snapshot de referencias originales (servidor + filas actuales).
+ * Debe llamarse **antes** de applyConsecutiveReferences.
+ */
+export function buildSourceReferenceSnapshot(
+  rows: QuickMeasureRow[],
+  serverRows: QuickMeasureRow[] = [],
+): Record<string, string> {
+  const serverById = new Map(
+    serverRows.map((r) => [r.id, String(r.referencia ?? "").trim()]),
+  );
+  const out: Record<string, string> = {};
+
+  rows.forEach((row, index) => {
+    const fromId = serverById.get(row.id) ?? "";
+    const fromIndex = String(serverRows[index]?.referencia ?? "").trim();
+    const current = String(row.referencia ?? "").trim();
+
+    if (rowHasRealReference(fromId)) {
+      out[row.id] = fromId;
+    } else if (rowHasRealReference(fromIndex)) {
+      out[row.id] = fromIndex;
+    } else if (rowHasRealReference(current)) {
+      out[row.id] = current;
+    } else if (fromId) {
+      out[row.id] = fromId;
+    } else if (fromIndex) {
+      out[row.id] = fromIndex;
+    } else {
+      out[row.id] = current;
+    }
+  });
+
+  return out;
+}
+
+/** Al pasar a modo sin refs: conserva refs reales en snapshot sin pisar las importadas. */
+export function captureSourceReferencesFromRows(
+  rows: QuickMeasureRow[],
+  snapshot: Record<string, string>,
+): Record<string, string> {
+  const next = { ...snapshot };
+  for (const row of rows) {
+    const ref = String(row.referencia ?? "").trim();
+    if (rowHasRealReference(ref)) {
+      next[row.id] = ref;
+    }
+  }
+  return next;
+}
+
+export function restoreSourceReferences<T extends QuickMeasureRow>(
+  rows: T[],
+  snapshot: Record<string, string>,
+): T[] {
+  return rows.map((row) => {
+    const saved = snapshot[row.id];
+    const savedStr = saved !== undefined ? String(saved).trim() : "";
+    const current = String(row.referencia ?? "").trim();
+
+    let referencia: string;
+    if (savedStr && rowHasRealReference(savedStr)) {
+      referencia = savedStr;
+    } else if (savedStr) {
+      referencia = savedStr;
+    } else if (rowHasRealReference(current)) {
+      referencia = current;
+    } else {
+      referencia = saved !== undefined ? String(saved) : current;
+    }
+
+    return { ...row, referencia };
+  });
 }
 
 export function renumberConsecutiveReferences<T extends QuickMeasureRow>(rows: T[]): T[] {

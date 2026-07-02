@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
+import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
@@ -358,6 +359,69 @@ export function CollectionOrderModule({
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const catalogSeqRef = useRef<Record<string, number>>({});
+  const editingRef = useRef<CollectionOrder | null>(null);
+  const isOrderSavingRef = useRef(false);
+  const lastSavedOrderHashRef = useRef("");
+  const lastRemoteOrderHashRef = useRef("");
+  const pendingRemoteOrderRef = useRef<CollectionOrder | null>(null);
+  const prevEditingIdRef = useRef<string | null>(null);
+  const [remoteOrderUpdatePending, setRemoteOrderUpdatePending] = useState(false);
+
+  editingRef.current = editing;
+
+  useEffect(() => {
+    const id = editing?.id ?? null;
+    if (id === prevEditingIdRef.current) return;
+    prevEditingIdRef.current = id;
+    const remote = id ? orders.find((o) => o.id === id) : null;
+    lastRemoteOrderHashRef.current = remote ? JSON.stringify(remote.lines) : "";
+    lastSavedOrderHashRef.current = remote ? JSON.stringify(remote) : "";
+    pendingRemoteOrderRef.current = null;
+    setRemoteOrderUpdatePending(false);
+  }, [editing?.id, orders]);
+
+  useEffect(() => {
+    if (!editing?.id) return;
+    const remote = orders.find((o) => o.id === editing.id);
+    if (!remote) return;
+    const remoteLinesHash = JSON.stringify(remote.lines);
+    if (remoteLinesHash === lastRemoteOrderHashRef.current) return;
+
+    if (isOrderSavingRef.current) {
+      pendingRemoteOrderRef.current = remote;
+      return;
+    }
+
+    const current = editingRef.current;
+    if (!current) return;
+    const localHash = JSON.stringify(current);
+    const isDirty = localHash !== lastSavedOrderHashRef.current;
+
+    if (isDirty) {
+      pendingRemoteOrderRef.current = remote;
+      setRemoteOrderUpdatePending(true);
+      lastRemoteOrderHashRef.current = remoteLinesHash;
+      return;
+    }
+
+    setEditing(remote);
+    lastSavedOrderHashRef.current = JSON.stringify(remote);
+    lastRemoteOrderHashRef.current = remoteLinesHash;
+    pendingRemoteOrderRef.current = null;
+    setRemoteOrderUpdatePending(false);
+  }, [orders, editing?.id]);
+
+  const applyPendingRemoteOrder = useCallback(() => {
+    const remote = pendingRemoteOrderRef.current;
+    if (!remote) return;
+    setEditing(JSON.parse(JSON.stringify(remote)) as CollectionOrder);
+    lastSavedOrderHashRef.current = JSON.stringify(remote);
+    lastRemoteOrderHashRef.current = JSON.stringify(remote.lines);
+    pendingRemoteOrderRef.current = null;
+    setRemoteOrderUpdatePending(false);
+    setPendingUndTot({});
+    setPendingPesoTot({});
+  }, []);
 
   useEffect(() => {
     const d = catalogDebounceRef;
@@ -529,6 +593,7 @@ export function CollectionOrderModule({
       };
       const exists = orders.some((o) => o.id === payload.id);
       if (showAlerts) setSaveBusy(true);
+      isOrderSavingRef.current = true;
       try {
         if (exists) await updateCollectionOrder(payload);
         else await insertCollectionOrder(payload);
@@ -537,6 +602,8 @@ export function CollectionOrderModule({
           return [payload, ...rest];
         });
         setEditing((prev) => (prev && prev.id === payload.id ? payload : prev));
+        lastSavedOrderHashRef.current = JSON.stringify(payload);
+        lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
         if (showAlerts) alert(`Orden guardada. Número: ${numero}.`);
       } catch (e) {
         console.error(e);
@@ -544,7 +611,20 @@ export function CollectionOrderModule({
           alert("No se pudo guardar. ¿Aplicaste la migración SQL `collection_orders` en Supabase?");
         }
       } finally {
+        isOrderSavingRef.current = false;
         if (showAlerts) setSaveBusy(false);
+        const pending = pendingRemoteOrderRef.current;
+        if (
+          pending &&
+          editingRef.current &&
+          JSON.stringify(editingRef.current) === lastSavedOrderHashRef.current
+        ) {
+          setEditing(JSON.parse(JSON.stringify(pending)) as CollectionOrder);
+          lastSavedOrderHashRef.current = JSON.stringify(pending);
+          lastRemoteOrderHashRef.current = JSON.stringify(pending.lines);
+          pendingRemoteOrderRef.current = null;
+          setRemoteOrderUpdatePending(false);
+        }
       }
     },
     [orders],
@@ -1336,6 +1416,11 @@ export function CollectionOrderModule({
 
   return (
     <>
+        {remoteOrderUpdatePending ? (
+          <div className="mb-3 px-2">
+            <RemoteSyncBanner onApply={applyPendingRemoteOrder} />
+          </div>
+        ) : null}
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-[#1f3467]/20 bg-gradient-to-r from-white via-slate-50 to-white p-2 shadow-lg shadow-indigo-100/60 backdrop-blur-sm dark:border-indigo-900/40 dark:bg-slate-900/90 dark:shadow-black/20">
           <button
             type="button"

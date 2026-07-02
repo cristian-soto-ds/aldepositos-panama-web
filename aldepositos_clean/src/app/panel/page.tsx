@@ -19,7 +19,6 @@ import { CompletedReportsModule } from "@/components/control-panel/CompletedRepo
 import { LiveMonitor } from "@/components/control-panel/LiveMonitor";
 import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
 import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
-import { ProductivityInsightsPanel } from "@/components/control-panel/ProductivityInsightsPanel";
 import { ReferenceCatalogModule } from "@/components/control-panel/ReferenceCatalogModule";
 import { CollectionOrderModule } from "@/components/control-panel/CollectionOrderModule";
 import { UserOptionsPanel } from "@/components/control-panel/UserOptionsPanel";
@@ -40,7 +39,6 @@ import {
 import { isPublicAvatarUrl } from "@/lib/profileAvatar";
 import { fetchPerfilUsuario } from "@/lib/perfiles";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
-import { withTaskContribution } from "@/lib/taskContributions";
 import { fetchWithTimeout } from "@/lib/clientFetch";
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
@@ -264,7 +262,7 @@ export default function PanelPage() {
           dispatched: t.dispatched ?? false,
           containerDraft: t.containerDraft ?? false,
         };
-        return withTaskContribution(base, userEmail, userDisplayName, "create");
+        return base;
       });
       return [...prev, ...normalized];
     });
@@ -282,17 +280,11 @@ export default function PanelPage() {
   };
 
   const handleUpdateTask = async (updatedTask: Task) => {
-    const persisted = withTaskContribution(
-      updatedTask,
-      userEmail,
-      userDisplayName,
-      "touch",
-    );
     setTasks((prev) =>
-      prev.map((t) => (t.id === persisted.id ? persisted : t)),
+      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
     );
     try {
-      await updateTask(persisted);
+      await updateTask(updatedTask);
     } catch (e) {
       console.error(e);
       // eslint-disable-next-line no-alert
@@ -395,23 +387,17 @@ export default function PanelPage() {
       dispatched: taskData.dispatched ?? false,
       containerDraft: taskData.containerDraft ?? false,
     };
-    const normalized = withTaskContribution(
-      base,
-      userEmail,
-      userDisplayName,
-      exists ? "touch" : "create",
-    );
     try {
       if (exists) {
-        await updateTask(normalized);
+        await updateTask(base);
       } else {
-        await insertTask(normalized);
+        await insertTask(base);
       }
       setTasks((prev) => {
         if (exists) {
-          return prev.map((t) => (t.id === taskData.id ? normalized : t));
+          return prev.map((t) => (t.id === taskData.id ? base : t));
         }
-        return [...prev, normalized];
+        return [...prev, base];
       });
       closeManualModal();
     } catch (e) {
@@ -437,19 +423,12 @@ export default function PanelPage() {
     const taskIds = container.tasks.map((t) => t.id);
     const updated: Task[] = tasks
       .filter((t) => taskIds.includes(t.id))
-      .map((t) =>
-        withTaskContribution(
-          {
-            ...t,
-            dispatched: false,
-            containerDraft: true,
-            dispatchInfo: undefined,
-          },
-          userEmail,
-          userDisplayName,
-          "touch",
-        ),
-      );
+      .map((t) => ({
+        ...t,
+        dispatched: false,
+        containerDraft: true,
+        dispatchInfo: undefined,
+      }));
     try {
       if (updated.length > 0) {
         await Promise.all(updated.map((t) => updateTask(t)));
@@ -583,14 +562,6 @@ export default function PanelPage() {
             onDeleteTask={handleDeleteTask}
             onUpdateTask={handleUpdateTask}
             onAddTasks={handleImport}
-          />
-        )}
-
-        {visibleView === "productivity" && (
-          <ProductivityInsightsPanel
-            tasks={tasks}
-            userEmail={userEmail}
-            userDisplayName={userDisplayName}
           />
         )}
 

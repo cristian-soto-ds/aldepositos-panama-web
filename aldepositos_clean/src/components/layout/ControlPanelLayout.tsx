@@ -13,7 +13,6 @@ import {
   X,
   ClipboardList,
   PackageSearch,
-  BarChart3,
   Settings,
   UserRound,
   BookMarked,
@@ -241,15 +240,6 @@ export function ControlPanelLayout({
             active={currentView === "reports"}
             onClick={() => {
               setCurrentView("reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={BarChart3} />}
-            text="Productividad"
-            active={currentView === "productivity"}
-            onClick={() => {
-              setCurrentView("productivity");
               setSidebarOpen(false);
             }}
           />

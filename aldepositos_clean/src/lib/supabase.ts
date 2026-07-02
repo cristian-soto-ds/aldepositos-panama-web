@@ -1,5 +1,14 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import {
+  isTaskPayload,
+  parseTaskRealtimeChange,
+  type DbPayloadRow,
+  type TaskRealtimeChange,
+} from "@/lib/realtimePatch";
 import type { Task } from "@/lib/types/task";
+
+export type { TaskRealtimeChange };
 
 /**
  * Valores por defecto tipo Supabase local: evitan que `createBrowserClient` reciba
@@ -18,15 +27,6 @@ export const supabase = createBrowserClient(
   BROWSER_SUPABASE_ANON_KEY,
 );
 
-function isTask(value: unknown): value is Task {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    "ra" in value
-  );
-}
-
 /**
  * Lee todas las filas de public.tasks y devuelve los Task del JSON payload.
  */
@@ -39,7 +39,7 @@ export async function fetchTasks(): Promise<Task[]> {
   if (error) throw error;
 
   const rows = (data ?? []) as { payload: unknown }[];
-  return rows.map((r) => r.payload).filter(isTask);
+  return rows.map((r) => r.payload).filter(isTaskPayload);
 }
 
 /**
@@ -90,14 +90,29 @@ export async function deleteTaskById(id: string): Promise<void> {
 
 const REALTIME_DEBOUNCE_MS = 200;
 
+type TasksRealtimeHandlers = {
+  /** Parche inmediato con el payload del evento (sin esperar refetch). */
+  onChange?: (change: TaskRealtimeChange) => void;
+  /** Recarga completa debounced como respaldo. */
+  onReload?: () => void;
+};
+
 /**
  * Suscripción a cambios en `public.tasks` (INSERT, UPDATE, DELETE).
- * Debounce evita múltiples `fetchTasks` seguidos (p. ej. importación masiva).
+ * Emite parche inmediato y, opcionalmente, recarga completa debounced.
  */
-export function subscribeTasksRealtime(onReload: () => void): () => void {
+export function subscribeTasksRealtime(
+  handlers: TasksRealtimeHandlers | (() => void),
+): () => void {
+  const { onChange, onReload } =
+    typeof handlers === "function"
+      ? { onChange: undefined, onReload: handlers }
+      : handlers;
+
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleReload = () => {
+    if (!onReload) return;
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -110,7 +125,15 @@ export function subscribeTasksRealtime(onReload: () => void): () => void {
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "tasks" },
-      () => {
+      (payload: RealtimePostgresChangesPayload<DbPayloadRow>) => {
+        const change = parseTaskRealtimeChange(payload);
+        if (change) {
+          onChange?.(change);
+          if (!change.task && change.eventType !== "DELETE") {
+            scheduleReload();
+            return;
+          }
+        }
         scheduleReload();
       },
     )
@@ -119,6 +142,10 @@ export function subscribeTasksRealtime(onReload: () => void): () => void {
         console.warn(
           "[Supabase Realtime] Error en el canal de `tasks`. ¿Está la tabla en la publicación y RLS permite leer?",
         );
+        scheduleReload();
+      }
+      if (status === "SUBSCRIBED") {
+        scheduleReload();
       }
     });
 

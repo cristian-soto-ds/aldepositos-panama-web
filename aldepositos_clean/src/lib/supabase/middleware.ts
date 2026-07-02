@@ -48,8 +48,12 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) => {
             supabaseResponse.cookies.set(name, value, options);
           });
-          for (const [key, value] of Object.entries(headers)) {
-            supabaseResponse.headers.set(key, value);
+          if (headers && typeof headers === "object") {
+            for (const [key, value] of Object.entries(headers)) {
+              if (typeof value === "string") {
+                supabaseResponse.headers.set(key, value);
+              }
+            }
           }
         },
       },

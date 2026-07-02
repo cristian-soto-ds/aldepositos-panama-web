@@ -26,6 +26,9 @@ import {
 } from "@/lib/panelPresence";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
+import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
+import { useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
+import type { Task as SharedTask } from "@/lib/types/task";
 import {
   buildMeasurePatchFromCatalog,
   getReferenceCatalogItem,
@@ -84,6 +87,24 @@ type DetailedInventoryEntryProps = {
 };
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
+
+function createEmptyDetailedRow(): MeasureRow {
+  return {
+    id: generateId(),
+    referencia: "",
+    descripcion: "",
+    bultos: "",
+    unidadesPorBulto: "",
+    pesoPorBulto: "",
+    l: "",
+    w: "",
+    h: "",
+    reempaque: false,
+    bultoContenedor: "",
+    referenciasContenedor: "",
+    referenciaContenedora: "",
+  };
+}
 const CATALOG_DEBOUNCE_MS = 500;
 const DETAILED_AUTOSAVE_MS = 700;
 const detailedDraftKey = (taskId: string) =>
@@ -208,6 +229,47 @@ export function DetailedInventoryEntry({
     Record<string, ReturnType<typeof setTimeout>>
   >({});
   const catalogSeqRef = useRef<Record<string, number>>({});
+  const onLocalSaveCompletedRef = useRef<() => void>(() => {});
+
+  const prepareRowsFromRemote = useCallback((remote: SharedTask): MeasureRow[] => {
+    return remote.measureData && remote.measureData.length > 0
+      ? (JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[])
+      : [createEmptyDetailedRow()];
+  }, []);
+
+  const buildEditorHash = useCallback(
+    (rows: MeasureRow[]) => JSON.stringify({ rows }),
+    [],
+  );
+
+  const {
+    remoteUpdatePending,
+    applyPendingRemoteUpdate,
+    onLocalSaveCompleted,
+  } = useInventoryRealtimeSync({
+    tasks: tasks as SharedTask[],
+    selectedTask: selectedTask as SharedTask | null,
+    setSelectedTask: setSelectedTask as React.Dispatch<
+      React.SetStateAction<SharedTask | null>
+    >,
+    setMeasureRows,
+    isSavingRef,
+    lastSavedHashRef,
+    latestRowsRef,
+    latestTaskRef: latestTaskRef as React.MutableRefObject<SharedTask | null>,
+    buildHash: buildEditorHash,
+    prepareRowsFromRemote,
+    onTaskRemoved: () => {
+      setSelectedTask(null);
+      activeTaskIdRef.current = null;
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    },
+  });
+
+  onLocalSaveCompletedRef.current = onLocalSaveCompleted;
 
   useEffect(() => {
     const debRef = catalogDebounceRef;
@@ -315,23 +377,7 @@ export function DetailedInventoryEntry({
     const taskRows =
       task.measureData && task.measureData.length > 0
         ? (JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[])
-        : [
-            {
-              id: generateId(),
-              referencia: "",
-              descripcion: "",
-              bultos: "",
-              unidadesPorBulto: "",
-              pesoPorBulto: "",
-              l: "",
-              w: "",
-              h: "",
-              reempaque: false,
-              bultoContenedor: "",
-              referenciasContenedor: "",
-              referenciaContenedora: "",
-            },
-          ];
+        : [createEmptyDetailedRow()];
 
     const serverHasCapture = detailedRowsHaveAnyCapture(taskRows);
     let rowsToUse = taskRows;
@@ -636,6 +682,7 @@ export function DetailedInventoryEntry({
       setAutosaveState("error");
     } finally {
       isSavingRef.current = false;
+      onLocalSaveCompletedRef.current();
       if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
         queuedRef.current = false;
         const latestHash = queuedHashRef.current || JSON.stringify({ rows: latestRowsRef.current });
@@ -973,6 +1020,11 @@ export function DetailedInventoryEntry({
     <>
     <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade">
       <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col">
+        {remoteUpdatePending ? (
+          <div className="mb-2 px-2 md:px-0">
+            <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
+          </div>
+        ) : null}
         <div className="mb-2 flex shrink-0 flex-col items-start justify-between gap-3 px-2 md:mb-3 md:flex-row md:items-center md:px-0">
           <div className="flex flex-wrap items-center gap-2">
             <button

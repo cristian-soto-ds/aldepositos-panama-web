@@ -23,10 +23,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
+import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
+import { useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
 import { tableScrollHostClass } from "@/lib/responsiveUi";
 import {
   applyConsecutiveReferences,
   buildReferenceSnapshot,
+  buildSourceReferenceSnapshot,
+  captureSourceReferencesFromRows,
   CAPTURE_LAYOUT_STORAGE_KEY,
   isCaptureLayout,
   renumberConsecutiveReferences,
@@ -113,6 +117,26 @@ const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
   `${kind}_inventory_draft_v1_${taskId}`;
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
+
+function createEmptyMeasureRow(): MeasureRow {
+  return {
+    id: generateId(),
+    referencia: "",
+    descripcion: "",
+    bultos: "",
+    unidadesPorBulto: "",
+    pesoPorBulto: "",
+    l: "",
+    w: "",
+    h: "",
+    weight: "",
+    reempaque: false,
+    bultoContenedor: "",
+    referenciasContenedor: "",
+    reempaqueRefs: [],
+    referenciaContenedora: "",
+  };
+}
 const CATALOG_DEBOUNCE_MS = 500;
 const QUICK_AUTOSAVE_MS = 700;
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
@@ -289,6 +313,61 @@ export function QuickInventoryEntry({
     Record<string, ReturnType<typeof setTimeout>>
   >({});
   const catalogSeqRef = useRef<Record<string, number>>({});
+  const onLocalSaveCompletedRef = useRef<() => void>(() => {});
+
+  const prepareRowsFromRemote = useCallback(
+    (remote: Task): MeasureRow[] => {
+      const taskRows =
+        remote.measureData && remote.measureData.length > 0
+          ? (JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[])
+          : [createEmptyMeasureRow()];
+      if (taskHasImportedReferences(taskRows)) {
+        sourceReferencesRef.current = buildSourceReferenceSnapshot(
+          taskRows,
+          taskRows,
+        );
+      } else {
+        sourceReferencesRef.current = buildReferenceSnapshot(taskRows);
+      }
+      return referenceMode === "without"
+        ? applyConsecutiveReferences(taskRows)
+        : taskRows;
+    },
+    [referenceMode],
+  );
+
+  const buildEditorHash = useCallback(
+    (rows: MeasureRow[]) =>
+      JSON.stringify({ rows, referenceMode, captureLayout }),
+    [referenceMode, captureLayout],
+  );
+
+  const {
+    remoteUpdatePending,
+    applyPendingRemoteUpdate,
+    onLocalSaveCompleted,
+  } = useInventoryRealtimeSync({
+    tasks,
+    selectedTask,
+    setSelectedTask,
+    setMeasureRows,
+    isSavingRef,
+    lastSavedHashRef,
+    latestRowsRef,
+    latestTaskRef,
+    buildHash: buildEditorHash,
+    prepareRowsFromRemote,
+    onTaskRemoved: () => {
+      setSelectedTask(null);
+      activeTaskIdRef.current = null;
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    },
+  });
+
+  onLocalSaveCompletedRef.current = onLocalSaveCompleted;
 
   useEffect(() => {
     const debRef = catalogDebounceRef;
@@ -378,25 +457,7 @@ export function QuickInventoryEntry({
     const taskRows =
       task.measureData && task.measureData.length > 0
         ? (JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[])
-        : [
-            {
-              id: generateId(),
-              referencia: "",
-              descripcion: "",
-              bultos: "",
-              unidadesPorBulto: "",
-              pesoPorBulto: "",
-              l: "",
-              w: "",
-              h: "",
-              weight: "",
-              reempaque: false,
-              bultoContenedor: "",
-              referenciasContenedor: "",
-              reempaqueRefs: [],
-              referenciaContenedora: "",
-            },
-          ];
+        : [createEmptyMeasureRow()];
     const serverRows = taskRows;
     const serverHasCapture = quickRowsHaveAnyCapture(taskRows);
     let rowsToUse = taskRows;
@@ -439,19 +500,14 @@ export function QuickInventoryEntry({
       }
     }
 
-    if (refModeToUse === "without") {
-      rowsToUse = applyConsecutiveReferences(rowsToUse);
-    }
-
     if (taskHasImportedReferences(serverRows)) {
-      sourceReferencesRef.current = Object.fromEntries(
-        rowsToUse.map((row, i) => [
-          row.id,
-          String(serverRows[i]?.referencia ?? row.referencia ?? ""),
-        ]),
-      );
+      sourceReferencesRef.current = buildSourceReferenceSnapshot(rowsToUse, serverRows);
     } else {
       sourceReferencesRef.current = buildReferenceSnapshot(rowsToUse);
+    }
+
+    if (refModeToUse === "without") {
+      rowsToUse = applyConsecutiveReferences(rowsToUse);
     }
 
     const firstPending = rowsToUse.find((r) => !isQuickRowComplete(r));
@@ -463,6 +519,8 @@ export function QuickInventoryEntry({
     latestTaskRef.current = task;
     lastSavedHashRef.current = JSON.stringify({
       rows: rowsToUse,
+      referenceMode: refModeToUse,
+      captureLayout: layoutToUse,
     });
     setAutosaveState("idle");
   };
@@ -491,7 +549,10 @@ export function QuickInventoryEntry({
       );
     } else {
       setMeasureRows((prev) => {
-        sourceReferencesRef.current = buildReferenceSnapshot(prev);
+        sourceReferencesRef.current = captureSourceReferencesFromRows(
+          prev,
+          sourceReferencesRef.current,
+        );
         return applyConsecutiveReferences(prev);
       });
     }
@@ -769,6 +830,7 @@ export function QuickInventoryEntry({
       setAutosaveState("error");
     } finally {
       isSavingRef.current = false;
+      onLocalSaveCompletedRef.current();
       if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
         queuedRef.current = false;
         const latestHash =
@@ -1188,6 +1250,11 @@ export function QuickInventoryEntry({
   if (captureLayout === "reekon") {
     return (
       <>
+        {remoteUpdatePending ? (
+          <div className="fixed inset-x-0 top-0 z-[10001] p-2">
+            <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
+          </div>
+        ) : null}
         <ReekonCaptureView
           measureRows={measureRows}
           referenceMode={referenceMode}
@@ -1252,6 +1319,9 @@ export function QuickInventoryEntry({
     <>
     <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade">
       <div className="mb-2 shrink-0 space-y-2 px-0.5 md:px-0">
+        {remoteUpdatePending ? (
+          <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
+        ) : null}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"

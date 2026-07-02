@@ -31,7 +31,11 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
     }
     try {
       const list = await fetchCollectionOrders();
-      setOrders(list);
+      setOrders((prev) => {
+        const prevJson = JSON.stringify(prev);
+        const nextJson = JSON.stringify(list);
+        return prevJson === nextJson ? prev : list;
+      });
     } catch (e) {
       console.error(e);
       setOrders([]);
@@ -78,10 +82,13 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
 
   useEffect(() => {
     if (!enabled) return;
+    const lastFocusReloadRef = { current: 0 };
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        void reload();
-      }
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusReloadRef.current < 30_000) return;
+      lastFocusReloadRef.current = now;
+      void reload();
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);

@@ -35,13 +35,25 @@ export function isConsecutiveReference(ref: string): boolean {
   return /^\d+$/.test(ref.trim());
 }
 
+/** Referencia capturada por el usuario (incluye códigos solo numéricos, ej. "21", "1234"). */
+export function hasReferenceValue(ref: string): boolean {
+  return String(ref ?? "").trim().length > 0;
+}
+
 export function rowHasRealReference(ref: string): boolean {
-  const t = ref.trim();
-  return t.length > 0 && !isConsecutiveReference(t);
+  return hasReferenceValue(ref);
+}
+
+/** Bloque 1,2,3…n generado por modo «Sin refs» (no confundir con códigos numéricos reales). */
+export function isAutoConsecutiveBlock(rows: QuickMeasureRow[]): boolean {
+  if (rows.length === 0) return false;
+  return rows.every(
+    (row, i) => String(row.referencia ?? "").trim() === String(i + 1),
+  );
 }
 
 export function taskHasImportedReferences(rows: QuickMeasureRow[]): boolean {
-  return rows.some((r) => rowHasRealReference(String(r.referencia ?? "")));
+  return rows.some((r) => hasReferenceValue(String(r.referencia ?? "")));
 }
 
 export function applyConsecutiveReferences<T extends QuickMeasureRow>(rows: T[]): T[] {
@@ -75,11 +87,11 @@ export function buildSourceReferenceSnapshot(
     const fromIndex = String(serverRows[index]?.referencia ?? "").trim();
     const current = String(row.referencia ?? "").trim();
 
-    if (rowHasRealReference(fromId)) {
+    if (hasReferenceValue(fromId)) {
       out[row.id] = fromId;
-    } else if (rowHasRealReference(fromIndex)) {
+    } else if (hasReferenceValue(fromIndex)) {
       out[row.id] = fromIndex;
-    } else if (rowHasRealReference(current)) {
+    } else if (hasReferenceValue(current)) {
       out[row.id] = current;
     } else if (fromId) {
       out[row.id] = fromId;
@@ -101,9 +113,33 @@ export function captureSourceReferencesFromRows(
   const next = { ...snapshot };
   for (const row of rows) {
     const ref = String(row.referencia ?? "").trim();
-    if (rowHasRealReference(ref)) {
+    if (ref) {
       next[row.id] = ref;
     }
+  }
+  return next;
+}
+
+/**
+ * Fusiona snapshots sin reemplazar referencias reales por consecutivos (1, 2, 3…).
+ */
+export function mergePreservingRealReferences(
+  existing: Record<string, string>,
+  incoming: Record<string, string>,
+): Record<string, string> {
+  const next = { ...existing };
+  for (const [id, ref] of Object.entries(incoming)) {
+    const incomingRef = String(ref ?? "").trim();
+    const existingRef = String(next[id] ?? "").trim();
+    if (!incomingRef) continue;
+    if (existingRef && isConsecutiveReference(existingRef) && !isConsecutiveReference(incomingRef)) {
+      next[id] = incomingRef;
+      continue;
+    }
+    if (existingRef && !isConsecutiveReference(existingRef) && isConsecutiveReference(incomingRef)) {
+      continue;
+    }
+    next[id] = incomingRef;
   }
   return next;
 }
@@ -113,22 +149,13 @@ export function restoreSourceReferences<T extends QuickMeasureRow>(
   snapshot: Record<string, string>,
 ): T[] {
   return rows.map((row) => {
-    const saved = snapshot[row.id];
-    const savedStr = saved !== undefined ? String(saved).trim() : "";
+    const savedStr = String(snapshot[row.id] ?? "").trim();
     const current = String(row.referencia ?? "").trim();
 
-    let referencia: string;
-    if (savedStr && rowHasRealReference(savedStr)) {
-      referencia = savedStr;
-    } else if (savedStr) {
-      referencia = savedStr;
-    } else if (rowHasRealReference(current)) {
-      referencia = current;
-    } else {
-      referencia = saved !== undefined ? String(saved) : current;
+    if (savedStr) {
+      return { ...row, referencia: savedStr };
     }
-
-    return { ...row, referencia };
+    return { ...row, referencia: current };
   });
 }
 
@@ -164,4 +191,42 @@ export function formatRowLabel(
   }
   const ref = String(row.referencia ?? "").trim();
   return ref ? `${index + 1}. ${ref}` : `${index + 1}. —`;
+}
+
+/** Campos de captura en almacén (ingreso rápido / guía aérea), no del OR. */
+const QUICK_WAREHOUSE_CAPTURE_KEYS = [
+  "l",
+  "w",
+  "h",
+  "weight",
+  "volumenM3",
+  "unidad",
+  "reempaque",
+  "bultoContenedor",
+  "referenciasContenedor",
+  "referenciaContenedora",
+  "reempaqueRefs",
+] as const;
+
+/**
+ * Ingreso rápido: solo referencia + bultos desde OR; medidas/peso los toma el inventariado.
+ * Elimina campos propios del módulo detallado (descripción, und/bulto, pesoPorBulto).
+ */
+export function stripQuickMeasureRow<T extends QuickMeasureRow>(row: T): T {
+  const out: QuickMeasureRow = {
+    id: row.id,
+    referencia: row.referencia ?? "",
+    bultos: row.bultos ?? "",
+  };
+  for (const key of QUICK_WAREHOUSE_CAPTURE_KEYS) {
+    const v = row[key];
+    if (v === undefined || v === "" || v === false) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    (out as Record<string, unknown>)[key] = v;
+  }
+  return out as T;
+}
+
+export function stripQuickRowsForPersist<T extends QuickMeasureRow>(rows: T[]): T[] {
+  return rows.map(stripQuickMeasureRow);
 }

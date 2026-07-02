@@ -383,19 +383,15 @@ export function buildMeasurePatchFromCatalog(
   const unidad = item.unidad ?? "";
   const volumenM3 = formatCatalogNumber(item.volumen_m3);
 
-  const base: Record<string, string> = {
-    referencia: item.numero_parte,
-    descripcion,
-    l: formatCatalogNumber(item.longitud_cm),
-    w: formatCatalogNumber(item.ancho_cm),
-    h: formatCatalogNumber(item.altura_cm),
-    volumenM3,
-    unidad,
-  };
-
   if (moduleType === "detailed") {
     const patch: Record<string, string> = {
-      ...base,
+      referencia: item.numero_parte,
+      descripcion,
+      l: formatCatalogNumber(item.longitud_cm),
+      w: formatCatalogNumber(item.ancho_cm),
+      h: formatCatalogNumber(item.altura_cm),
+      volumenM3,
+      unidad,
       pesoPorBulto: formatCatalogNumber(item.peso_por_pieza_kg),
     };
     if (item.piezas != null) {
@@ -404,8 +400,14 @@ export function buildMeasurePatchFromCatalog(
     return patch;
   }
 
+  // Ingreso rápido / guía aérea: sin descripción ni und/bulto del catálogo.
   return {
-    ...base,
+    referencia: item.numero_parte,
+    l: formatCatalogNumber(item.longitud_cm),
+    w: formatCatalogNumber(item.ancho_cm),
+    h: formatCatalogNumber(item.altura_cm),
+    volumenM3,
+    unidad,
     weight: formatCatalogNumber(item.peso_por_pieza_kg),
   };
 }

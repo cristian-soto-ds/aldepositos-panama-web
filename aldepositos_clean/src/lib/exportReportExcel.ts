@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import type { Task } from "@/lib/types/task";
 import logoMark from "@/assets/brand/logo-aldepositos.png";
 import { computeReportData, reportModuleLabel } from "@/lib/reportTotals";
+import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
 
 const BRAND = "FF16263F";
 const BRAND_LIGHT = "FF1E3A5F";
@@ -22,20 +23,10 @@ function thinBorder(color = BORDER): Partial<ExcelJS.Borders> {
   return { top: edge, left: edge, bottom: edge, right: edge };
 }
 
-function sanitizeFilenamePart(s: string): string {
-  return String(s)
-    .trim()
-    .replace(/[^\w.\-]/g, "_")
-    .slice(0, 64);
-}
-
-export function buildReportExcelFilename(tasks: { ra: string }[]): string {
-  if (tasks.length === 0) return "reporte_ingreso";
-  if (tasks.length === 1) {
-    return `reporte_ingreso_RA-${sanitizeFilenamePart(tasks[0].ra)}`;
-  }
-  const first = sanitizeFilenamePart(tasks[0].ra);
-  return `reporte_ingreso_RA-${first}_y_${tasks.length - 1}_ordenes_mas`;
+export function buildReportExcelFilename(
+  tasks: Parameters<typeof buildReportDownloadFilename>[0],
+): string {
+  return buildReportDownloadFilename(tasks);
 }
 
 function safeSheetName(ra: string): string {
@@ -51,6 +42,53 @@ async function loadLogoBuffer(): Promise<ArrayBuffer | null> {
   } catch {
     return null;
   }
+}
+
+function colLetter(col: number): string {
+  let n = col;
+  let s = "";
+  while (n > 0) {
+    const mod = (n - 1) % 26;
+    s = String.fromCharCode(65 + mod) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s || "A";
+}
+
+/**
+ * A4, área de impresión exacta y ajuste a página para que Excel imprima completo y legible.
+ */
+function applySheetPrintSetup(
+  ws: ExcelJS.Worksheet,
+  lastRow: number,
+  colCount: number,
+  measureRowCount: number,
+  isDetailed: boolean,
+): void {
+  const lastCol = colLetter(colCount);
+  const compactReport = lastRow <= 48 && measureRowCount <= 24;
+
+  ws.pageSetup = {
+    paperSize: 9,
+    orientation: isDetailed ? "landscape" : "portrait",
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: compactReport ? 1 : 0,
+    scale: 100,
+    horizontalCentered: true,
+    verticalCentered: false,
+    showGridLines: false,
+    showRowColHeaders: false,
+    printArea: `A1:${lastCol}${lastRow}`,
+    margins: {
+      left: 0.35,
+      right: 0.35,
+      top: 0.45,
+      bottom: 0.45,
+      header: 0.15,
+      footer: 0.15,
+    },
+  };
 }
 
 function paintCanvas(ws: ExcelJS.Worksheet, rows: number, cols: number) {
@@ -248,43 +286,26 @@ function addReportSheet(
     ? buildDetailedHeaders()
     : buildQuickHeaders(showReferenceColumn, showWeightColumn);
   const colCount = headers.length;
-  const estimatedRows = 28 + measureRows.length;
 
   const ws = wb.addWorksheet(safeSheetName(task.ra), {
-    properties: { defaultRowHeight: 18, defaultColWidth: 12 },
-    views: [{ showGridLines: false, zoomScale: 110 }],
+    properties: { defaultRowHeight: 20, defaultColWidth: 10 },
+    views: [{ showGridLines: false, zoomScale: 100 }],
   });
-
-  ws.pageSetup = {
-    paperSize: 9,
-    orientation: isDetailed ? "landscape" : "portrait",
-    fitToPage: false,
-    margins: {
-      left: 0.5,
-      right: 0.5,
-      top: 0.5,
-      bottom: 0.5,
-      header: 0.2,
-      footer: 0.2,
-    },
-  };
 
   for (let c = 1; c <= colCount; c++) {
     ws.getColumn(c).width =
       c === 1
-        ? 5
+        ? 4.5
         : isDetailed
           ? c === 3
-            ? 26
-            : 11
-          : c === 2 && showReferenceColumn
-            ? 20
+            ? 24
+            : 10
+          : showReferenceColumn && c === 2
+            ? 18
             : c === colCount
-              ? 13
-              : 11;
+              ? 11
+              : 9.5;
   }
-
-  paintCanvas(ws, estimatedRows + 6, colCount);
 
   let row = 1;
 
@@ -357,9 +378,9 @@ function addReportSheet(
     metaRight.alignment = { vertical: "top", horizontal: "right", indent: 1 };
   }
 
-  ws.getRow(row).height = 30;
-  ws.getRow(row + 1).height = 26;
-  ws.getRow(row + 2).height = 22;
+  ws.getRow(row).height = 32;
+  ws.getRow(row + 1).height = 28;
+  ws.getRow(row + 2).height = 24;
   row += 3;
 
   // ═══ BANNER RA ═══
@@ -384,7 +405,7 @@ function addReportSheet(
     fgColor: { argb: KPI_BG },
   };
   raBanner.border = thinBorder();
-  ws.getRow(row).height = 36;
+  ws.getRow(row).height = 40;
   row += 1;
 
   // ═══ DATOS DEL ENVÍO (4 campos en 2 filas) ═══
@@ -414,8 +435,8 @@ function addReportSheet(
     const [c1, c2] = spans[i]!;
     writeFieldBlock(ws, row, row + 1, c1, c2, label, value, { hero });
   });
-  ws.getRow(row).height = 16;
-  ws.getRow(row + 1).height = 28;
+  ws.getRow(row).height = 18;
+  ws.getRow(row + 1).height = 32;
   row += 2;
 
   // ═══ KPIs (bultos, volumen, peso) ═══
@@ -462,7 +483,7 @@ function addReportSheet(
       bottom: { style: "medium", color: { argb: BRAND_LIGHT } },
     };
   }
-  ws.getRow(row).height = 44;
+  ws.getRow(row).height = 48;
   row += 2;
 
   // ═══ TABLA DE DIMENSIONES ═══
@@ -487,7 +508,7 @@ function addReportSheet(
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     cell.border = thinBorder(BRAND);
   });
-  ws.getRow(row).height = 22;
+  ws.getRow(row).height = 24;
   row += 1;
 
   measureRows.forEach((measureRow, idx) => {
@@ -519,7 +540,7 @@ function addReportSheet(
       };
       cell.border = thinBorder();
     });
-    ws.getRow(row).height = 21;
+    ws.getRow(row).height = 22;
     row += 1;
   });
 
@@ -570,8 +591,10 @@ function addReportSheet(
     top: { style: "thin", color: { argb: BORDER } },
   };
 
-  paintCanvas(ws, row, colCount);
-  ws.views = [{ showGridLines: false, zoomScale: 110 }];
+  const lastRow = row;
+  paintCanvas(ws, lastRow, colCount);
+  applySheetPrintSetup(ws, lastRow, colCount, measureRows.length, isDetailed);
+  ws.views = [{ showGridLines: false, zoomScale: 100 }];
 }
 
 export async function downloadReportExcel(params: {

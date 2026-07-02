@@ -33,7 +33,7 @@ export const supabase = createBrowserClient(
 export async function fetchTasks(): Promise<Task[]> {
   const { data, error } = await supabase
     .from("tasks")
-    .select("*")
+    .select("id, payload, updated_at")
     .order("updated_at", { ascending: false });
 
   if (error) throw error;
@@ -88,7 +88,7 @@ export async function deleteTaskById(id: string): Promise<void> {
   if (error) throw error;
 }
 
-const REALTIME_DEBOUNCE_MS = 50;
+const REALTIME_DEBOUNCE_MS = 250;
 
 type TasksRealtimeHandlers = {
   /** Parche inmediato con el payload del evento (sin esperar refetch). */
@@ -129,10 +129,13 @@ export function subscribeTasksRealtime(
         const change = parseTaskRealtimeChange(payload);
         if (change) {
           onChange?.(change);
-          if (!change.task && change.eventType !== "DELETE") {
-            scheduleReload();
+          const canPatchLocally =
+            change.eventType === "DELETE" || change.task != null;
+          if (onChange && canPatchLocally) {
             return;
           }
+          scheduleReload();
+          return;
         }
         scheduleReload();
       },
@@ -142,9 +145,6 @@ export function subscribeTasksRealtime(
         console.warn(
           "[Supabase Realtime] Error en el canal de `tasks`. ¿Está la tabla en la publicación y RLS permite leer?",
         );
-        scheduleReload();
-      }
-      if (status === "SUBSCRIBED") {
         scheduleReload();
       }
     });

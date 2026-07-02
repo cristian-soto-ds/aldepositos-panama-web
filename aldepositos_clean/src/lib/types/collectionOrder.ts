@@ -1,6 +1,8 @@
 /**
  * Orden de recolección: captura previa al RA en almacén (líneas tipo detallado).
  */
+import type { ReceptionStatusId } from "@/lib/receptionLogistics/config";
+
 export type CollectionOrderLine = {
   id: string;
   referencia?: string;
@@ -35,9 +37,22 @@ export type CollectionOrder = {
   /** Cliente / consignatario */
   cliente: string;
   proveedor: string;
+  /** Nombre del expedidor (documento Magaya / HTM). */
+  expedidor?: string;
+  /** Fecha de entrega indicada en el documento origen. */
+  fechaEntrega?: string;
   notes?: string;
+  /**
+   * Totales del documento (HTM / Magaya) — editables en el encabezado de la orden.
+   * Se comparan contra la suma de las líneas con referencia.
+   */
+  expectedBultos?: number;
+  expectedPesoKg?: number;
+  expectedCbm?: number;
   lines: CollectionOrderLine[];
   status: CollectionOrderStatus;
+  /** Estado en recepción (fila / rampa / completado) — vista recepcionista. */
+  receptionStatus?: ReceptionStatusId;
   /** RA(s) a los que ya se enviaron medidas */
   linkedRaNumbers?: string[];
   createdAt: string;

@@ -79,7 +79,13 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  if (!user && (path.startsWith("/panel") || path.startsWith("/welcome"))) {
+  if (
+    !user &&
+    (path.startsWith("/panel") ||
+      path.startsWith("/welcome") ||
+      (path.startsWith("/direccion-camiones") &&
+        !path.startsWith("/direccion-camiones/tv")))
+  ) {
     try {
       const redirect = NextResponse.redirect(new URL("/login", request.url));
       applySetCookiesFrom(supabaseResponse, redirect);

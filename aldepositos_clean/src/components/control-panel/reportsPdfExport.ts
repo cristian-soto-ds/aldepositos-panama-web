@@ -8,6 +8,7 @@
 
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
 
 const MAX_CANVAS_EDGE = 4096;
 
@@ -20,19 +21,10 @@ function removeExternalStylesFromClone(doc: Document): void {
   doc.querySelectorAll("style").forEach((n) => n.remove());
 }
 
-export function buildReportPdfFilename(tasks: { ra: string }[]): string {
-  const sanitize = (s: string) =>
-    String(s)
-      .trim()
-      .replace(/[^\w.\-]/g, "_")
-      .slice(0, 64);
-
-  if (tasks.length === 0) return "reporte_ingreso.pdf";
-  if (tasks.length === 1) {
-    return `reporte_ingreso_RA-${sanitize(tasks[0].ra)}.pdf`;
-  }
-  const first = sanitize(tasks[0].ra);
-  return `reporte_ingreso_RA-${first}_y_${tasks.length - 1}_ordenes_mas.pdf`;
+export function buildReportPdfFilename(
+  tasks: Parameters<typeof buildReportDownloadFilename>[0],
+): string {
+  return `${buildReportDownloadFilename(tasks)}.pdf`;
 }
 
 export async function waitForReportDomReady(): Promise<void> {

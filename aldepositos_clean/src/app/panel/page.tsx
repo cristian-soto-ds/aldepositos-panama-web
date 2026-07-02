@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   supabase,
@@ -13,15 +14,6 @@ import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
 import type { Task } from "@/lib/types/task";
 import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
-import { QuickInventoryEntry } from "@/components/control-panel/QuickInventoryEntry";
-import { DetailedInventoryEntry } from "@/components/control-panel/DetailedInventoryEntry";
-import { CompletedReportsModule } from "@/components/control-panel/CompletedReportsModule";
-import { LiveMonitor } from "@/components/control-panel/LiveMonitor";
-import { DispatchEntry } from "@/components/control-panel/DispatchEntry";
-import { ContainerReportsModule } from "@/components/control-panel/ContainerReportsModule";
-import { ReferenceCatalogModule } from "@/components/control-panel/ReferenceCatalogModule";
-import { CollectionOrderModule } from "@/components/control-panel/CollectionOrderModule";
-import { UserOptionsPanel } from "@/components/control-panel/UserOptionsPanel";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
@@ -41,12 +33,86 @@ import { fetchPerfilUsuario } from "@/lib/perfiles";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { fetchWithTimeout } from "@/lib/clientFetch";
 
+function PanelModuleLoader() {
+  return (
+    <div className="flex min-h-[12rem] flex-1 items-center justify-center p-8">
+      <p className="text-sm font-semibold text-slate-500">Cargando módulo…</p>
+    </div>
+  );
+}
+
+const QuickInventoryEntry = dynamic(
+  () =>
+    import("@/components/control-panel/QuickInventoryEntry").then(
+      (m) => m.QuickInventoryEntry,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const DetailedInventoryEntry = dynamic(
+  () =>
+    import("@/components/control-panel/DetailedInventoryEntry").then(
+      (m) => m.DetailedInventoryEntry,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const CompletedReportsModule = dynamic(
+  () =>
+    import("@/components/control-panel/CompletedReportsModule").then(
+      (m) => m.CompletedReportsModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const LiveMonitor = dynamic(
+  () => import("@/components/control-panel/LiveMonitor").then((m) => m.LiveMonitor),
+  { loading: () => <PanelModuleLoader /> },
+);
+const DispatchEntry = dynamic(
+  () => import("@/components/control-panel/DispatchEntry").then((m) => m.DispatchEntry),
+  { loading: () => <PanelModuleLoader /> },
+);
+const ContainerReportsModule = dynamic(
+  () =>
+    import("@/components/control-panel/ContainerReportsModule").then(
+      (m) => m.ContainerReportsModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const ReferenceCatalogModule = dynamic(
+  () =>
+    import("@/components/control-panel/ReferenceCatalogModule").then(
+      (m) => m.ReferenceCatalogModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const CollectionOrderModule = dynamic(
+  () =>
+    import("@/components/control-panel/CollectionOrderModule").then(
+      (m) => m.CollectionOrderModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const TruckDirectionModule = dynamic(
+  () =>
+    import("@/components/truck-direction/TruckDirectionModule").then(
+      (m) => m.TruckDirectionModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const UserOptionsPanel = dynamic(
+  () =>
+    import("@/components/control-panel/UserOptionsPanel").then(
+      (m) => m.UserOptionsPanel,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "quick-entry",
   "detailed-entry",
   "airway",
   "collection-orders",
+  "truck-direction",
 ]);
 
 export default function PanelPage() {
@@ -227,9 +293,27 @@ export default function PanelPage() {
       });
     };
     pulse();
-    const interval = window.setInterval(pulse, 12000);
+    let intervalId: number | undefined;
+    const start = () => {
+      pulse();
+      if (intervalId != null) window.clearInterval(intervalId);
+      intervalId = window.setInterval(pulse, 20_000);
+    };
+    const stop = () => {
+      if (intervalId != null) {
+        window.clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
-      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
       void clearWorkPresence(tabId);
     };
   }, [
@@ -340,31 +424,45 @@ export default function PanelPage() {
     await handleUpdateTask(updated);
   };
 
-  const openManualModal = (
-    defaultModule: "quick" | "detailed" | "airway" = "quick",
-  ) => {
-    setModalState({
-      isOpen: true,
-      editingTask: null,
-      defaultModule,
-    });
-  };
+  const openManualModal = useCallback(
+    (defaultModule: "quick" | "detailed" | "airway" = "quick") => {
+      setModalState({
+        isOpen: true,
+        editingTask: null,
+        defaultModule,
+      });
+    },
+    [],
+  );
 
-  const openEditModal = (task: Task) => {
+  const openQuickManualModal = useCallback(
+    () => openManualModal("quick"),
+    [openManualModal],
+  );
+  const openDetailedManualModal = useCallback(
+    () => openManualModal("detailed"),
+    [openManualModal],
+  );
+  const openAirwayManualModal = useCallback(
+    () => openManualModal("airway"),
+    [openManualModal],
+  );
+
+  const openEditModal = useCallback((task: Task) => {
     setModalState({
       isOpen: true,
       editingTask: task,
       defaultModule: (task.type as "quick" | "detailed" | "airway") || "quick",
     });
-  };
+  }, []);
 
-  const closeManualModal = () => {
+  const closeManualModal = useCallback(() => {
     setModalState({
       isOpen: false,
       editingTask: null,
       defaultModule: "quick",
     });
-  };
+  }, []);
 
   const handleSaveManualTask = async (taskData: Task) => {
     const today = new Date().toISOString().split("T")[0]!;
@@ -494,7 +592,7 @@ export default function PanelPage() {
           <ControlPanelHome
             tasks={tasks}
             onImport={handleImport}
-            openManualModal={() => openManualModal("quick")}
+            openManualModal={openQuickManualModal}
             userDisplayName={userDisplayName}
             profileFullName={profileFullName}
             userEmail={userEmail}
@@ -509,7 +607,7 @@ export default function PanelPage() {
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
             onTransferTask={handleTransferTask}
-            openManualModal={() => openManualModal("quick")}
+            openManualModal={openQuickManualModal}
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
@@ -523,7 +621,7 @@ export default function PanelPage() {
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
             onTransferTask={handleTransferTask}
-            openManualModal={() => openManualModal("detailed")}
+            openManualModal={openDetailedManualModal}
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
@@ -538,7 +636,7 @@ export default function PanelPage() {
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
             onTransferTask={handleTransferTask}
-            openManualModal={() => openManualModal("airway")}
+            openManualModal={openAirwayManualModal}
             openEditModal={openEditModal}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
@@ -555,15 +653,12 @@ export default function PanelPage() {
           />
         )}
 
+        {visibleView === "truck-direction" && <TruckDirectionModule />}
+
         {visibleView === "reference-catalog" && <ReferenceCatalogModule />}
 
         {visibleView === "reports" && (
-          <CompletedReportsModule
-            tasks={tasks}
-            onDeleteTask={handleDeleteTask}
-            onUpdateTask={handleUpdateTask}
-            onAddTasks={handleImport}
-          />
+          <CompletedReportsModule tasks={tasks} />
         )}
 
         {visibleView === "dispatch" && (

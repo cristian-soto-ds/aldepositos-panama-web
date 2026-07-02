@@ -18,6 +18,7 @@ import {
   BookMarked,
   HandHelping,
   MoreHorizontal,
+  Route,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -168,6 +169,15 @@ export function ControlPanelLayout({
             active={currentView === "collection-orders"}
             onClick={() => {
               setCurrentView("collection-orders");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<NavIcon Icon={Route} />}
+            text="Dirección de Camiones"
+            active={currentView === "truck-direction"}
+            onClick={() => {
+              setCurrentView("truck-direction");
               setSidebarOpen(false);
             }}
           />

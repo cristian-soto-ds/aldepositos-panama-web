@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ClipboardList,
   Download,
+  FileCode,
   FileSpreadsheet,
   HandHelping,
   Loader2,
@@ -11,6 +13,9 @@ import {
   Save,
   Send,
   Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  ChevronRight,
 } from "lucide-react";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
@@ -19,8 +24,12 @@ import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectio
 import {
   deleteCollectionOrderById,
   insertCollectionOrder,
+  parseCollectionOrderNumber,
+  sortCollectionOrdersByNumero,
   updateCollectionOrder,
+  upsertCollectionOrderInList,
 } from "@/lib/collectionOrders";
+import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
 import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders";
 import { useEditingFocusRef } from "@/hooks/useInventoryRealtimeSync";
 import {
@@ -56,6 +65,10 @@ import {
 } from "@/components/control-panel/CollectionOrderGeminiPanel";
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
+import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
+import { filterNewHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
+import { CollectionOrderReceptionistView } from "@/components/control-panel/CollectionOrderReceptionistView";
+import type { ReceptionStatusId } from "@/lib/receptionLogistics/config";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   applyPesoTotalToLine,
@@ -63,8 +76,14 @@ import {
   collectionLinesToRaMeasureData,
   lineHasData,
   pesoTotalFromLine,
+  sanitizeMeasureDataForTarget,
   unidadesTotalesFromLine,
 } from "@/lib/collectionLineUtils";
+import {
+  normalizeCollectionOrderFields,
+  reconcileCollectionOrder,
+  totalsFromCapturedLines,
+} from "@/lib/collectionOrderReconcile";
 import { supabase } from "@/lib/supabase";
 import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
 import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
@@ -141,6 +160,14 @@ function listBultosTotal(lines: CollectionOrderLine[]): number {
     if (Number.isFinite(n) && n > 0) sum += Math.round(n);
   }
   return sum;
+}
+
+/** Bultos mostrados en lista: total del documento si existe, si no suma de líneas. */
+function orderDisplayBultos(order: CollectionOrder): number {
+  if (order.expectedBultos != null && order.expectedBultos > 0) {
+    return Math.round(order.expectedBultos);
+  }
+  return listBultosTotal(order.lines);
 }
 
 /** Barra indeterminada + texto mientras la IA analiza el documento */
@@ -284,12 +311,7 @@ function newDraftOrder(): CollectionOrder {
 }
 
 function parseOrderNumber(n: string | undefined): number {
-  const raw = String(n ?? "").trim();
-  if (!raw) return 0;
-  const onlyDigits = raw.replace(/\D+/g, "");
-  if (!onlyDigits) return 0;
-  const val = parseInt(onlyDigits, 10);
-  return Number.isFinite(val) ? val : 0;
+  return parseCollectionOrderNumber(n);
 }
 
 function normalizeRaKey(ra: string | undefined): string {
@@ -338,6 +360,10 @@ export function CollectionOrderModule({
     useSupabaseCollectionOrders({ enabled: !!userEmail, userKey: userEmail });
 
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
+  const [receptionistView, setReceptionistView] = useState(false);
+  const [receptionBusyId, setReceptionBusyId] = useState<string | null>(null);
+  const [htmImportOpen, setHtmImportOpen] = useState(false);
+  const [htmImportBusy, setHtmImportBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
@@ -501,6 +527,7 @@ export function CollectionOrderModule({
   }, [weightMode]);
 
   const openNew = () => {
+    setReceptionistView(false);
     setEditing(newDraftOrder());
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -511,8 +538,11 @@ export function CollectionOrderModule({
   };
 
   const openEdit = (o: CollectionOrder) => {
+    setReceptionistView(false);
     setEditing(
-      JSON.parse(JSON.stringify(o)) as CollectionOrder,
+      normalizeCollectionOrderFields(
+        JSON.parse(JSON.stringify(o)) as CollectionOrder,
+      ),
     );
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -523,6 +553,7 @@ export function CollectionOrderModule({
   };
 
   const backToList = () => {
+    setReceptionistView(false);
     setEditing(null);
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -659,10 +690,7 @@ export function CollectionOrderModule({
       try {
         if (exists) await updateCollectionOrder(payload);
         else await insertCollectionOrder(payload);
-        setOrders((prev) => {
-          const rest = prev.filter((o) => o.id !== payload.id);
-          return [payload, ...rest];
-        });
+        setOrders((prev) => upsertCollectionOrderInList(prev, payload));
         setEditing((prev) => (prev && prev.id === payload.id ? payload : prev));
         lastSavedOrderHashRef.current = JSON.stringify(payload);
         lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
@@ -737,6 +765,10 @@ export function CollectionOrderModule({
       return;
     try {
       await deleteCollectionOrderById(o.id);
+      await syncCollectionOrderToReceptionQueue({
+        ...o,
+        receptionStatus: undefined,
+      });
       setOrders((prev) => prev.filter((x) => x.id !== o.id));
       if (editing?.id === o.id) setEditing(null);
     } catch (e) {
@@ -767,6 +799,10 @@ export function CollectionOrderModule({
     for (const o of selected) {
       try {
         await deleteCollectionOrderById(o.id);
+        await syncCollectionOrderToReceptionQueue({
+          ...o,
+          receptionStatus: undefined,
+        });
         deletedIds.push(o.id);
       } catch (e) {
         console.error(e);
@@ -811,6 +847,53 @@ export function CollectionOrderModule({
       filenameBase: `magaya-recoleccion-varias-${stamp}`,
     });
   }, [orders, selectedOrderIds]);
+
+  const confirmHtmImport = async (imported: CollectionOrder[]) => {
+    const { toCreate, skippedNumeros } = filterNewHtmCollectionOrders(
+      imported,
+      orders,
+    );
+    if (toCreate.length === 0) {
+      alert(
+        skippedNumeros.length > 0
+          ? "Todas las órdenes del archivo ya existen. No se agregó ninguna."
+          : "No hay órdenes para importar.",
+      );
+      setHtmImportOpen(false);
+      return;
+    }
+    setHtmImportBusy(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const order of toCreate) {
+        try {
+          await insertCollectionOrder(order);
+          ok += 1;
+        } catch (e) {
+          console.error(e);
+          fail += 1;
+        }
+      }
+      await reloadOrders();
+      setHtmImportOpen(false);
+      const skipped = skippedNumeros.length;
+      if (fail > 0) {
+        alert(
+          `${ok} orden(es) creadas. ${fail} no se pudieron guardar.` +
+            (skipped > 0 ? ` ${skipped} omitida(s) por número OR duplicado.` : ""),
+        );
+      } else if (skipped > 0) {
+        alert(
+          `${ok} orden(es) creadas desde HTM. ${skipped} omitida(s) porque el número OR ya existía.`,
+        );
+      } else {
+        alert(`${ok} orden(es) de recolección creadas desde HTM.`);
+      }
+    } finally {
+      setHtmImportBusy(false);
+    }
+  };
 
   const downloadSelectedListInventarioExcel = useCallback(async () => {
     const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
@@ -935,23 +1018,19 @@ export function CollectionOrderModule({
     );
   }, [editing, unitsMode, weightMode, pendingUndTot, pendingPesoTot]);
 
-  /** Mismas reglas que la tabla: bultos, peso (kg) y CBM total por línea. */
-  const editorAggregatedTotals = useMemo(() => {
-    let totalBultos = 0;
-    let totalPesoKg = 0;
-    let totalCbm = 0;
-    for (const row of mergedEditorLinesPreview) {
-      const bultos = parseFloat(String(row.bultos ?? 0).replace(",", ".")) || 0;
-      totalBultos += Math.max(0, Math.round(bultos));
-      totalPesoKg += pesoTotalFromLine(row);
-      const l = parseFloat(String(row.l ?? 0).replace(",", ".")) || 0;
-      const w = parseFloat(String(row.w ?? 0).replace(",", ".")) || 0;
-      const h = parseFloat(String(row.h ?? 0).replace(",", ".")) || 0;
-      const cbmBulto = (l * w * h) / 1_000_000;
-      totalCbm += cbmBulto * bultos;
-    }
-    return { totalBultos, totalPesoKg, totalCbm };
-  }, [mergedEditorLinesPreview]);
+  const capturedLineTotals = useMemo(
+    () => totalsFromCapturedLines(mergedEditorLinesPreview),
+    [mergedEditorLinesPreview],
+  );
+
+  const orderReconcile = useMemo(() => {
+    if (!editing) return null;
+    return reconcileCollectionOrder(editing, capturedLineTotals);
+  }, [editing, capturedLineTotals]);
+
+  const bultosReconcile = orderReconcile?.checks.find((c) => c.label === "Bultos");
+  const pesoReconcile = orderReconcile?.checks.find((c) => c.label === "Peso (kg)");
+  const cbmReconcile = orderReconcile?.checks.find((c) => c.label === "Cubicaje (m³)");
 
   const transferLinesCount = useMemo(
     () => mergedEditorLinesPreview.filter(lineHasData).length,
@@ -1009,10 +1088,10 @@ export function CollectionOrderModule({
       };
       if (!existsInDb) {
         await insertCollectionOrder(baseOrder);
-        setOrders((prev) => [baseOrder, ...prev.filter((o) => o.id !== baseOrder.id)]);
+        setOrders((prev) => upsertCollectionOrderInList(prev, baseOrder));
       } else {
         await updateCollectionOrder(baseOrder);
-        setOrders((prev) => [baseOrder, ...prev.filter((o) => o.id !== baseOrder.id)]);
+        setOrders((prev) => upsertCollectionOrderInList(prev, baseOrder));
       }
       setEditing(baseOrder);
 
@@ -1024,7 +1103,10 @@ export function CollectionOrderModule({
       const prevData = (task.measureData || []) as Record<string, unknown>[];
       const nextMeasure: unknown[] =
         merge === "replace" ? adapted : [...prevData, ...adapted];
-      const sanitizedMeasure = JSON.parse(JSON.stringify(nextMeasure)) as unknown[];
+      const sanitizedMeasure = sanitizeMeasureDataForTarget(
+        nextMeasure as Record<string, unknown>[],
+        targetType,
+      );
       const updatedTask: Task = {
         ...task,
         measureData: sanitizedMeasure,
@@ -1052,10 +1134,7 @@ export function CollectionOrderModule({
         console.warn("RA actualizado; aviso: no se guardó el vínculo en la orden:", e);
       }
       setEditing(nextOrder);
-      setOrders((prev) => {
-        const rest = prev.filter((o) => o.id !== nextOrder.id);
-        return [nextOrder, ...rest];
-      });
+      setOrders((prev) => upsertCollectionOrderInList(prev, nextOrder));
       setTransferOpen(false);
        
       alert(`Medidas enviadas al RA-${ra}.`);
@@ -1070,9 +1149,98 @@ export function CollectionOrderModule({
     }
   };
 
+  const handleSetReceptionStatus = useCallback(
+    async (orderId: string, status: ReceptionStatusId) => {
+      const order = orders.find((o) => o.id === orderId);
+      if (!order || order.receptionStatus === status) return;
+      setReceptionBusyId(orderId);
+      try {
+        const payload: CollectionOrder = {
+          ...order,
+          receptionStatus: status,
+          updatedAt: new Date().toISOString(),
+        };
+        await updateCollectionOrder(payload);
+        setOrders((prev) =>
+          sortCollectionOrdersByNumero(
+            prev.map((o) => (o.id === orderId ? payload : o)),
+          ),
+        );
+        await syncCollectionOrderToReceptionQueue(payload);
+      } catch (e) {
+        console.error(e);
+        alert("No se pudo actualizar el estado de recepción.");
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders],
+  );
+
+  const handleClearReceptionStatus = useCallback(
+    async (orderId: string) => {
+      const order = orders.find((o) => o.id === orderId);
+      if (!order?.receptionStatus) return;
+      setReceptionBusyId(orderId);
+      try {
+        const { receptionStatus: _removed, ...rest } = order;
+        const payload: CollectionOrder = {
+          ...rest,
+          updatedAt: new Date().toISOString(),
+        };
+        await updateCollectionOrder(payload);
+        setOrders((prev) =>
+          sortCollectionOrdersByNumero(
+            prev.map((o) => (o.id === orderId ? payload : o)),
+          ),
+        );
+        await syncCollectionOrderToReceptionQueue(payload);
+      } catch (e) {
+        console.error(e);
+        alert("No se pudo quitar la orden de recepción.");
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders],
+  );
+
   /* ——— Lista ——— */
   if (!editing) {
+    if (receptionistView) {
+      return (
+        <CollectionOrderReceptionistView
+          orders={orders}
+          loading={ordersLoading}
+          busyOrderId={receptionBusyId}
+          onBack={() => setReceptionistView(false)}
+          onSetReceptionStatus={(orderId, status) =>
+            void handleSetReceptionStatus(orderId, status)
+          }
+          onClearReceptionStatus={(orderId) =>
+            void handleClearReceptionStatus(orderId)
+          }
+        />
+      );
+    }
+
     const listSelectedCount = orders.filter((o) => selectedOrderIds[o.id] === true).length;
+    const listDominantCliente = (() => {
+      const freq = new Map<string, number>();
+      for (const o of orders) {
+        const c = String(o.cliente ?? "").trim();
+        if (c) freq.set(c, (freq.get(c) ?? 0) + 1);
+      }
+      let best = "";
+      let bestN = 0;
+      for (const [c, n] of freq) {
+        if (n > bestN) {
+          best = c;
+          bestN = n;
+        }
+      }
+      return best;
+    })();
     const toggleListSelectAll = () => {
       if (orders.length === 0) return;
       if (listSelectedCount === orders.length) {
@@ -1101,13 +1269,31 @@ export function CollectionOrderModule({
                 detallado.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={openNew}
-              className="flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-xs font-black uppercase tracking-widest text-[#1b2d58] shadow-xl transition hover:scale-[1.01] hover:bg-indigo-50"
-            >
-              <Plus className="h-5 w-5" /> Nueva orden
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+              <button
+                type="button"
+                onClick={() => setHtmImportOpen(true)}
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-emerald-300/60 bg-emerald-500/20 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg backdrop-blur-sm transition hover:bg-emerald-500/30"
+              >
+                <FileCode className="h-5 w-5" aria-hidden />
+                Importar HTM
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceptionistView(true)}
+                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-white/35 bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg backdrop-blur-sm transition hover:bg-white/20"
+              >
+                <ClipboardList className="h-5 w-5" aria-hidden />
+                Recepcionista
+              </button>
+              <button
+                type="button"
+                onClick={openNew}
+                className="flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-xs font-black uppercase tracking-widest text-[#1b2d58] shadow-xl transition hover:scale-[1.01] hover:bg-indigo-50"
+              >
+                <Plus className="h-5 w-5" /> Nueva orden
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1171,9 +1357,11 @@ export function CollectionOrderModule({
               const job = geminiJobByOrderId[o.id];
               const analyzing = job?.busy === true;
               const refCount = listReferenciasCount(o.lines);
-              const bultosTot = listBultosTotal(o.lines);
+              const bultosTot = orderDisplayBultos(o);
               const refWord = refCount === 1 ? "referencia" : "referencias";
               const orderLabel = String(o.numero ?? "").trim() || o.id.slice(0, 8);
+              const clienteLabel =
+                String(o.cliente ?? "").trim() || listDominantCliente;
               return (
                 <div
                   key={o.id}
@@ -1187,7 +1375,7 @@ export function CollectionOrderModule({
                     }
                   }}
                   aria-label={`Abrir orden #${orderLabel}`}
-                  className="group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 pl-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:hover:border-indigo-500/50 sm:flex-row sm:items-center sm:justify-between"
+                  className="group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3.5 pl-3 text-left shadow-sm ring-1 ring-slate-900/[0.03] transition duration-200 hover:-translate-y-0.5 hover:border-indigo-200/80 hover:shadow-md hover:ring-indigo-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600/80 dark:bg-slate-900 dark:ring-white/[0.04] dark:hover:border-indigo-500/40 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                 >
                   <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
                   <label
@@ -1216,6 +1404,16 @@ export function CollectionOrderModule({
                       </p>
                       {analyzing && <CollectionOrderAiAnalyzingInline />}
                     </div>
+                    {o.proveedor?.trim() && (
+                      <p className="mt-1 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          Proveedor{" "}
+                        </span>
+                        <span className="text-slate-600 dark:text-slate-300">
+                          {o.proveedor}
+                        </span>
+                      </p>
+                    )}
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <span
                         className="inline-flex items-baseline gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-800/90"
@@ -1239,15 +1437,11 @@ export function CollectionOrderModule({
                           {bultosTot}
                         </span>
                       </span>
-                      <span
-                        className={
-                          o.status === "sent"
-                            ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300"
-                            : "rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300"
-                        }
-                      >
-                        {o.status === "sent" ? "Enviada al almacén" : "Borrador"}
-                      </span>
+                      {o.status === "sent" && (
+                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                          Enviada al almacén
+                        </span>
+                      )}
                       {o.linkedRaNumbers && o.linkedRaNumbers.length > 0 && (
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           RA: {o.linkedRaNumbers.join(", ")}
@@ -1255,9 +1449,18 @@ export function CollectionOrderModule({
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <span className="rounded-xl border-2 border-slate-200 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:border-indigo-200 group-hover:bg-indigo-50/50 group-hover:text-indigo-700 dark:border-slate-600 dark:text-slate-400 dark:group-hover:border-indigo-500/40 dark:group-hover:bg-indigo-950/30 dark:group-hover:text-indigo-200">
+                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+                    {clienteLabel ? (
+                      <span
+                        className="max-w-[min(100%,220px)] truncate text-xs font-semibold text-[#16263F] dark:text-slate-100"
+                        title={`Cliente: ${clienteLabel}`}
+                      >
+                        {clienteLabel}
+                      </span>
+                    ) : null}
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-[#16263F] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500">
                       Abrir
+                      <ChevronRight className="h-3 w-3 opacity-80" aria-hidden />
                     </span>
                     <button
                       type="button"
@@ -1265,7 +1468,7 @@ export function CollectionOrderModule({
                         ev.stopPropagation();
                         void deleteOrder(o);
                       }}
-                      className="relative z-[1] rounded-xl border-2 border-red-100 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:text-red-400"
+                      className="relative z-[1] rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                     >
                       Eliminar
                     </button>
@@ -1276,6 +1479,14 @@ export function CollectionOrderModule({
             </div>
           </>
         )}
+
+        <ImportCollectionOrdersHtmModal
+          open={htmImportOpen}
+          existingOrders={orders}
+          busy={htmImportBusy}
+          onCancel={() => setHtmImportOpen(false)}
+          onConfirm={(imported) => void confirmHtmImport(imported)}
+        />
       </div>
     );
   }
@@ -1571,50 +1782,216 @@ export function CollectionOrderModule({
           Paso 1 · Número de orden · Paso 2 · Líneas · Paso 3 · Pasar al RA
         </p>
 
-        <div className="mb-3 grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-white to-indigo-50/60 px-3 py-2 shadow-sm dark:border-indigo-900/50 dark:from-slate-900 dark:to-indigo-950/20">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Cantidad de bultos
-            </p>
-            <p className="mt-1 text-lg font-black tabular-nums text-[#16263F] dark:text-slate-100">
-              {editorAggregatedTotals.totalBultos.toLocaleString("es")}
-            </p>
-          </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
-              Peso total (kg)
-            </p>
-            <p className="mt-1 text-lg font-black tabular-nums text-emerald-800 dark:text-emerald-200">
-              {editorAggregatedTotals.totalPesoKg.toLocaleString("es", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-          </div>
-          <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-3 py-2 shadow-sm dark:border-sky-900/40 dark:bg-sky-950/25">
-            <p className="text-[10px] font-black uppercase tracking-widest text-sky-800 dark:text-sky-200">
-              Cubicaje total (m³)
-            </p>
-            <p className="mt-1 text-lg font-black tabular-nums text-sky-900 dark:text-sky-100">
-              {editorAggregatedTotals.totalCbm.toLocaleString("es", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-          </div>
-        </div>
+        <section className="mb-4 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-col lg:flex-row lg:items-stretch">
+            {/* Totales documento — horizontal */}
+            <div className="flex shrink-0 flex-row border-b border-slate-100 lg:border-b-0 lg:border-r dark:border-slate-800">
+              <div
+                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-4 py-3 last:border-r-0 dark:border-slate-800 lg:min-w-[7.25rem] lg:flex-none ${
+                  bultosReconcile?.ok
+                    ? "bg-emerald-50/50 dark:bg-emerald-950/20"
+                    : bultosReconcile
+                      ? "bg-amber-50/40 dark:bg-amber-950/15"
+                      : ""
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Bultos
+                  </span>
+                  {bultosReconcile ? (
+                    bultosReconcile.ok ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                    )
+                  ) : null}
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={e.expectedBultos ?? ""}
+                    onChange={(ev) => {
+                      const raw = sanitizeIntegerInput(ev.target.value);
+                      updateEditing({
+                        expectedBultos: raw ? Math.max(0, parseInt(raw, 10)) : undefined,
+                      });
+                    }}
+                    className="no-spinners w-12 bg-transparent text-lg font-black tabular-nums text-[#16263F] outline-none dark:text-slate-100"
+                    placeholder="0"
+                    aria-label="Bultos documento"
+                  />
+                  {orderReconcile?.bultosProgress ? (
+                    <span className="text-[10px] font-semibold tabular-nums text-slate-500">
+                      {orderReconcile.bultosProgress.actual}/
+                      {orderReconcile.bultosProgress.expected}
+                    </span>
+                  ) : null}
+                </div>
+                {orderReconcile?.bultosProgress ? (
+                  <div className="h-0.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-slate-700">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        bultosReconcile?.ok ? "bg-emerald-500" : "bg-amber-500"
+                      }`}
+                      style={{ width: `${orderReconcile.bultosProgress.pct}%` }}
+                    />
+                  </div>
+                ) : null}
+              </div>
 
-        <div className="mb-3 shrink-0 rounded-2xl border-2 border-indigo-200 bg-white p-4 shadow-md dark:border-indigo-900/45 dark:bg-slate-900 max-w-md">
-          <label className="mb-1 block text-[10px] font-black uppercase text-slate-500">
-            Número de orden
-          </label>
-          <input
-            value={e.numero ?? ""}
-            onChange={(ev) => updateEditing({ numero: ev.target.value })}
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-black text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
-            placeholder={`Ej. ${suggestedNumber}`}
-          />
-        </div>
+              <div
+                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-4 py-3 dark:border-slate-800 lg:min-w-[7.25rem] lg:flex-none ${
+                  pesoReconcile?.ok
+                    ? "bg-emerald-50/50 dark:bg-emerald-950/20"
+                    : pesoReconcile
+                      ? "bg-amber-50/40 dark:bg-amber-950/15"
+                      : ""
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Peso kg
+                  </span>
+                  {pesoReconcile ? (
+                    pesoReconcile.ok ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                    )
+                  ) : null}
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={
+                    e.expectedPesoKg != null && e.expectedPesoKg > 0
+                      ? String(e.expectedPesoKg)
+                      : ""
+                  }
+                  onChange={(ev) => {
+                    const raw = sanitizeDecimalInput(ev.target.value, 2);
+                    const n = parseFloat(raw.replace(",", "."));
+                    updateEditing({
+                      expectedPesoKg:
+                        raw && Number.isFinite(n) && n > 0 ? n : undefined,
+                    });
+                  }}
+                  className="no-spinners w-full bg-transparent text-lg font-black tabular-nums text-[#16263F] outline-none dark:text-slate-100"
+                  placeholder="0"
+                  aria-label="Peso kg documento"
+                />
+                <p className="text-[9px] tabular-nums text-slate-400">
+                  Tabla:{" "}
+                  {capturedLineTotals.pesoKg.toLocaleString("es", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+
+              <div
+                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 px-4 py-3 lg:min-w-[7.25rem] lg:flex-none ${
+                  cbmReconcile?.ok
+                    ? "bg-emerald-50/50 dark:bg-emerald-950/20"
+                    : cbmReconcile
+                      ? "bg-amber-50/40 dark:bg-amber-950/15"
+                      : ""
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                    CBM m³
+                  </span>
+                  {cbmReconcile ? (
+                    cbmReconcile.ok ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+                    ) : (
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+                    )
+                  ) : null}
+                </div>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={e.expectedCbm != null && e.expectedCbm > 0 ? String(e.expectedCbm) : ""}
+                  onChange={(ev) => {
+                    const raw = sanitizeDecimalInput(ev.target.value, 2);
+                    const n = parseFloat(raw.replace(",", "."));
+                    updateEditing({
+                      expectedCbm: raw && Number.isFinite(n) && n > 0 ? n : undefined,
+                    });
+                  }}
+                  className="no-spinners w-full bg-transparent text-lg font-black tabular-nums text-[#16263F] outline-none dark:text-slate-100"
+                  placeholder="0"
+                  aria-label="Cubicaje documento"
+                />
+                <p className="text-[9px] tabular-nums text-slate-400">
+                  Tabla:{" "}
+                  {capturedLineTotals.cbm.toLocaleString("es", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+            </div>
+
+            {/* Datos de la orden — una fila ancha */}
+            <div className="grid min-w-0 flex-1 grid-cols-2 items-end gap-x-4 gap-y-2 px-4 py-3 xl:grid-cols-4">
+              <div className="min-w-0">
+                <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Nº orden
+                </label>
+                <input
+                  value={e.numero ?? ""}
+                  onChange={(ev) => updateEditing({ numero: ev.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-bold text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder={`Ej. ${suggestedNumber}`}
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Consignatario
+                </label>
+                <input
+                  value={e.cliente ?? ""}
+                  onChange={(ev) => updateEditing({ cliente: ev.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-medium text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Cliente"
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Proveedor
+                </label>
+                <input
+                  value={e.proveedor ?? ""}
+                  onChange={(ev) => updateEditing({ proveedor: ev.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-medium text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Proveedor"
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Expedidor
+                </label>
+                <input
+                  value={e.expedidor ?? ""}
+                  onChange={(ev) => updateEditing({ expedidor: ev.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-medium text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Ej. TORII ENTERPRISES CORP."
+                />
+                {e.fechaEntrega?.trim() ? (
+                  <p className="mt-0.5 truncate text-[9px] text-slate-400">
+                    Entrega: {e.fechaEntrega}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
 
         <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <p className="text-xs text-slate-600 dark:text-slate-400">

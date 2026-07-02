@@ -34,25 +34,32 @@ export function adaptMeasureDataForModule(
   }
 
   if (toType === "quick" || toType === "airway") {
-    // Solo referencia y bultos: medidas y peso los toma el inventariado en almacén.
-    return measureData.map((row) => ({
-      id: row.id ?? generateId(),
-      referencia: row.referencia ?? "",
-      descripcion: "",
-      bultos: row.bultos ?? 0,
-      unidadesPorBulto: "",
-      pesoPorBulto: "",
-      l: "",
-      w: "",
-      h: "",
-      weight: "",
-      volumenM3: "",
-      unidad: "",
-      reempaque: false,
-      bultoContenedor: "",
-      referenciasContenedor: "",
-      referenciaContenedora: "",
-    }));
+    return measureData.map((row) => {
+      const out: AnyMeasureRow = {
+        id: row.id ?? generateId(),
+        referencia: row.referencia ?? "",
+        bultos: row.bultos ?? 0,
+      };
+      for (const key of [
+        "l",
+        "w",
+        "h",
+        "weight",
+        "volumenM3",
+        "unidad",
+        "reempaque",
+        "bultoContenedor",
+        "referenciasContenedor",
+        "referenciaContenedora",
+        "reempaqueRefs",
+      ] as const) {
+        const v = row[key];
+        if (v === undefined || v === "" || v === false) continue;
+        if (Array.isArray(v) && v.length === 0) continue;
+        out[key] = v;
+      }
+      return out;
+    });
   }
 
   return measureData;

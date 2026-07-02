@@ -14,16 +14,49 @@ function isCollectionOrder(value: unknown): value is CollectionOrder {
   );
 }
 
+/** Número OR para ordenar (solo dígitos; sin número → 0). */
+export function parseCollectionOrderNumber(n: string | undefined): number {
+  const raw = String(n ?? "").trim();
+  if (!raw) return 0;
+  const onlyDigits = raw.replace(/\D+/g, "");
+  if (!onlyDigits) return 0;
+  const val = parseInt(onlyDigits, 10);
+  return Number.isFinite(val) ? val : 0;
+}
+
+/** Lista consecutiva por número de orden (ascendente). */
+export function sortCollectionOrdersByNumero(
+  orders: CollectionOrder[],
+): CollectionOrder[] {
+  return [...orders].sort((a, b) => {
+    const na = parseCollectionOrderNumber(a.numero);
+    const nb = parseCollectionOrderNumber(b.numero);
+    if (na !== nb) return na - nb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+export function upsertCollectionOrderInList(
+  prev: CollectionOrder[],
+  order: CollectionOrder,
+): CollectionOrder[] {
+  return sortCollectionOrdersByNumero([
+    ...prev.filter((o) => o.id !== order.id),
+    order,
+  ]);
+}
+
 export async function fetchCollectionOrders(): Promise<CollectionOrder[]> {
   const { data, error } = await supabase
     .from("collection_orders")
-    .select("*")
-    .order("updated_at", { ascending: false });
+    .select("id, payload, updated_at");
 
   if (error) throw error;
 
   const rows = (data ?? []) as { payload: unknown }[];
-  return rows.map((r) => r.payload).filter(isCollectionOrder);
+  return sortCollectionOrdersByNumero(
+    rows.map((r) => r.payload).filter(isCollectionOrder),
+  );
 }
 
 export async function insertCollectionOrder(order: CollectionOrder): Promise<void> {
@@ -50,7 +83,21 @@ export async function deleteCollectionOrderById(id: string): Promise<void> {
   if (error) throw error;
 }
 
-const COLLECTION_REALTIME_DEBOUNCE_MS = 50;
+/** Una sola orden (evita cargar toda la tabla al sincronizar recepción). */
+export async function fetchCollectionOrderById(
+  id: string,
+): Promise<CollectionOrder | null> {
+  const { data, error } = await supabase
+    .from("collection_orders")
+    .select("id, payload")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return orderFromDbRow(data as DbPayloadRow | null);
+}
+
+const COLLECTION_REALTIME_DEBOUNCE_MS = 250;
 
 export type CollectionOrderRealtimeChange = {
   eventType: "INSERT" | "UPDATE" | "DELETE";
@@ -95,12 +142,14 @@ export function patchCollectionOrdersList(
   if (!change.order) return null;
   const exists = prev.some((o) => o.id === change.id);
   if (change.eventType === "INSERT" && !exists) {
-    return [change.order, ...prev];
+    return sortCollectionOrdersByNumero([...prev, change.order]);
   }
   if (exists) {
-    return prev.map((o) => (o.id === change.id ? change.order! : o));
+    return sortCollectionOrdersByNumero(
+      prev.map((o) => (o.id === change.id ? change.order! : o)),
+    );
   }
-  return [change.order, ...prev];
+  return sortCollectionOrdersByNumero([...prev, change.order]);
 }
 
 type CollectionOrdersRealtimeHandlers = {
@@ -108,56 +157,103 @@ type CollectionOrdersRealtimeHandlers = {
   onReload?: () => void;
 };
 
-export function subscribeCollectionOrdersRealtime(
-  handlers: CollectionOrdersRealtimeHandlers | (() => void),
-): () => void {
-  const { onChange, onReload } =
-    typeof handlers === "function"
-      ? { onChange: undefined, onReload: handlers }
-      : handlers;
+type CollectionOrdersListener = {
+  handlers: CollectionOrdersRealtimeHandlers;
+  scheduleReload: () => void;
+  clearDebounce: () => void;
+};
 
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+const COLLECTION_ORDERS_CHANNEL_ID = "public-collection-orders-changes";
 
-  const scheduleReload = () => {
-    if (!onReload) return;
-    if (debounceTimer !== null) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      debounceTimer = null;
-      onReload();
-    }, COLLECTION_REALTIME_DEBOUNCE_MS);
-  };
+let collectionOrdersListeners = new Set<CollectionOrdersListener>();
+let collectionOrdersChannel: ReturnType<typeof supabase.channel> | null = null;
 
-  const channel = supabase
-    .channel("public-collection-orders-changes")
+function dispatchCollectionOrderPayload(
+  payload: RealtimePostgresChangesPayload<DbPayloadRow>,
+) {
+  const change = parseCollectionOrderChange(payload);
+  for (const listener of collectionOrdersListeners) {
+    const { onChange, onReload } = listener.handlers;
+    if (change) {
+      onChange?.(change);
+      const canPatchLocally =
+        change.eventType === "DELETE" || change.order != null;
+      if (onChange && canPatchLocally) {
+        continue;
+      }
+      listener.scheduleReload();
+      continue;
+    }
+    if (onReload) listener.scheduleReload();
+  }
+}
+
+function ensureCollectionOrdersChannel() {
+  if (collectionOrdersChannel) return;
+
+  collectionOrdersChannel = supabase
+    .channel(COLLECTION_ORDERS_CHANNEL_ID)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "collection_orders" },
-      (payload: RealtimePostgresChangesPayload<DbPayloadRow>) => {
-        const change = parseCollectionOrderChange(payload);
-        if (change) {
-          onChange?.(change);
-          if (!change.order && change.eventType !== "DELETE") {
-            scheduleReload();
-            return;
-          }
-        }
-        scheduleReload();
-      },
+      dispatchCollectionOrderPayload,
     )
     .subscribe((status) => {
       if (status === "CHANNEL_ERROR") {
         console.warn(
           "[Supabase Realtime] Error en el canal de `collection_orders`.",
         );
-        scheduleReload();
-      }
-      if (status === "SUBSCRIBED") {
-        scheduleReload();
+        for (const listener of collectionOrdersListeners) {
+          listener.scheduleReload();
+        }
       }
     });
+}
+
+function teardownCollectionOrdersChannelIfIdle() {
+  if (collectionOrdersListeners.size > 0 || !collectionOrdersChannel) return;
+  void supabase.removeChannel(collectionOrdersChannel);
+  collectionOrdersChannel = null;
+}
+
+export function subscribeCollectionOrdersRealtime(
+  handlers: CollectionOrdersRealtimeHandlers | (() => void),
+): () => void {
+  const normalized: CollectionOrdersRealtimeHandlers =
+    typeof handlers === "function"
+      ? { onReload: handlers }
+      : handlers;
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearDebounce = () => {
+    if (debounceTimer !== null) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+  };
+
+  const scheduleReload = () => {
+    if (!normalized.onReload) return;
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      normalized.onReload?.();
+    }, COLLECTION_REALTIME_DEBOUNCE_MS);
+  };
+
+  const listener: CollectionOrdersListener = {
+    handlers: normalized,
+    scheduleReload,
+    clearDebounce,
+  };
+
+  collectionOrdersListeners.add(listener);
+  ensureCollectionOrdersChannel();
 
   return () => {
-    if (debounceTimer !== null) clearTimeout(debounceTimer);
-    void supabase.removeChannel(channel);
+    clearDebounce();
+    collectionOrdersListeners.delete(listener);
+    teardownCollectionOrdersChannelIfIdle();
   };
 }

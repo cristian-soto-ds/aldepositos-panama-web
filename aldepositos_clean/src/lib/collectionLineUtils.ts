@@ -144,21 +144,56 @@ export function collectionLinesToQuickMeasureData(
     .map((row) => ({
       id: row.id,
       referencia: String(row.referencia ?? "").trim(),
-      descripcion: "",
       bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
-      unidadesPorBulto: "",
-      pesoPorBulto: "",
-      l: "",
-      w: "",
-      h: "",
-      weight: "",
-      volumenM3: "",
-      unidad: "",
-      reempaque: false,
-      bultoContenedor: "",
-      referenciasContenedor: "",
-      referenciaContenedora: "",
     }));
+}
+
+/** Solo campos del módulo detallado (sin `weight` del ingreso rápido). */
+export function stripDetailedMeasureRow(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    id: row.id,
+    referencia: row.referencia ?? "",
+    descripcion: row.descripcion ?? "",
+    bultos: row.bultos ?? "",
+    unidadesPorBulto: row.unidadesPorBulto ?? "",
+    pesoPorBulto: row.pesoPorBulto ?? "",
+    l: row.l ?? "",
+    w: row.w ?? "",
+    h: row.h ?? "",
+    volumenM3: row.volumenM3 ?? "",
+    unidad: row.unidad ?? "",
+    reempaque: row.reempaque ?? false,
+    bultoContenedor: row.bultoContenedor ?? "",
+    referenciasContenedor: row.referenciasContenedor ?? "",
+    referenciaContenedora: row.referenciaContenedora ?? "",
+  };
+}
+
+export function sanitizeMeasureDataForTarget(
+  rows: Record<string, unknown>[],
+  targetType: RaMeasureModule | string,
+): Record<string, unknown>[] {
+  const t: RaMeasureModule =
+    targetType === "detailed" ? "detailed" : targetType === "airway" ? "airway" : "quick";
+  if (t === "detailed") {
+    return rows.map(stripDetailedMeasureRow);
+  }
+  return rows.map((row) => {
+    const out: Record<string, unknown> = {
+      id: row.id,
+      referencia: row.referencia ?? "",
+      bultos: row.bultos ?? "",
+    };
+    for (const key of ["l", "w", "h", "weight", "volumenM3", "unidad", "reempaque", "bultoContenedor", "referenciasContenedor", "referenciaContenedora", "reempaqueRefs"] as const) {
+      const v = row[key];
+      if (v === undefined || v === "" || v === false) continue;
+      if (Array.isArray(v) && v.length === 0) continue;
+      out[key] = v;
+    }
+    return out;
+  });
 }
 
 export type RaMeasureModule = "quick" | "detailed" | "airway";

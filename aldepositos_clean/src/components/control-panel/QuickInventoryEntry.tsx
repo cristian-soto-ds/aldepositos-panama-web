@@ -32,12 +32,16 @@ import {
   buildSourceReferenceSnapshot,
   captureSourceReferencesFromRows,
   CAPTURE_LAYOUT_STORAGE_KEY,
+  isAutoConsecutiveBlock,
   isCaptureLayout,
+  mergePreservingRealReferences,
   renumberConsecutiveReferences,
   restoreSourceReferences,
   taskHasImportedReferences,
   nextConsecutiveReference,
+  stripQuickRowsForPersist,
   type CaptureLayout,
+  type QuickMeasureRow,
   type ReferenceCaptureMode,
 } from "@/lib/quickInventoryTypes";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
@@ -83,12 +87,7 @@ type QuickInventoryEntryProps = {
 type MeasureRow = {
   id: string;
   referencia?: string;
-  descripcion?: string;
   bultos?: string | number;
-  /** Und/bulto (p. ej. desde orden de recolección → RA rápido) */
-  unidadesPorBulto?: string | number;
-  /** Peso por bulto en kg si viene de captura detallada */
-  pesoPorBulto?: string | number;
   l?: string | number;
   w?: string | number;
   h?: string | number;
@@ -111,6 +110,7 @@ type QuickDraft = {
   weightMode?: WeightMode;
   referenceMode?: ReferenceCaptureMode;
   captureLayout?: CaptureLayout;
+  sourceReferences?: Record<string, string>;
 };
 
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
@@ -122,10 +122,7 @@ function createEmptyMeasureRow(): MeasureRow {
   return {
     id: generateId(),
     referencia: "",
-    descripcion: "",
     bultos: "",
-    unidadesPorBulto: "",
-    pesoPorBulto: "",
     l: "",
     w: "",
     h: "",
@@ -212,10 +209,7 @@ function quickRowHasPartialData(row: MeasureRow): boolean {
 function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
   return rows.some((row) => {
     const referencia = String(row.referencia ?? "").trim();
-    const descripcion = String(row.descripcion ?? "").trim();
     const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-    const upb = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
-    const pesoDet = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
     const h = parseFloat(String(row.h ?? 0)) || 0;
@@ -228,10 +222,7 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
     const referenciaContenedora = String(row.referenciaContenedora ?? "").trim();
     return (
       referencia.length > 0 ||
-      descripcion.length > 0 ||
       bultos > 0 ||
-      upb > 0 ||
-      pesoDet > 0 ||
       l > 0 ||
       w > 0 ||
       h > 0 ||
@@ -270,23 +261,25 @@ export function QuickInventoryEntry({
     }
   }, [transferOpenId]);
 
-  const moduleTasks = tasks.filter((t) => {
-    if (t.type !== moduleType) return false;
-    if (viewMode === "completed") {
-      return t.status === "completed";
-    }
-    if (viewMode === "priority") {
+  const moduleTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (t.type !== moduleType) return false;
+      if (viewMode === "completed") {
+        return t.status === "completed";
+      }
+      if (viewMode === "priority") {
+        return (
+          t.status === "pending" &&
+          (t.containerDraft === true || t.dispatched === true)
+        );
+      }
       return (
-        t.status === "pending" &&
-        (t.containerDraft === true || t.dispatched === true)
+        (t.status === "pending" || t.status === "in_progress") &&
+        !t.containerDraft &&
+        !t.dispatched
       );
-    }
-    return (
-      (t.status === "pending" || t.status === "in_progress") &&
-      !t.containerDraft &&
-      !t.dispatched
-    );
-  });
+    });
+  }, [tasks, moduleType, viewMode]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState<string>("Todos");
@@ -319,22 +312,34 @@ export function QuickInventoryEntry({
     (remote: Task): MeasureRow[] => {
       const taskRows =
         remote.measureData && remote.measureData.length > 0
-          ? (JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[])
+          ? stripQuickRowsForPersist(
+              JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[],
+            )
           : [createEmptyMeasureRow()];
-      if (taskHasImportedReferences(taskRows)) {
-        sourceReferencesRef.current = buildSourceReferenceSnapshot(
-          taskRows,
-          taskRows,
+      const incomingSnapshot = taskHasImportedReferences(taskRows)
+        ? buildSourceReferenceSnapshot(taskRows, taskRows)
+        : buildReferenceSnapshot(taskRows);
+      if (!isAutoConsecutiveBlock(taskRows)) {
+        sourceReferencesRef.current = mergePreservingRealReferences(
+          sourceReferencesRef.current,
+          incomingSnapshot,
         );
-      } else {
-        sourceReferencesRef.current = buildReferenceSnapshot(taskRows);
       }
-      return referenceMode === "without"
-        ? applyConsecutiveReferences(taskRows)
-        : taskRows;
+      if (referenceMode === "without") {
+        return applyConsecutiveReferences(taskRows);
+      }
+      return restoreSourceReferences(taskRows, sourceReferencesRef.current);
     },
     [referenceMode],
   );
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    setMeasureRows((prev) => {
+      const next = stripQuickRowsForPersist(prev);
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+  }, [selectedTask?.id]);
 
   const buildEditorHash = useCallback(
     (rows: MeasureRow[]) =>
@@ -441,20 +446,26 @@ export function QuickInventoryEntry({
     moduleType,
   ]);
 
-  const groupedTasks = moduleTasks.reduce<Record<string, Task[]>>((groups, task) => {
-    const client = task.mainClient || "Sin Cliente";
-    if (!groups[client]) groups[client] = [];
-    groups[client].push(task);
-    return groups;
-  }, {});
+  const groupedTasks = useMemo(
+    () =>
+      moduleTasks.reduce<Record<string, Task[]>>((groups, task) => {
+        const client = task.mainClient || "Sin Cliente";
+        if (!groups[client]) groups[client] = [];
+        groups[client].push(task);
+        return groups;
+      }, {}),
+    [moduleTasks],
+  );
 
-  const clients = Object.keys(groupedTasks);
+  const clients = useMemo(() => Object.keys(groupedTasks), [groupedTasks]);
   const totalModuleTasks = moduleTasks.length;
 
-  let displayedTasks = moduleTasks;
-  if (clientFilter !== "Todos" && clients.includes(clientFilter)) {
-    displayedTasks = groupedTasks[clientFilter];
-  }
+  const displayedTasks = useMemo(() => {
+    if (clientFilter !== "Todos" && clients.includes(clientFilter)) {
+      return groupedTasks[clientFilter] ?? moduleTasks;
+    }
+    return moduleTasks;
+  }, [moduleTasks, groupedTasks, clientFilter, clients]);
 
   const calculateTotals = () => {
     if (!selectedTask) return { bultos: 0, cbm: "0.000", weight: 0 };
@@ -486,7 +497,9 @@ export function QuickInventoryEntry({
 
     const taskRows =
       task.measureData && task.measureData.length > 0
-        ? (JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[])
+        ? stripQuickRowsForPersist(
+            JSON.parse(JSON.stringify(task.measureData)) as MeasureRow[],
+          )
         : [createEmptyMeasureRow()];
     const serverRows = taskRows;
     const serverHasCapture = quickRowsHaveAnyCapture(taskRows);
@@ -511,11 +524,11 @@ export function QuickInventoryEntry({
           if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
             const draftHasCapture = quickRowsHaveAnyCapture(parsed.rows);
             if (!serverHasCapture && draftHasCapture) {
-              rowsToUse = parsed.rows;
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
             } else if (serverHasCapture) {
               rowsToUse = taskRows;
             } else {
-              rowsToUse = parsed.rows;
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
             }
           }
           if (parsed.referenceMode === "with" || parsed.referenceMode === "without") {
@@ -524,21 +537,36 @@ export function QuickInventoryEntry({
           if (isCaptureLayout(parsed.captureLayout)) {
             layoutToUse = parsed.captureLayout;
           }
+          if (
+            parsed.sourceReferences &&
+            typeof parsed.sourceReferences === "object"
+          ) {
+            sourceReferencesRef.current = mergePreservingRealReferences(
+              parsed.sourceReferences,
+              sourceReferencesRef.current,
+            );
+          }
         } catch {
           // ignore invalid draft
         }
       }
     }
 
-    if (taskHasImportedReferences(serverRows)) {
-      sourceReferencesRef.current = buildSourceReferenceSnapshot(rowsToUse, serverRows);
-    } else {
-      sourceReferencesRef.current = buildReferenceSnapshot(rowsToUse);
-    }
+    const serverSnapshot = taskHasImportedReferences(serverRows)
+      ? buildSourceReferenceSnapshot(rowsToUse, serverRows)
+      : buildReferenceSnapshot(rowsToUse);
+    sourceReferencesRef.current = mergePreservingRealReferences(
+      sourceReferencesRef.current,
+      serverSnapshot,
+    );
 
     if (refModeToUse === "without") {
       rowsToUse = applyConsecutiveReferences(rowsToUse);
+    } else {
+      rowsToUse = restoreSourceReferences(rowsToUse, sourceReferencesRef.current);
     }
+
+    rowsToUse = stripQuickRowsForPersist(rowsToUse);
 
     const firstPending = rowsToUse.find((r) => !isQuickRowComplete(r));
     setExpandedRowId(firstPending?.id ?? rowsToUse[0]?.id ?? null);
@@ -578,13 +606,11 @@ export function QuickInventoryEntry({
         restoreSourceReferences(prev, sourceReferencesRef.current),
       );
     } else {
-      setMeasureRows((prev) => {
-        sourceReferencesRef.current = captureSourceReferencesFromRows(
-          prev,
-          sourceReferencesRef.current,
-        );
-        return applyConsecutiveReferences(prev);
-      });
+      sourceReferencesRef.current = captureSourceReferencesFromRows(
+        measureRows,
+        sourceReferencesRef.current,
+      );
+      setMeasureRows((prev) => applyConsecutiveReferences(prev));
     }
     setReferenceMode(mode);
   };
@@ -599,10 +625,7 @@ export function QuickInventoryEntry({
         {
           id: newId,
           referencia: nextRef,
-          descripcion: "",
           bultos: referenceMode === "without" ? "1" : "",
-          unidadesPorBulto: "",
-          pesoPorBulto: "",
           l: "",
           w: "",
           h: "",
@@ -704,7 +727,7 @@ export function QuickInventoryEntry({
 
         void mergeCatalogIntoImportedRows(mod, additions)
           .then(({ rows: enriched, catalogMatched }) => {
-            setMeasureRows((p) => appendDeduped(p, enriched));
+            setMeasureRows((p) => appendDeduped(p, stripQuickRowsForPersist(enriched)));
             // eslint-disable-next-line no-alert
             alert(
               `Añadidas ${enriched.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
@@ -716,7 +739,9 @@ export function QuickInventoryEntry({
           })
           .catch((err) => {
             console.error(err);
-            setMeasureRows((p) => appendDeduped(p, additions));
+            setMeasureRows((p) =>
+              appendDeduped(p, stripQuickRowsForPersist(additions)),
+            );
             // eslint-disable-next-line no-alert
             alert(
               `Añadidas ${additions.length} fila(s). No se pudo consultar el catálogo; revisa la conexión.` +
@@ -753,7 +778,7 @@ export function QuickInventoryEntry({
 
   const updateRowValue = (
     id: string,
-    field: keyof MeasureRow,
+    field: keyof MeasureRow | keyof QuickMeasureRow,
     value: string | boolean | string[],
   ) =>
     setMeasureRows((prev) =>
@@ -777,7 +802,9 @@ export function QuickInventoryEntry({
         moduleType === "airway" ? "airway" : "quick";
       const patch = buildMeasurePatchFromCatalog(mod, item);
       setMeasureRows((prev) =>
-        prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+        stripQuickRowsForPersist(
+          prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+        ),
       );
     },
     [moduleType],
@@ -801,10 +828,11 @@ export function QuickInventoryEntry({
     if (typeof window === "undefined") return;
     const draft: QuickDraft = {
       updatedAt: Date.now(),
-      rows: JSON.parse(JSON.stringify(rows)) as MeasureRow[],
+      rows: JSON.parse(JSON.stringify(stripQuickRowsForPersist(rows))) as MeasureRow[],
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: refMode,
       captureLayout: layout,
+      sourceReferences: { ...sourceReferencesRef.current },
     };
     window.localStorage.setItem(
       inventoryDraftKey(taskId, moduleType),
@@ -832,7 +860,7 @@ export function QuickInventoryEntry({
       totalsBultos >= task.expectedBultos &&
       hasQuickRequiredData(rows);
 
-    const persistedRows = hasCapture ? rows : [];
+    const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(inventoryDraftKey(task.id, moduleType));
     }
@@ -914,7 +942,7 @@ export function QuickInventoryEntry({
       totals.bultos >= selectedTask.expectedBultos &&
       hasQuickRequiredData(measureRows);
 
-    const persistedRows = hasCapture ? measureRows : [];
+    const persistedRows = hasCapture ? stripQuickRowsForPersist(measureRows) : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(
         inventoryDraftKey(selectedTask.id, moduleType),
@@ -944,20 +972,7 @@ export function QuickInventoryEntry({
     clearTask();
   };
 
-  const showDetailedLineExtras = useMemo(
-    () =>
-      measureRows.some(
-        (row) =>
-          String(row.descripcion ?? "").trim() !== "" ||
-          String(row.unidadesPorBulto ?? "").trim() !== "" ||
-          String(row.pesoPorBulto ?? "").trim() !== "",
-      ),
-    [measureRows],
-  );
-
-  const tableMinWidthClass = showDetailedLineExtras
-    ? "min-w-[1420px]"
-    : "min-w-[1180px]";
+  const tableMinWidthClass = "min-w-[1180px]";
 
   // Lista de órdenes (sin task seleccionado) — encabezado fijo, solo la lista con barra de desplazamiento
   if (!selectedTask) {
@@ -1071,7 +1086,7 @@ export function QuickInventoryEntry({
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pb-12 sm:pb-20">
-            <div className="grid grid-cols-1 gap-2 sm:gap-3 md:gap-4">
+            <div className="grid grid-cols-1 gap-2 sm:gap-3">
               {displayedTasks.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
                   No hay órdenes{" "}
@@ -1095,16 +1110,16 @@ export function QuickInventoryEntry({
                     handleSelectTask(t);
                   }
                 }}
-                className={`group relative flex cursor-pointer flex-col gap-2 rounded-xl border p-2.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:gap-3 sm:rounded-2xl sm:p-4 md:p-6 ${
+                className={`group flex cursor-pointer flex-col gap-2 rounded-xl border p-3 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:p-4 ${
                   viewMode === "priority"
                     ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
                     : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
                     <h3
-                      className={`shrink-0 text-base font-black leading-none tracking-tight sm:text-2xl md:text-3xl ${
+                      className={`shrink-0 text-lg font-black tabular-nums leading-none sm:text-xl ${
                         viewMode === "priority"
                           ? "text-red-700 dark:text-red-300"
                           : "text-[#16263F] dark:text-slate-100"
@@ -1113,63 +1128,49 @@ export function QuickInventoryEntry({
                       RA {t.ra}
                     </h3>
                     {t.status === "in_progress" && (
-                      <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200 sm:rounded-full sm:px-2 sm:text-[10px]">
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
                         En curso
                       </span>
                     )}
                   </div>
                   <div
-                    className={`flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-center shadow-sm sm:flex-col sm:gap-0 sm:rounded-xl sm:px-3 sm:py-1.5 ${
+                    className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-1 text-center ${
                       viewMode === "priority"
                         ? "border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
                         : "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
                     }`}
                   >
-                    <span className="text-[8px] font-semibold leading-none sm:text-[9px]">Bultos</span>
-                    <span className="text-sm font-bold tabular-nums leading-none sm:text-xl md:text-2xl">
+                    <span className="text-[9px] font-semibold leading-none">Bultos</span>
+                    <span className="text-lg font-bold tabular-nums leading-tight">
                       {t.expectedBultos}
                     </span>
                   </div>
                 </div>
 
-                <div className="min-w-0 border-t border-slate-100 pt-2 dark:border-slate-700 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 sm:pt-3">
-                  <p className="truncate text-[11px] font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:hidden">
-                    <span className="text-slate-400 dark:text-slate-500">{t.provider}</span>
-                    {t.brand ? (
-                      <>
-                        <span className="text-slate-300 dark:text-slate-600"> · </span>
-                        {t.brand}
-                      </>
-                    ) : null}
-                  </p>
-                  <div className="hidden min-w-0 sm:block">
-                    <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                      Proveedor
-                    </p>
-                    <p className="truncate text-xs font-semibold leading-snug text-[#16263F] dark:text-slate-100 md:text-sm">
-                      {t.provider}
-                    </p>
-                  </div>
-                  <div className="hidden min-w-0 sm:block">
-                    <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                      Marca / tracking
-                    </p>
-                    <p className="truncate text-xs font-semibold leading-snug text-[#16263F] dark:text-slate-100 md:text-sm">
-                      {t.brand}
-                    </p>
-                  </div>
-                </div>
-
                 <div
-                  className="flex items-center justify-between gap-1 border-t border-slate-100 pt-2 dark:border-slate-700 sm:gap-2 sm:pt-3"
+                  className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-700"
                   onClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400 sm:text-[11px] sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                    <span className="sm:hidden">Capturar →</span>
-                    <span className="hidden sm:inline">Toca para capturar →</span>
-                  </p>
-                  <div className="ml-auto flex shrink-0 items-center gap-0 sm:gap-1">
+                  <div className="grid min-w-0 flex-1 grid-cols-1 gap-1 sm:grid-cols-2 sm:gap-4">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                        Proveedor
+                      </p>
+                      <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
+                        {t.provider}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                        Marca / tracking
+                      </p>
+                      <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
+                        {t.brand || "—"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
                     <div className="relative">
                       <button
                         type="button"
@@ -1177,91 +1178,91 @@ export function QuickInventoryEntry({
                           e.stopPropagation();
                           setTransferOpenId((prev) => (prev === t.id ? null : t.id));
                         }}
-                        className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-500 dark:hover:bg-emerald-950/30 sm:rounded-xl sm:p-2"
+                        className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
                         title="Transferir a otro módulo"
                       >
-                        <ArrowRightLeft className="h-3.5 w-3.5 sm:icon-sm" />
+                        <ArrowRightLeft className="h-4 w-4" />
                       </button>
-                      {transferOpenId === t.id && (
-                        <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
-                          {moduleType === "quick" ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onTransferTask(t, "detailed");
-                                  setTransferOpenId(null);
-                                }}
-                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                              >
-                                → Ingreso Detallado
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onTransferTask(t, "airway");
-                                  setTransferOpenId(null);
-                                }}
-                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                              >
-                                → Guía Aérea
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onTransferTask(t, "quick");
-                                  setTransferOpenId(null);
-                                }}
-                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                              >
-                                → Ingreso Rápido
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onTransferTask(t, "detailed");
-                                  setTransferOpenId(null);
-                                }}
-                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                              >
-                                → Ingreso Detallado
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEditModal(t);
-                      }}
-                      className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-slate-500 dark:hover:bg-blue-950/45 dark:hover:text-blue-400 sm:rounded-xl sm:p-2"
-                    >
-                      <Edit className="h-3.5 w-3.5 sm:icon-sm" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteTask(t.id);
-                      }}
-                      className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500 sm:rounded-xl sm:p-2"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 sm:icon-sm" />
-                    </button>
-                    <span className="hidden items-center justify-center rounded-xl bg-slate-50 p-2 text-slate-400 sm:flex dark:bg-slate-800/60 dark:text-slate-500">
-                      <ArrowRight className="icon-sm" />
-                    </span>
+                    {transferOpenId === t.id && (
+                      <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
+                        {moduleType === "quick" ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "detailed");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                            >
+                              → Ingreso Detallado
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "airway");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                            >
+                              → Guía Aérea
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "quick");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                            >
+                              → Ingreso Rápido
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTransferTask(t, "detailed");
+                                setTransferOpenId(null);
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                            >
+                              → Ingreso Detallado
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditModal(t);
+                    }}
+                    className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteTask(t.id);
+                    }}
+                    className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <span className="hidden items-center justify-center rounded-lg bg-slate-50 p-1.5 text-slate-400 group-hover:text-blue-500 sm:flex dark:bg-slate-800/60">
+                    <ArrowRight className="h-4 w-4" />
+                  </span>
+                </div>
                 </div>
               </div>
             ))
@@ -1303,7 +1304,10 @@ export function QuickInventoryEntry({
           onUpdateRow={(id, field, value) => updateRowValue(id, field, value)}
           onReferenceChange={(id, value) => {
             updateRowValue(id, "referencia", value);
-            sourceReferencesRef.current[id] = value;
+            const trimmed = String(value ?? "").trim();
+            if (trimmed) {
+              sourceReferencesRef.current[id] = trimmed;
+            }
             scheduleCatalogLookup(id, value);
           }}
           onReferenceBlur={(id, value) => {
@@ -1542,14 +1546,6 @@ export function QuickInventoryEntry({
                   {showReferenceColumn && (
                     <th className="min-w-[7rem] px-2 py-2.5 text-left">Referencia</th>
                   )}
-                  {showReferenceColumn && showDetailedLineExtras && (
-                    <th className="min-w-[120px] max-w-[200px] px-2 py-2.5 text-left">
-                      Descripción
-                    </th>
-                  )}
-                  {showReferenceColumn && showDetailedLineExtras && (
-                    <th className="w-24 px-2 py-2.5 text-center">Und/bulto</th>
-                  )}
                   <th className="w-24 px-2 py-2.5 text-center">Bultos</th>
                   {showWeightColumn && (
                     <th
@@ -1620,7 +1616,10 @@ export function QuickInventoryEntry({
                             onChange={(e) => {
                               const v = e.target.value;
                               updateRowValue(row.id, "referencia", v);
-                              sourceReferencesRef.current[row.id] = v;
+                              const trimmed = v.trim();
+                              if (trimmed) {
+                                sourceReferencesRef.current[row.id] = trimmed;
+                              }
                               scheduleCatalogLookup(row.id, v);
                             }}
                             onBlur={(e) => {
@@ -1636,38 +1635,6 @@ export function QuickInventoryEntry({
                             placeholder="Ej. WT-2524"
                           />
                           )}
-                        </td>
-                      )}
-
-                      {showReferenceColumn && showDetailedLineExtras && (
-                        <td className="px-2 py-1 align-top">
-                          <input
-                            type="text"
-                            value={row.descripcion ?? ""}
-                            onChange={(e) =>
-                              updateRowValue(row.id, "descripcion", e.target.value)
-                            }
-                            className="w-full min-w-[100px] rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1.5 text-left text-xs font-semibold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/20"
-                            placeholder="Descripción"
-                          />
-                        </td>
-                      )}
-                      {showReferenceColumn && showDetailedLineExtras && (
-                        <td className="px-2 py-1">
-                          <input
-                            type="number"
-                            value={row.unidadesPorBulto ?? ""}
-                            onChange={(e) =>
-                              updateRowValue(
-                                row.id,
-                                "unidadesPorBulto",
-                                e.target.value.replace(/\D+/g, ""),
-                              )
-                            }
-                            inputMode="numeric"
-                            className="no-spinners w-full rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/25 py-1.5 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-indigo-500"
-                            placeholder="—"
-                          />
                         </td>
                       )}
 

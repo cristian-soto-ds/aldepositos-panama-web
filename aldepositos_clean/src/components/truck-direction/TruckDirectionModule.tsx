@@ -1,0 +1,315 @@
+"use client";
+
+/**
+ * Módulo Operador — Dirección de camiones
+ * Tablero Kanban, carga de órdenes, buscador y Recibo de Almacén.
+ * Personalización: src/lib/receptionLogistics/config.ts
+ */
+
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import {
+  GripVertical,
+  Loader2,
+  Monitor,
+  Search,
+  Truck,
+  UploadCloud,
+  FileSpreadsheet,
+} from "lucide-react";
+import { useReceptionQueue } from "@/hooks/useReceptionQueue";
+import {
+  RECEPTION_COPY,
+  RECEPTION_KANBAN_COLUMNS,
+  RECEPTION_RECEIPT_ON_STATUS,
+  RECEPTION_COLUMN_THEME,
+  RECEPTION_STATUS_LABELS,
+  type ReceptionStatusId,
+} from "@/lib/receptionLogistics/config";
+import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
+import { isCollectionOrderReceptionTruck } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import {
+  importReceptionTrucks,
+  updateReceptionTruckStatus,
+} from "@/lib/receptionLogistics/repository";
+import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
+import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
+
+function matchesSearch(truck: ReceptionTruck, q: string): boolean {
+  const s = q.trim().toLowerCase();
+  if (!s) return true;
+  return [truck.plate, truck.ra, truck.provider, truck.client, truck.driverName]
+    .filter(Boolean)
+    .some((v) => String(v).toLowerCase().includes(s));
+}
+
+export function TruckDirectionModule() {
+  const { trucks, loading, reload } = useReceptionQueue();
+  const [search, setSearch] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [moveBusy, setMoveBusy] = useState<string | null>(null);
+  const [tvModeOpen, setTvModeOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dragTruckId = useRef<string | null>(null);
+
+  const filtered = useMemo(
+    () => trucks.filter((t) => matchesSearch(t, search)),
+    [trucks, search],
+  );
+
+  const byStatus = useMemo(() => {
+    const map: Record<ReceptionStatusId, ReceptionTruck[]> = {
+      EN_FILA: [],
+      RAMPA_1: [],
+      RAMPA_2: [],
+      COMPLETADO: [],
+    };
+    for (const col of RECEPTION_KANBAN_COLUMNS) {
+      map[col] = filtered
+        .filter((t) => t.status === col)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    return map;
+  }, [filtered]);
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportBusy(true);
+    try {
+      const { parseReceptionOrdersFile } = await import(
+        "@/lib/receptionLogistics/parseOrdersFile"
+      );
+      const { trucks: imported, error } = await parseReceptionOrdersFile(file);
+      if (error) {
+        alert(error);
+        return;
+      }
+      if (imported.length === 0) {
+        alert("No se encontraron filas válidas en el archivo.");
+        return;
+      }
+      await importReceptionTrucks(imported);
+      await reload();
+      alert(`${imported.length} orden(es) cargadas en «En Fila».`);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const handleDropOnColumn = useCallback(
+    async (status: ReceptionStatusId) => {
+      const id = dragTruckId.current;
+      dragTruckId.current = null;
+      if (!id) return;
+
+      const truck = trucks.find((t) => t.id === id);
+      if (!truck || truck.status === status) return;
+
+      const needsReceipt = RECEPTION_RECEIPT_ON_STATUS.includes(status);
+      setMoveBusy(id);
+      try {
+        const updated = await updateReceptionTruckStatus(id, status, {
+          issueReceipt: needsReceipt,
+        });
+        await reload();
+        if (updated?.warehouseReceiptNumber && needsReceipt) {
+          printWarehouseReceipt(updated);
+        }
+      } finally {
+        setMoveBusy(null);
+      }
+    },
+    [trucks, reload],
+  );
+
+  return (
+    <>
+      {tvModeOpen ? (
+        <div className="fixed inset-0 z-[500]">
+          <TruckDirectionTvModule
+            onClose={() => setTvModeOpen(false)}
+            trucks={trucks}
+            loading={loading}
+          />
+        </div>
+      ) : null}
+
+      <div className="flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4 md:p-6">
+      <header className="shrink-0 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="flex items-center gap-2 text-xl font-black text-[#16263F] dark:text-slate-100 md:text-2xl">
+              <Truck className="h-6 w-6 text-amber-600" aria-hidden />
+              {RECEPTION_COPY.operatorTitle}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {RECEPTION_COPY.operatorSubtitle}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTvModeOpen(true)}
+              className="inline-flex items-center justify-center gap-2 border border-neutral-600 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-neutral-800 transition hover:bg-neutral-50"
+            >
+              <Monitor className="h-4 w-4" />
+              Modo TV
+            </button>
+            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:brightness-110">
+            {importBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <UploadCloud className="h-4 w-4" />
+            )}
+            {RECEPTION_COPY.uploadLabel}
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={onFileChange}
+              disabled={importBusy}
+            />
+          </label>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-400">{RECEPTION_COPY.uploadHint}</p>
+
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900">
+          <Search className="h-4 w-4 shrink-0 text-slate-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={RECEPTION_COPY.searchPlaceholder}
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none dark:text-slate-100"
+          />
+        </div>
+      </header>
+
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center text-slate-400">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          Cargando tablero…
+        </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pb-4 sm:grid-cols-2 xl:grid-cols-4 xl:overflow-hidden">
+          {RECEPTION_KANBAN_COLUMNS.map((statusId) => {
+            const theme = RECEPTION_COLUMN_THEME[statusId];
+            const list = byStatus[statusId] ?? [];
+            return (
+              <section
+                key={statusId}
+                className="flex min-h-[200px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/50 xl:min-h-0 xl:overflow-hidden"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  void handleDropOnColumn(statusId);
+                }}
+              >
+                <div
+                  className={`shrink-0 rounded-t-2xl border-b px-3 py-2.5 text-center text-xs font-black uppercase tracking-widest ${theme.header}`}
+                >
+                  {RECEPTION_STATUS_LABELS[statusId]}
+                  <span className="ml-2 opacity-80">({list.length})</span>
+                </div>
+
+                <ul className="custom-scrollbar flex flex-1 flex-col gap-2 overflow-y-auto p-2">
+                  {list.length === 0 ? (
+                    <li className="py-8 text-center text-xs text-slate-400">
+                      {RECEPTION_COPY.emptyColumn}
+                    </li>
+                  ) : (
+                    list.map((truck) => (
+                      <li
+                        key={truck.id}
+                        draggable={moveBusy !== truck.id}
+                        onDragStart={() => {
+                          dragTruckId.current = truck.id;
+                        }}
+                        onDragEnd={() => {
+                          dragTruckId.current = null;
+                        }}
+                        className={`cursor-grab rounded-xl border p-3 shadow-sm active:cursor-grabbing ${theme.card} ${
+                          moveBusy === truck.id ? "opacity-60" : ""
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="text-sm font-black">{truck.plate}</p>
+                              {isCollectionOrderReceptionTruck(truck) ? (
+                                <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
+                                  Recolección
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                              RA {truck.ra}
+                            </p>
+                            <p className="mt-1 truncate text-[11px] text-slate-500">
+                              {truck.provider} · {truck.client}
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              <span
+                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${theme.badge}`}
+                              >
+                                {truck.expectedBultos} bultos
+                              </span>
+                              {truck.warehouseReceiptNumber ? (
+                                <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                  {truck.warehouseReceiptNumber}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2 dark:border-slate-700 sm:hidden">
+                          {RECEPTION_KANBAN_COLUMNS.filter((s) => s !== truck.status).map(
+                            (target) => (
+                              <button
+                                key={target}
+                                type="button"
+                                className="rounded-lg border border-slate-200 px-2 py-1 text-[9px] font-bold uppercase"
+                                onClick={() => {
+                                  dragTruckId.current = truck.id;
+                                  void handleDropOnColumn(target);
+                                }}
+                              >
+                                → {RECEPTION_STATUS_LABELS[target]}
+                              </button>
+                            ),
+                          )}
+                        </div>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="shrink-0 text-center text-[10px] text-slate-400">
+        <FileSpreadsheet className="mr-1 inline h-3 w-3" />
+        Arrastra tarjetas entre columnas · Recibo automático al asignar rampa
+        {" · "}
+        <button
+          type="button"
+          onClick={() => setTvModeOpen(true)}
+          className="inline-flex items-center gap-0.5 font-semibold text-neutral-700 underline-offset-2 hover:underline"
+        >
+          <Monitor className="h-3 w-3" />
+          Abrir pantalla TV
+        </button>
+      </p>
+    </div>
+    </>
+  );
+}

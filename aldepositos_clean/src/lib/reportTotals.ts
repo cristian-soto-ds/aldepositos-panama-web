@@ -1,4 +1,8 @@
 import type { Task } from "@/lib/types/task";
+import {
+  stripQuickRowsForPersist,
+  type QuickMeasureRow,
+} from "@/lib/quickInventoryTypes";
 
 export type ReportTotals = {
   bultos: number;
@@ -17,12 +21,18 @@ export type ReportComputed = {
 };
 
 export function computeReportData(task: Task): ReportComputed {
-  const measureRows = (task.measureData || []) as Record<string, unknown>[];
+  const rawRows = (task.measureData || []) as Record<string, unknown>[];
   const isDetailed = task.type === "detailed";
   const isAirway = task.type === "airway";
+  const measureRows = isDetailed
+    ? rawRows
+    : (stripQuickRowsForPersist(rawRows as QuickMeasureRow[]) as Record<
+        string,
+        unknown
+      >[]);
   const showWeightColumn = task.weightMode === "per_bundle" || isDetailed;
-  const showReferenceColumn =
-    task.weightMode === "by_reference" || isDetailed || isAirway;
+  /** Misma regla que ingreso rápido / guía aérea: siempre mostrar Referencia en el reporte. */
+  const showReferenceColumn = true;
 
   let totalWeight = task.expectedWeight || 0;
   let totalUnidades = 0;

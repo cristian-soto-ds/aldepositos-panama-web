@@ -35,7 +35,11 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
   const reloadTasks = useCallback(async () => {
     try {
       const list = await fetchTasks();
-      setTasks(list);
+      setTasks((prev) => {
+        const prevJson = JSON.stringify(prev);
+        const nextJson = JSON.stringify(list);
+        return prevJson === nextJson ? prev : list;
+      });
     } catch (e) {
       console.error(e);
       // eslint-disable-next-line no-alert
@@ -102,10 +106,13 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
 
   useEffect(() => {
     if (!enabled) return;
+    const lastFocusReloadRef = { current: 0 };
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        void reloadTasks();
-      }
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusReloadRef.current < 30_000) return;
+      lastFocusReloadRef.current = now;
+      void reloadTasks();
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);

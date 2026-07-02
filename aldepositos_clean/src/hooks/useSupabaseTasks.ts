@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
+import {
+  isForeignLiveUpdate,
+  subscribeLiveUpdates,
+} from "@/lib/liveCollaboration";
 import {
   fetchTasks,
   subscribeTasksRealtime,
@@ -12,16 +17,18 @@ import type { Task } from "@/lib/types/task";
 type UseSupabaseTasksOptions = {
   /** Si es false no se cargan datos ni se escucha Realtime (p. ej. sin sesión). */
   enabled: boolean;
+  /** Email del usuario actual (para ignorar sus propios broadcasts). */
+  userKey?: string | null;
 };
 
 /**
  * Estado de tareas sincronizado con `public.tasks`:
  * - carga inicial al habilitar
  * - parche inmediato vía Supabase Realtime
+ * - parche en vivo vía Broadcast (~80 ms) mientras otros escriben
  * - recarga completa debounced como respaldo
- * - refetch al volver a la pestaña
  */
-export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
+export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
 
@@ -47,6 +54,29 @@ export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
     });
   }, []);
 
+  const applyLiveTaskUpdate = useCallback(
+    (update: {
+      taskId: string;
+      measureData: unknown[];
+      currentBultos: number;
+      status: string;
+    }) => {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === update.taskId
+            ? {
+                ...t,
+                measureData: update.measureData,
+                currentBultos: update.currentBultos,
+                status: update.status,
+              }
+            : t,
+        ),
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!enabled) return;
     void reloadTasks();
@@ -59,6 +89,16 @@ export function useSupabaseTasks({ enabled }: UseSupabaseTasksOptions) {
       onReload: reloadTasks,
     });
   }, [enabled, reloadTasks, applyRealtimeChange]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const tabId = getSharedWorkPresenceTabId();
+    return subscribeLiveUpdates((update) => {
+      if (update.type !== "task") return;
+      if (!isForeignLiveUpdate(update, tabId)) return;
+      applyLiveTaskUpdate(update);
+    });
+  }, [enabled, userKey, applyLiveTaskUpdate]);
 
   useEffect(() => {
     if (!enabled) return;

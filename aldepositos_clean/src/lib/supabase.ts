@@ -88,7 +88,7 @@ export async function deleteTaskById(id: string): Promise<void> {
   if (error) throw error;
 }
 
-const REALTIME_DEBOUNCE_MS = 200;
+const REALTIME_DEBOUNCE_MS = 50;
 
 type TasksRealtimeHandlers = {
   /** Parche inmediato con el payload del evento (sin esperar refetch). */

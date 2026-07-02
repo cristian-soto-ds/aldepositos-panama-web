@@ -568,9 +568,9 @@ export function ControlPanelHome({
   const isDark = preferences?.theme === "dark";
 
   return (
-    <div className="max-w-[1600px] mx-auto animate-fade pb-10 px-0">
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] animate-fade overflow-x-hidden pb-8 sm:pb-10">
       <div
-        className={`relative overflow-hidden rounded-[2rem] border p-4 shadow-md md:p-7 ${
+        className={`relative min-w-0 overflow-hidden rounded-xl border p-3 shadow-md sm:rounded-2xl sm:p-4 md:rounded-[2rem] md:p-7 ${
           isDark
             ? "border-slate-700/70 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 shadow-[inset_6px_0_0_0_rgba(245,158,11,0.85)]"
             : "border-slate-200/80 bg-gradient-to-br from-white via-slate-50/95 to-slate-100/70 shadow-[inset_6px_0_0_0_#e8b84a]"
@@ -584,37 +584,37 @@ export function ControlPanelHome({
           }`}
           aria-hidden
         />
-        <div className="relative z-10">
-        {/* Franja de operaciones: cambio visual muy visible vs. versiones anteriores */}
-        <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-white/15 bg-gradient-to-r from-[#16263F] via-[#1a3558] to-blue-600/95 p-4 text-white shadow-md sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-6 md:p-5">
-          <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#FFC400] text-[#16263F] shadow-md">
+        <div className="relative z-10 min-w-0">
+        {/* Franja de operaciones */}
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-white/15 bg-gradient-to-r from-[#16263F] via-[#1a3558] to-blue-600/95 p-3 text-white shadow-md sm:mb-6 sm:gap-4 sm:rounded-2xl sm:p-4 md:flex-row md:items-center md:justify-between md:gap-6 md:p-5">
+          <div className="flex min-w-0 items-start gap-3 sm:items-center sm:gap-4">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFC400] text-[#16263F] shadow-md sm:h-11 sm:w-11 sm:rounded-2xl">
               <Zap className="h-5 w-5" aria-hidden />
             </span>
-            <div className="min-w-0">
-              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#FFC400]">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#FFC400] sm:tracking-[0.24em]">
                 Centro de operaciones
               </p>
-              <p className="mt-0.5 text-sm font-bold leading-snug text-blue-100 sm:text-base">
+              <p className="mt-0.5 text-pretty text-sm font-bold leading-snug text-blue-100 sm:text-base">
                 Resumen en vivo de RAs, bultos y quién está capturando ahora.
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-            <span className="rounded-full bg-white/12 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-white/95 backdrop-blur-sm">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <span className="flex-1 rounded-full bg-white/12 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-white/95 backdrop-blur-sm sm:flex-none">
               {formatNumber(dashboard.total)} RAs en sistema
             </span>
-            <span className="rounded-full bg-emerald-400/20 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-emerald-50">
+            <span className="flex-1 rounded-full bg-emerald-400/20 px-3 py-1.5 text-center text-[10px] font-black uppercase tracking-wider text-emerald-50 sm:flex-none">
               {formatNumber(activeOrders)} activas
             </span>
           </div>
         </div>
 
         {/* Barra superior: título + búsqueda / filtro + acciones */}
-        <header className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-start gap-4 md:gap-5">
+        <header className="mb-5 flex min-w-0 flex-col gap-4 sm:mb-6 sm:gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 md:gap-5">
             <div
-              className={`relative flex h-[112px] w-[112px] shrink-0 items-center justify-center overflow-hidden rounded-[1.35rem] text-white shadow-xl md:h-[120px] md:w-[120px] md:rounded-[1.5rem] ${
+              className={`relative mx-auto flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-xl sm:mx-0 sm:h-20 sm:w-20 md:h-[112px] md:w-[112px] md:rounded-[1.35rem] lg:h-[120px] lg:w-[120px] lg:rounded-[1.5rem] ${
                 isDark
                   ? "border border-white/10 bg-gradient-to-br from-slate-800 to-[#16263F] shadow-black/40 ring-2 ring-blue-500/25"
                   : "border-2 border-white bg-[#16263F] shadow-[0_12px_40px_rgba(22,38,63,0.22)] ring-2 ring-slate-200/80"
@@ -637,8 +637,8 @@ export function ControlPanelHome({
                 </span>
               )}
             </div>
-            <div className="min-w-0 pt-0.5">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1 text-center sm:pt-0.5 sm:text-left">
+              <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] ${
                     isDark
@@ -648,14 +648,14 @@ export function ControlPanelHome({
                 >
                   Vista general
                 </span>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400 sm:tracking-[0.2em]">
                   {currentDate}
                 </p>
               </div>
-              <h1 className="mt-1.5 bg-gradient-to-r from-[#16263F] via-blue-700 to-blue-500 bg-clip-text text-2xl font-black leading-tight tracking-tight text-transparent dark:from-white dark:via-sky-200 dark:to-blue-300 md:text-3xl md:leading-tight">
+              <h1 className="mt-1.5 bg-gradient-to-r from-[#16263F] via-blue-700 to-blue-500 bg-clip-text text-xl font-black leading-tight tracking-tight text-transparent dark:from-white dark:via-sky-200 dark:to-blue-300 sm:text-2xl md:text-3xl md:leading-tight">
                 Panel principal
               </h1>
-              <p className="mt-1 truncate text-sm font-semibold text-slate-600 dark:text-slate-300">
+              <p className="mt-1 text-pretty text-sm font-semibold leading-snug text-slate-600 dark:text-slate-300">
                 {getGreeting()},{" "}
                 <span className="text-[#16263F] dark:text-sky-300">{greetingName}</span>
               </p>
@@ -669,7 +669,7 @@ export function ControlPanelHome({
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#16263F] to-blue-700 text-white shadow-md shadow-blue-900/20">
                   <Clock3 className="h-3.5 w-3.5" />
                 </span>
-                <div className="leading-tight">
+                <div className="leading-tight text-left">
                   <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
                     Hora en vivo
                   </p>
@@ -681,9 +681,9 @@ export function ControlPanelHome({
             </div>
           </div>
 
-          <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto lg:max-w-2xl">
+          <div className="flex w-full min-w-0 flex-col gap-2.5 sm:gap-3 lg:max-w-2xl lg:flex-shrink-0">
             <div
-              className={`flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-3 py-2.5 backdrop-blur-sm transition-shadow focus-within:ring-2 sm:rounded-full sm:px-4 ${
+              className={`flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 backdrop-blur-sm transition-shadow focus-within:ring-2 sm:rounded-2xl sm:px-4 md:rounded-full ${
                 isDark
                   ? "border border-slate-600/80 bg-slate-800/70 focus-within:border-blue-500/50 focus-within:ring-blue-500/25"
                   : "border border-slate-200/90 bg-white/95 shadow-sm focus-within:border-blue-300/80 focus-within:ring-blue-500/20"
@@ -694,15 +694,17 @@ export function ControlPanelHome({
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar RA, cliente o proveedor…"
+                placeholder="Buscar RA, cliente o proveedor"
                 className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
+            </div>
+            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center">
               <select
                 value={filterStatus}
                 onChange={(e) =>
                   setFilterStatus(e.target.value as "all" | "in_progress" | "pending")
                 }
-                className={`shrink-0 cursor-pointer rounded-xl border py-1.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider outline-none sm:rounded-full ${
+                className={`w-full min-w-0 cursor-pointer rounded-xl border py-2.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider outline-none sm:rounded-full sm:py-1.5 ${
                   isDark
                     ? "border-slate-600 bg-slate-900/80 text-slate-100"
                     : "border-slate-200 bg-slate-50 text-[#16263F]"
@@ -713,17 +715,15 @@ export function ControlPanelHome({
                 <option value="in_progress">En proceso</option>
                 <option value="pending">Pendiente</option>
               </select>
-            </div>
-            <div className="flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={openManualModal}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#16263F] to-[#1a3560] px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-[#16263F]/20 transition hover:brightness-110 active:scale-[0.98] sm:flex-none"
+                className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#16263F] to-[#1a3560] px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-[#16263F]/20 transition hover:brightness-110 active:scale-[0.98] sm:rounded-full sm:px-5"
               >
-                <Plus className="h-4 w-4" /> Manual
+                <Plus className="h-4 w-4 shrink-0" /> Manual
               </button>
-              <label className="inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-r from-emerald-600 to-emerald-500 px-5 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-emerald-700/20 transition hover:brightness-110 active:scale-[0.98] sm:flex-none">
-                <UploadCloud className="h-4 w-4" /> Excel
+              <label className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-emerald-700/20 transition hover:brightness-110 active:scale-[0.98] sm:rounded-full sm:px-5">
+                <UploadCloud className="h-4 w-4 shrink-0" /> Excel
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -737,8 +737,8 @@ export function ControlPanelHome({
         </header>
 
         {/* Hero + donut + KPIs compactos */}
-        <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-12 lg:gap-5">
-          <div className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-gradient-to-br from-[#16263F] via-[#1a3a66] to-[#2563eb] p-6 text-white shadow-lg shadow-[#16263F]/15 md:p-8 lg:col-span-7">
+        <div className="mb-5 grid min-w-0 grid-cols-1 gap-3 sm:mb-6 sm:gap-4 lg:grid-cols-12 lg:gap-5">
+          <div className="relative min-w-0 overflow-hidden rounded-xl border border-white/12 bg-gradient-to-br from-[#16263F] via-[#1a3a66] to-[#2563eb] p-4 text-white shadow-lg shadow-[#16263F]/15 sm:rounded-2xl sm:p-6 md:rounded-[2rem] md:p-8 lg:col-span-7">
             <div
               className="pointer-events-none absolute inset-0 bg-[linear-gradient(105deg,transparent_40%,rgba(255,255,255,0.06)_50%,transparent_60%)]"
               aria-hidden
@@ -748,18 +748,18 @@ export function ControlPanelHome({
               aria-hidden
             />
             <div className="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full bg-emerald-400/10 blur-3xl" aria-hidden />
-            <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-200/90">
+            <div className="relative z-10 flex min-w-0 flex-col gap-4 sm:gap-6 md:flex-row md:items-end md:justify-between">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200/90 sm:tracking-[0.25em]">
                   Resumen operativo
                 </p>
-                <p className="mt-2 text-4xl md:text-5xl font-black tabular-nums tracking-tight">
+                <p className="mt-2 text-3xl font-black tabular-nums tracking-tight sm:text-4xl md:text-5xl">
                   {formatNumber(activeOrders)}
                 </p>
-                <p className="mt-1 text-sm font-semibold text-blue-100/95">
+                <p className="mt-1 text-pretty text-sm font-semibold leading-snug text-blue-100/95">
                   órdenes activas (pendientes + en proceso)
                 </p>
-                <p className="mt-3 text-xs text-blue-200/80">
+                <p className="mt-3 text-pretty text-[11px] leading-relaxed text-blue-200/80 sm:text-xs">
                   Total en sistema:{" "}
                   <span className="font-bold text-white">{formatNumber(dashboard.total)}</span>{" "}
                   RAs · Bultos capturados{" "}
@@ -769,9 +769,9 @@ export function ControlPanelHome({
                   </span>
                 </p>
               </div>
-              <div className="flex flex-col items-stretch md:items-end gap-3">
+              <div className="flex min-w-0 flex-col items-stretch gap-2 sm:gap-3 md:items-end">
                 <SparklineBars heights={sparkHeights} />
-                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-200/70 text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-blue-200/70 md:text-right">
                   Actividad relativa · reciente
                 </p>
               </div>
@@ -783,8 +783,8 @@ export function ControlPanelHome({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-5 lg:grid-cols-1">
-            <div className="flex flex-row items-center gap-5 rounded-[2rem] border border-slate-200/80 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:col-span-5 lg:grid-cols-1">
+            <div className="flex min-w-0 flex-row items-center gap-4 rounded-xl border border-slate-200/80 bg-white p-4 shadow-md shadow-slate-200/30 sm:gap-5 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
               <DonutRing percent={completionDonutPct} />
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
@@ -799,7 +799,7 @@ export function ControlPanelHome({
                 </p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3 rounded-[2rem] border border-slate-200/80 bg-white p-4 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
+            <div className="grid min-w-0 grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white p-3 shadow-md shadow-slate-200/30 sm:gap-3 sm:rounded-2xl sm:p-4 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
               <MiniStat icon={<Truck className="h-3.5 w-3.5" />} label="Despachados" value={dashboard.dispatched} />
               <MiniStat icon={<AlertCircle className="h-3.5 w-3.5 text-red-500" />} label="Prioridad" value={dashboard.priority} />
               <MiniStat icon={<Package className="h-3.5 w-3.5" />} label="Progreso real" value={`${overallProgressPct}%`} />
@@ -809,8 +809,8 @@ export function ControlPanelHome({
         </div>
 
         {/* Contenido principal: lista + lateral */}
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
-          <section className="rounded-[2rem] border border-slate-200/80 bg-white p-5 shadow-md shadow-slate-200/25 md:p-6 xl:col-span-8 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+        <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-12">
+          <section className="min-w-0 rounded-xl border border-slate-200/80 bg-white p-4 shadow-md shadow-slate-200/25 sm:rounded-2xl sm:p-5 md:rounded-[2rem] md:p-6 xl:col-span-8 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
             <div className="mb-5 flex flex-col gap-3 border-b border-slate-100 pb-4 dark:border-slate-800 sm:flex-row sm:items-end sm:justify-between">
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#16263F] to-blue-700 text-white shadow-md shadow-blue-900/25">
@@ -903,7 +903,7 @@ export function ControlPanelHome({
                               : "En vivo: sin captura activa"}
                           </p>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0 md:min-w-[200px]">
+                      <div className="flex w-full items-center gap-3 sm:w-auto md:min-w-[200px]">
                         <div className="flex-1 md:flex-none md:w-36">
                           <div className="flex justify-between text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 mb-1">
                             <span>Progreso</span>
@@ -937,8 +937,8 @@ export function ControlPanelHome({
             </div>
           </section>
 
-          <aside className="space-y-4 xl:col-span-4">
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+          <aside className="min-w-0 space-y-3 sm:space-y-4 xl:col-span-4">
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-md shadow-slate-200/30 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
               <div className="mb-4 flex items-center gap-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/80 dark:text-violet-300">
                   <BarChart3 className="h-5 w-5" aria-hidden />
@@ -969,8 +969,8 @@ export function ControlPanelHome({
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
-              <div className="mb-3 flex items-center gap-3">
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-md shadow-slate-200/30 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-3 flex items-center gap-3 sm:mb-4">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100 text-sky-800 dark:bg-sky-950/80 dark:text-sky-300">
                   <Layers className="h-5 w-5" aria-hidden />
                 </span>
@@ -989,8 +989,8 @@ export function ControlPanelHome({
               </p>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200/90 bg-white p-5 shadow-md shadow-slate-200/30 dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
-              <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-md shadow-slate-200/30 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-3">
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
                     <Users className="h-5 w-5" aria-hidden />
@@ -1060,7 +1060,7 @@ export function ControlPanelHome({
               )}
             </div>
 
-            <div className="rounded-[2rem] border border-dashed border-slate-300/90 bg-gradient-to-br from-slate-50 to-white p-4 dark:border-slate-600 dark:from-slate-900 dark:to-slate-950">
+            <div className="rounded-xl border border-dashed border-slate-300/90 bg-gradient-to-br from-slate-50 to-white p-3 sm:rounded-2xl sm:p-4 md:rounded-[2rem] dark:border-slate-600 dark:from-slate-900 dark:to-slate-950">
               <div className="mb-2 flex items-center gap-2 text-[#16263F] dark:text-slate-100">
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
                   <User className="h-4 w-4" aria-hidden />
@@ -1181,7 +1181,7 @@ function HeroChip({ label, value }: { label: string; value: string }) {
 
 function SparklineBars({ heights }: { heights: number[] }) {
   return (
-    <div className="flex h-14 max-w-[220px] items-end justify-end gap-1 md:max-w-[260px]">
+    <div className="flex h-12 w-full min-w-0 items-end justify-start gap-1 sm:h-14 sm:max-w-[220px] sm:justify-end md:max-w-[260px]">
       {heights.map((h, i) => (
         <div
           key={i}

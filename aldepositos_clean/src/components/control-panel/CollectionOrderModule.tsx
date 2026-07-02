@@ -22,6 +22,15 @@ import {
   updateCollectionOrder,
 } from "@/lib/collectionOrders";
 import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders";
+import { useEditingFocusRef } from "@/hooks/useInventoryRealtimeSync";
+import {
+  getSharedWorkPresenceTabId,
+} from "@/lib/panelPresence";
+import {
+  isForeignLiveUpdate,
+  scheduleOrderLivePublish,
+  subscribeLiveUpdates,
+} from "@/lib/liveCollaboration";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
 import {
   buildMeasurePatchFromCatalog,
@@ -48,11 +57,10 @@ import {
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
-import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   applyPesoTotalToLine,
   applyUnidadesTotalesToLine,
-  collectionLinesToDetailedMeasureData,
+  collectionLinesToRaMeasureData,
   lineHasData,
   pesoTotalFromLine,
   unidadesTotalesFromLine,
@@ -66,6 +74,7 @@ import {
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
 const CATALOG_DEBOUNCE_MS = 500;
+const ORDER_AUTOSAVE_MS = 300;
 
 const makeEmptyGeminiJob = (): CollectionOrderGeminiJobState => ({
   input: "",
@@ -326,7 +335,7 @@ export function CollectionOrderModule({
   userDisplayName = null,
 }: CollectionOrderModuleProps) {
   const { orders, setOrders, reloadOrders, ordersLoading } =
-    useSupabaseCollectionOrders({ enabled: !!userEmail });
+    useSupabaseCollectionOrders({ enabled: !!userEmail, userKey: userEmail });
 
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -366,6 +375,7 @@ export function CollectionOrderModule({
   const pendingRemoteOrderRef = useRef<CollectionOrder | null>(null);
   const prevEditingIdRef = useRef<string | null>(null);
   const [remoteOrderUpdatePending, setRemoteOrderUpdatePending] = useState(false);
+  const isEditingRef = useEditingFocusRef();
 
   editingRef.current = editing;
 
@@ -396,8 +406,9 @@ export function CollectionOrderModule({
     if (!current) return;
     const localHash = JSON.stringify(current);
     const isDirty = localHash !== lastSavedOrderHashRef.current;
+    const isEditing = isEditingRef.current;
 
-    if (isDirty) {
+    if (isDirty && isEditing) {
       pendingRemoteOrderRef.current = remote;
       setRemoteOrderUpdatePending(true);
       lastRemoteOrderHashRef.current = remoteLinesHash;
@@ -409,7 +420,58 @@ export function CollectionOrderModule({
     lastRemoteOrderHashRef.current = remoteLinesHash;
     pendingRemoteOrderRef.current = null;
     setRemoteOrderUpdatePending(false);
-  }, [orders, editing?.id]);
+  }, [orders, editing?.id, isEditingRef]);
+
+  useEffect(() => {
+    const key = (userEmail ?? "").trim();
+    if (!editing?.id || !key) return;
+    const hash = JSON.stringify(editing);
+    if (hash === lastSavedOrderHashRef.current) return;
+    scheduleOrderLivePublish({
+      orderId: editing.id,
+      userKey: key,
+      lines: editing.lines,
+    });
+  }, [editing, userEmail]);
+
+  useEffect(() => {
+    if (!editing?.id) return;
+    const tabId = getSharedWorkPresenceTabId();
+    const orderId = editing.id;
+    return subscribeLiveUpdates((update) => {
+      if (update.type !== "order" || update.orderId !== orderId) return;
+      if (!isForeignLiveUpdate(update, tabId)) return;
+
+      const liveHash = JSON.stringify(update.lines);
+      if (liveHash === lastRemoteOrderHashRef.current) return;
+
+      if (isOrderSavingRef.current) {
+        const current = editingRef.current;
+        if (current) {
+          pendingRemoteOrderRef.current = { ...current, lines: update.lines };
+        }
+        return;
+      }
+
+      const current = editingRef.current;
+      if (!current) return;
+      const isDirty = JSON.stringify(current) !== lastSavedOrderHashRef.current;
+      const isEditing = isEditingRef.current;
+
+      if (isDirty && isEditing) {
+        pendingRemoteOrderRef.current = { ...current, lines: update.lines };
+        setRemoteOrderUpdatePending(true);
+        lastRemoteOrderHashRef.current = liveHash;
+        return;
+      }
+
+      const next = { ...current, lines: update.lines };
+      setEditing(next);
+      lastRemoteOrderHashRef.current = liveHash;
+      pendingRemoteOrderRef.current = null;
+      setRemoteOrderUpdatePending(false);
+    });
+  }, [editing?.id, userEmail, isEditingRef]);
 
   const applyPendingRemoteOrder = useCallback(() => {
     const remote = pendingRemoteOrderRef.current;
@@ -653,7 +715,7 @@ export function CollectionOrderModule({
       autoSaveTimerRef.current = setTimeout(() => {
         autoSaveTimerRef.current = null;
         void persistOrder({ order, showAlerts: false });
-      }, 1200);
+      }, ORDER_AUTOSAVE_MS);
     },
     [persistOrder, userEmail],
   );
@@ -954,12 +1016,11 @@ export function CollectionOrderModule({
       }
       setEditing(baseOrder);
 
-      const detailed = collectionLinesToDetailedMeasureData(lines).map((row) => ({
+      const targetType = (task.type as string) || "quick";
+      const adapted = collectionLinesToRaMeasureData(lines, targetType).map((row) => ({
         ...row,
         id: generateId(),
       }));
-      const targetType = (task.type as string) || "quick";
-      const adapted = adaptMeasureDataForModule(detailed, "detailed", targetType);
       const prevData = (task.measureData || []) as Record<string, unknown>[];
       const nextMeasure: unknown[] =
         merge === "replace" ? adapted : [...prevData, ...adapted];

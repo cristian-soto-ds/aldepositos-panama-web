@@ -50,7 +50,7 @@ export async function deleteCollectionOrderById(id: string): Promise<void> {
   if (error) throw error;
 }
 
-const COLLECTION_REALTIME_DEBOUNCE_MS = 250;
+const COLLECTION_REALTIME_DEBOUNCE_MS = 50;
 
 export type CollectionOrderRealtimeChange = {
   eventType: "INSERT" | "UPDATE" | "DELETE";

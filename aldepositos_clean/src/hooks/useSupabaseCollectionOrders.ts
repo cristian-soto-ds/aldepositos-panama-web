@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
+import {
+  isForeignLiveUpdate,
+  subscribeLiveUpdates,
+} from "@/lib/liveCollaboration";
 import {
   fetchCollectionOrders,
   patchCollectionOrdersList,
@@ -11,9 +16,10 @@ import type { CollectionOrder } from "@/lib/types/collectionOrder";
 
 type Options = {
   enabled: boolean;
+  userKey?: string | null;
 };
 
-export function useSupabaseCollectionOrders({ enabled }: Options) {
+export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
   const [orders, setOrders] = useState<CollectionOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +61,20 @@ export function useSupabaseCollectionOrders({ enabled }: Options) {
       unsubscribe();
     };
   }, [enabled, reload, applyRealtimeChange]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const tabId = getSharedWorkPresenceTabId();
+    return subscribeLiveUpdates((update) => {
+      if (update.type !== "order") return;
+      if (!isForeignLiveUpdate(update, tabId)) return;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === update.orderId ? { ...o, lines: update.lines } : o,
+        ),
+      );
+    });
+  }, [enabled, userKey]);
 
   useEffect(() => {
     if (!enabled) return;

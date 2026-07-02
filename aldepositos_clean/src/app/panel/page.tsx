@@ -64,6 +64,7 @@ export default function PanelPage() {
   const [currentView, setCurrentView] = useState("dashboard");
   const { tasks, setTasks, reloadTasks, tasksLoading } = useSupabaseTasks({
     enabled: !!userEmail,
+    userKey: userEmail,
   });
   const [containerToEdit, setContainerToEdit] = useState<{
     loadedIds: string[];

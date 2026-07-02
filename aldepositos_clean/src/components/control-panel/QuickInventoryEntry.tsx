@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
-import { useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
+import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
 import { tableScrollHostClass } from "@/lib/responsiveUi";
 import {
   applyConsecutiveReferences,
@@ -138,7 +138,7 @@ function createEmptyMeasureRow(): MeasureRow {
   };
 }
 const CATALOG_DEBOUNCE_MS = 500;
-const QUICK_AUTOSAVE_MS = 700;
+const QUICK_AUTOSAVE_MS = 200;
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
 
 function CaptureLayoutToggle({
@@ -342,6 +342,32 @@ export function QuickInventoryEntry({
     [referenceMode, captureLayout],
   );
 
+  const isEditingRef = useEditingFocusRef();
+
+  const getLiveTaskMeta = useCallback(
+    (rows: MeasureRow[]) => {
+      const hasCapture = quickRowsHaveAnyCapture(rows);
+      const totalsBultos = rows.reduce(
+        (a, row) => a + (parseFloat(String(row.bultos)) || 0),
+        0,
+      );
+      const expected = selectedTask?.expectedBultos ?? 0;
+      const isCompleted =
+        hasCapture &&
+        totalsBultos >= expected &&
+        hasQuickRequiredData(rows);
+      return {
+        currentBultos: hasCapture ? totalsBultos : 0,
+        status: isCompleted
+          ? "completed"
+          : hasCapture
+            ? "in_progress"
+            : "pending",
+      };
+    },
+    [selectedTask?.expectedBultos],
+  );
+
   const {
     remoteUpdatePending,
     applyPendingRemoteUpdate,
@@ -349,14 +375,18 @@ export function QuickInventoryEntry({
   } = useInventoryRealtimeSync({
     tasks,
     selectedTask,
+    measureRows,
     setSelectedTask,
     setMeasureRows,
     isSavingRef,
+    isEditingRef,
     lastSavedHashRef,
     latestRowsRef,
     latestTaskRef,
     buildHash: buildEditorHash,
     prepareRowsFromRemote,
+    getLiveTaskMeta,
+    userKey: presenceUserKey,
     onTaskRemoved: () => {
       setSelectedTask(null);
       activeTaskIdRef.current = null;
@@ -934,7 +964,7 @@ export function QuickInventoryEntry({
     return (
       <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">
         <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
-          <div className="shrink-0 space-y-3 sm:space-y-4 md:space-y-6 mb-3 sm:mb-4 md:mb-6">
+          <div className="shrink-0 space-y-2 sm:space-y-4 md:space-y-6 mb-2 sm:mb-4 md:mb-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div>
                 <h2 className="text-fluid-title flex items-center gap-2 font-bold text-[#16263F] dark:text-slate-100 md:gap-3">
@@ -1014,7 +1044,7 @@ export function QuickInventoryEntry({
             <button
               type="button"
               onClick={() => setClientFilter("Todos")}
-              className={`shrink-0 rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
+              className={`shrink-0 rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
                 clientFilter === "Todos"
                   ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
                   : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
@@ -1027,7 +1057,7 @@ export function QuickInventoryEntry({
                 key={c}
                 type="button"
                 onClick={() => setClientFilter(c)}
-                className={`shrink-0 rounded-full border px-4 py-2 text-[10px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
                   clientFilter === c
                     ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
                     : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
@@ -1040,8 +1070,8 @@ export function QuickInventoryEntry({
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pb-16 sm:pb-20">
-            <div className="grid grid-cols-1 gap-3 md:gap-4">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pb-12 sm:pb-20">
+            <div className="grid grid-cols-1 gap-2 sm:gap-3 md:gap-4">
               {displayedTasks.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
                   No hay órdenes{" "}
@@ -1065,16 +1095,16 @@ export function QuickInventoryEntry({
                     handleSelectTask(t);
                   }
                 }}
-                className={`group relative flex cursor-pointer flex-col gap-3 rounded-2xl border p-4 shadow-sm transition-all hover:border-blue-200 hover:shadow-lg dark:hover:border-blue-800 sm:p-5 md:p-6 ${
+                className={`group relative flex cursor-pointer flex-col gap-2 rounded-xl border p-2.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:gap-3 sm:rounded-2xl sm:p-4 md:p-6 ${
                   viewMode === "priority"
                     ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
                     : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
                     <h3
-                      className={`text-xl font-bold leading-none tracking-tight sm:text-2xl md:text-3xl ${
+                      className={`shrink-0 text-base font-black leading-none tracking-tight sm:text-2xl md:text-3xl ${
                         viewMode === "priority"
                           ? "text-red-700 dark:text-red-300"
                           : "text-[#16263F] dark:text-slate-100"
@@ -1083,53 +1113,63 @@ export function QuickInventoryEntry({
                       RA {t.ra}
                     </h3>
                     {t.status === "in_progress" && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                      <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200 sm:rounded-full sm:px-2 sm:text-[10px]">
                         En curso
                       </span>
                     )}
                   </div>
                   <div
-                    className={`flex shrink-0 flex-col items-center rounded-xl border px-3 py-1.5 text-center shadow-sm ${
+                    className={`flex shrink-0 items-center gap-1 rounded-lg border px-2 py-1 text-center shadow-sm sm:flex-col sm:gap-0 sm:rounded-xl sm:px-3 sm:py-1.5 ${
                       viewMode === "priority"
                         ? "border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
                         : "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
                     }`}
                   >
-                    <span className="text-[9px] font-semibold leading-none">Bultos</span>
-                    <span className="text-lg font-bold tabular-nums leading-none sm:text-xl md:text-2xl">
+                    <span className="text-[8px] font-semibold leading-none sm:text-[9px]">Bultos</span>
+                    <span className="text-sm font-bold tabular-nums leading-none sm:text-xl md:text-2xl">
                       {t.expectedBultos}
                     </span>
                   </div>
                 </div>
 
-                <div className="space-y-2.5 border-t border-slate-100 pt-3 dark:border-slate-700 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0">
-                  <div className="min-w-0">
+                <div className="min-w-0 border-t border-slate-100 pt-2 dark:border-slate-700 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 sm:pt-3">
+                  <p className="truncate text-[11px] font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:hidden">
+                    <span className="text-slate-400 dark:text-slate-500">{t.provider}</span>
+                    {t.brand ? (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-600"> · </span>
+                        {t.brand}
+                      </>
+                    ) : null}
+                  </p>
+                  <div className="hidden min-w-0 sm:block">
                     <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
                       Proveedor
                     </p>
-                    <p className="text-sm font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:text-xs md:text-sm">
+                    <p className="truncate text-xs font-semibold leading-snug text-[#16263F] dark:text-slate-100 md:text-sm">
                       {t.provider}
                     </p>
                   </div>
-                  <div className="min-w-0">
+                  <div className="hidden min-w-0 sm:block">
                     <p className="mb-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
                       Marca / tracking
                     </p>
-                    <p className="text-sm font-semibold leading-snug text-[#16263F] dark:text-slate-100 sm:text-xs md:text-sm">
+                    <p className="truncate text-xs font-semibold leading-snug text-[#16263F] dark:text-slate-100 md:text-sm">
                       {t.brand}
                     </p>
                   </div>
                 </div>
 
                 <div
-                  className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-700"
+                  className="flex items-center justify-between gap-1 border-t border-slate-100 pt-2 dark:border-slate-700 sm:gap-2 sm:pt-3"
                   onClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <p className="text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
-                    Toca para capturar →
+                  <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400 sm:text-[11px] sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                    <span className="sm:hidden">Capturar →</span>
+                    <span className="hidden sm:inline">Toca para capturar →</span>
                   </p>
-                  <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
+                  <div className="ml-auto flex shrink-0 items-center gap-0 sm:gap-1">
                     <div className="relative">
                       <button
                         type="button"
@@ -1137,10 +1177,10 @@ export function QuickInventoryEntry({
                           e.stopPropagation();
                           setTransferOpenId((prev) => (prev === t.id ? null : t.id));
                         }}
-                        className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-500 dark:hover:bg-emerald-950/30"
+                        className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:text-slate-500 dark:hover:bg-emerald-950/30 sm:rounded-xl sm:p-2"
                         title="Transferir a otro módulo"
                       >
-                        <ArrowRightLeft className="icon-sm" />
+                        <ArrowRightLeft className="h-3.5 w-3.5 sm:icon-sm" />
                       </button>
                       {transferOpenId === t.id && (
                         <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
@@ -1204,9 +1244,9 @@ export function QuickInventoryEntry({
                         e.stopPropagation();
                         openEditModal(t);
                       }}
-                      className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-slate-500 dark:hover:bg-blue-950/45 dark:hover:text-blue-400"
+                      className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:text-slate-500 dark:hover:bg-blue-950/45 dark:hover:text-blue-400 sm:rounded-xl sm:p-2"
                     >
-                      <Edit className="icon-sm" />
+                      <Edit className="h-3.5 w-3.5 sm:icon-sm" />
                     </button>
                     <button
                       type="button"
@@ -1214,9 +1254,9 @@ export function QuickInventoryEntry({
                         e.stopPropagation();
                         onDeleteTask(t.id);
                       }}
-                      className="touch-target flex items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500"
+                      className="touch-target flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-500 sm:rounded-xl sm:p-2"
                     >
-                      <Trash2 className="icon-sm" />
+                      <Trash2 className="h-3.5 w-3.5 sm:icon-sm" />
                     </button>
                     <span className="hidden items-center justify-center rounded-xl bg-slate-50 p-2 text-slate-400 sm:flex dark:bg-slate-800/60 dark:text-slate-500">
                       <ArrowRight className="icon-sm" />

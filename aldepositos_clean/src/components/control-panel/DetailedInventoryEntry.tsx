@@ -27,7 +27,7 @@ import {
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
-import { useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
+import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
 import type { Task as SharedTask } from "@/lib/types/task";
 import {
   buildMeasurePatchFromCatalog,
@@ -106,7 +106,7 @@ function createEmptyDetailedRow(): MeasureRow {
   };
 }
 const CATALOG_DEBOUNCE_MS = 500;
-const DETAILED_AUTOSAVE_MS = 700;
+const DETAILED_AUTOSAVE_MS = 200;
 const detailedDraftKey = (taskId: string) =>
   `detailed_inventory_draft_v1_${taskId}`;
 type AutosaveState = "idle" | "saving" | "saved" | "error";
@@ -242,6 +242,30 @@ export function DetailedInventoryEntry({
     [],
   );
 
+  const isEditingRef = useEditingFocusRef();
+
+  const getLiveTaskMeta = useCallback(
+    (rows: MeasureRow[]) => {
+      let bultos = 0;
+      rows.forEach((row) => {
+        const rowBultos = parseFloat(String(row.bultos ?? 0)) || 0;
+        const isReempaque = row.reempaque === true;
+        bultos += isReempaque ? 0 : rowBultos;
+      });
+      const hasCapture = detailedRowsHaveAnyCapture(rows);
+      const expected = selectedTask?.expectedBultos ?? 0;
+      const isCompleted =
+        hasCapture &&
+        bultos >= expected &&
+        hasDetailedRequiredData(rows);
+      return {
+        currentBultos: hasCapture ? bultos : 0,
+        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
+      };
+    },
+    [selectedTask?.expectedBultos],
+  );
+
   const {
     remoteUpdatePending,
     applyPendingRemoteUpdate,
@@ -249,16 +273,20 @@ export function DetailedInventoryEntry({
   } = useInventoryRealtimeSync({
     tasks: tasks as SharedTask[],
     selectedTask: selectedTask as SharedTask | null,
+    measureRows,
     setSelectedTask: setSelectedTask as React.Dispatch<
       React.SetStateAction<SharedTask | null>
     >,
     setMeasureRows,
     isSavingRef,
+    isEditingRef,
     lastSavedHashRef,
     latestRowsRef,
     latestTaskRef: latestTaskRef as React.MutableRefObject<SharedTask | null>,
     buildHash: buildEditorHash,
     prepareRowsFromRemote,
+    getLiveTaskMeta,
+    userKey: presenceUserKey,
     onTaskRemoved: () => {
       setSelectedTask(null);
       activeTaskIdRef.current = null;

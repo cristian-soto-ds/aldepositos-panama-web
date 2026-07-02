@@ -83,6 +83,7 @@ export function lineHasData(line: CollectionOrderLine): boolean {
 
 /**
  * Convierte líneas de recolección a filas `measureData` para RA tipo detallado.
+ * Solo incluye campos que existen en el módulo de ingreso detallado.
  */
 function cubicajeTotalM3FromLine(line: CollectionOrderLine): string {
   const l = parseN(line.l);
@@ -114,24 +115,61 @@ export function collectionLinesToDetailedMeasureData(
           : row.unidadesPorBulto,
       pesoPorBulto:
         row.pesoPorBulto === "" || row.pesoPorBulto === undefined ? "" : row.pesoPorBulto,
-      pesoPiezaKg:
-        row.pesoPiezaKg === "" || row.pesoPiezaKg === undefined ? "" : row.pesoPiezaKg,
       l: row.l ?? "",
       w: row.w ?? "",
       h: row.h ?? "",
       volumenM3: volumenM3 ?? "",
       unidad: row.unidad ?? "",
-      magayaModelo: row.magayaModelo ?? "",
-      paisOrigen: row.paisOrigen ?? "",
-      tejido: row.tejido ?? "",
-      talla: row.talla ?? "",
-      forro: row.forro ?? "",
-      genero: row.genero ?? "",
-      composicion: row.composicion ?? "",
       reempaque: false,
       bultoContenedor: "",
       referenciasContenedor: "",
       referenciaContenedora: "",
     };
   });
+}
+
+/**
+ * Convierte líneas de recolección a filas para ingreso rápido / guía aérea.
+ * Solo referencia y bultos: peso y medidas los captura el inventariado en almacén.
+ */
+export function collectionLinesToQuickMeasureData(
+  lines: CollectionOrderLine[],
+): Record<string, unknown>[] {
+  return lines
+    .filter((row) => {
+      const ref = String(row.referencia ?? "").trim();
+      const bultos = parseN(row.bultos);
+      return ref.length > 0 || bultos > 0;
+    })
+    .map((row) => ({
+      id: row.id,
+      referencia: String(row.referencia ?? "").trim(),
+      descripcion: "",
+      bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
+      unidadesPorBulto: "",
+      pesoPorBulto: "",
+      l: "",
+      w: "",
+      h: "",
+      weight: "",
+      volumenM3: "",
+      unidad: "",
+      reempaque: false,
+      bultoContenedor: "",
+      referenciasContenedor: "",
+      referenciaContenedora: "",
+    }));
+}
+
+export type RaMeasureModule = "quick" | "detailed" | "airway";
+
+/** Volcado OR → RA según el tipo de módulo de destino. */
+export function collectionLinesToRaMeasureData(
+  lines: CollectionOrderLine[],
+  targetType: RaMeasureModule | string,
+): Record<string, unknown>[] {
+  const t = targetType === "detailed" ? "detailed" : "quick";
+  return t === "detailed"
+    ? collectionLinesToDetailedMeasureData(lines)
+    : collectionLinesToQuickMeasureData(lines);
 }

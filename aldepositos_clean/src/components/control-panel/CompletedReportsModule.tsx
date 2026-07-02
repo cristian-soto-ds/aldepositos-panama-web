@@ -8,6 +8,7 @@ import {
   PDF_EXPORT_WIDTH_PX,
   waitForReportDomReady,
 } from "./reportsPdfExport";
+import { downloadReportExcel } from "@/lib/exportReportExcel";
 import type { Task as TaskModel } from "@/lib/types/task";
 import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
 import {
@@ -17,6 +18,7 @@ import {
   Download,
   Eye,
   FileText,
+  FileSpreadsheet,
   Loader2,
   Printer,
   Search,
@@ -70,7 +72,8 @@ export function CompletedReportsModule({
     "Todos" | "quick" | "detailed" | "airway"
   >("Todos");
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
-  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   /** Solo el árbol de exportación PDF (off-screen), no la vista en pantalla */
   const pdfExportLayoutRef = useRef<HTMLDivElement>(null);
 
@@ -106,7 +109,7 @@ export function CompletedReportsModule({
   }, [reportViewId, titleRa]);
 
   useEffect(() => {
-    if (!reportViewId) setPdfExportError(null);
+    if (!reportViewId) setExportError(null);
   }, [reportViewId]);
 
   const handlePrint = () => {
@@ -115,14 +118,14 @@ export function CompletedReportsModule({
 
   const handleDownloadPdf = async () => {
     if (tasksToPrint.length === 0) return;
-    setPdfExportError(null);
+    setExportError(null);
     setIsDownloadingPdf(true);
     try {
       const root = pdfExportLayoutRef.current;
       if (!root) {
         const err = new Error("[Reports PDF] pdfExportLayoutRef no montado.");
         console.error(err);
-        setPdfExportError("No se pudo acceder al contenedor de exportación PDF.");
+        setExportError("No se pudo acceder al contenedor de exportación PDF.");
         return;
       }
 
@@ -131,11 +134,29 @@ export function CompletedReportsModule({
       await exportReportPdfFromExportRoot(root, filename);
     } catch (e) {
       console.error("[Reports PDF] Fallo al generar PDF:", e);
-      setPdfExportError(
+      setExportError(
         e instanceof Error ? e.message : "Error al generar el PDF.",
       );
     } finally {
       setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleDownloadExcel = async (tasks: Task[]) => {
+    if (tasks.length === 0) return;
+    setExportError(null);
+    setIsDownloadingExcel(true);
+    try {
+      await downloadReportExcel({
+        tasks: tasks as TaskModel[],
+      });
+    } catch (e) {
+      console.error("[Reports Excel] Fallo al generar Excel:", e);
+      setExportError(
+        e instanceof Error ? e.message : "Error al generar el Excel.",
+      );
+    } finally {
+      setIsDownloadingExcel(false);
     }
   };
 
@@ -243,6 +264,19 @@ export function CompletedReportsModule({
             </button>
             <button
               type="button"
+              disabled={isDownloadingExcel}
+              onClick={() => void handleDownloadExcel(tasksToPrint)}
+              className="bg-emerald-600 text-white px-4 md:px-6 py-2.5 rounded-lg font-black shadow-md hover:bg-emerald-700 transition-colors flex items-center gap-2 uppercase text-[10px] md:text-xs tracking-widest disabled:opacity-70"
+            >
+              {isDownloadingExcel ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+              Descargar Excel
+            </button>
+            <button
+              type="button"
               disabled={isDownloadingPdf}
               onClick={handleDownloadPdf}
               className="bg-slate-700 text-white px-4 md:px-6 py-2.5 rounded-lg font-black shadow-md hover:bg-slate-800 transition-colors flex items-center gap-2 uppercase text-[10px] md:text-xs tracking-widest disabled:opacity-70"
@@ -257,12 +291,12 @@ export function CompletedReportsModule({
           </div>
         </div>
 
-        {pdfExportError && (
+        {exportError && (
           <div
             role="status"
             className="shrink-0 px-4 md:px-8 py-2 bg-red-50 border-b border-red-100 text-red-700 text-[11px] font-bold"
           >
-            {pdfExportError}
+            {exportError}
           </div>
         )}
 
@@ -403,6 +437,14 @@ export function CompletedReportsModule({
   return (
     <div className="w-full h-full flex flex-col animate-fade relative">
       <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+        {exportError && (
+          <div
+            role="status"
+            className="shrink-0 mx-2 md:mx-0 mb-3 px-4 py-2 bg-red-50 border border-red-100 rounded-xl text-red-700 text-[11px] font-bold"
+          >
+            {exportError}
+          </div>
+        )}
         <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6 px-2 md:px-0">
           <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
             <FileText className="text-purple-600 w-5 h-5 md:w-8 md:h-8" />{" "}
@@ -551,7 +593,23 @@ export function CompletedReportsModule({
                           {t.brand ? ` — ${t.brand}` : ""}
                         </p>
                       </div>
-                      <div className="text-left md:text-right flex items-center gap-4 justify-end mt-2 md:mt-0">
+                      <div className="text-left md:text-right flex items-center gap-2 md:gap-4 justify-end mt-2 md:mt-0">
+                        <button
+                          type="button"
+                          title="Descargar Excel"
+                          disabled={isDownloadingExcel}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDownloadExcel([t]);
+                          }}
+                          className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-colors border border-emerald-200 disabled:opacity-60"
+                        >
+                          {isDownloadingExcel ? (
+                            <Loader2 size={18} className="animate-spin" />
+                          ) : (
+                            <FileSpreadsheet size={18} />
+                          )}
+                        </button>
                         <div className="text-right">
                           <p className="text-sm md:text-lg font-black text-[#16263F] dark:text-slate-100 leading-none">
                             {t.currentBultos} BULTOS
@@ -575,6 +633,21 @@ export function CompletedReportsModule({
               {selectedReportIds.length} Seleccionados
             </span>
             <div className="h-6 w-[1px] bg-slate-600" />
+            <button
+              type="button"
+              onClick={() => void handleDownloadExcel(
+                completedTasks.filter((t) => selectedReportIds.includes(t.id)),
+              )}
+              disabled={isDownloadingExcel}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-colors shadow-lg shadow-emerald-500/30 disabled:opacity-70"
+            >
+              {isDownloadingExcel ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <FileSpreadsheet size={16} />
+              )}{" "}
+              Excel
+            </button>
             <button
               type="button"
               onClick={() => setIsViewingReports(true)}

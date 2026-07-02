@@ -1,7 +1,7 @@
 /**
  * Adapta measureData al cambiar un RA de un módulo a otro.
- * Quick: { id, referencia, bultos, l, w, h, weight? }
- * Detailed: { id, referencia, descripcion, bultos, unidadesPorBulto, pesoPorBulto, l, w, h }
+ * Quick/airway: { referencia, bultos } (+ campos vacíos de captura en almacén)
+ * Detailed: { referencia, descripcion, bultos, unidadesPorBulto, pesoPorBulto, l, w, h, ... }
  */
 
 type AnyMeasureRow = Record<string, unknown>;
@@ -34,25 +34,24 @@ export function adaptMeasureDataForModule(
   }
 
   if (toType === "quick" || toType === "airway") {
-    // detailed → quick/airway: conservar campos extra (und/bulto, desc., etc.) y mapear peso a weight
+    // Solo referencia y bultos: medidas y peso los toma el inventariado en almacén.
     return measureData.map((row) => ({
-      ...row,
       id: row.id ?? generateId(),
       referencia: row.referencia ?? "",
-      descripcion: row.descripcion ?? "",
+      descripcion: "",
       bultos: row.bultos ?? 0,
-      l: row.l ?? "",
-      w: row.w ?? "",
-      h: row.h ?? "",
-      weight: row.pesoPorBulto ?? row.weight ?? "",
-      volumenM3: row.volumenM3 ?? "",
-      unidad: row.unidad ?? "",
-      unidadesPorBulto: row.unidadesPorBulto ?? "",
-      pesoPorBulto: row.pesoPorBulto ?? "",
-      reempaque: row.reempaque ?? false,
-      bultoContenedor: row.bultoContenedor ?? "",
-      referenciasContenedor: row.referenciasContenedor ?? "",
-      referenciaContenedora: row.referenciaContenedora ?? "",
+      unidadesPorBulto: "",
+      pesoPorBulto: "",
+      l: "",
+      w: "",
+      h: "",
+      weight: "",
+      volumenM3: "",
+      unidad: "",
+      reempaque: false,
+      bultoContenedor: "",
+      referenciasContenedor: "",
+      referenciaContenedora: "",
     }));
   }
 

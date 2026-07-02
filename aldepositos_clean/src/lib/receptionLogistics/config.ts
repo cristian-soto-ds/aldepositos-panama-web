@@ -1,6 +1,6 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * CONFIGURACIÓN — Dirección de camiones (recepción logística)
+ * CONFIGURACIÓN — Recepción de camiones (recepción logística)
  * ═══════════════════════════════════════════════════════════════════════════
  * Edita este archivo para personalizar textos, colores, rampas y estados
  * sin tocar la lógica de los módulos Operador y Pantalla TV.
@@ -134,10 +134,10 @@ export const RECEPTION_TV_THEME = {
 // ─── TEXTOS DE INTERFAZ ───────────────────────────────────────────────────────
 
 export const RECEPTION_COPY = {
-  operatorTitle: "Dirección de camiones",
+  operatorTitle: "Recepción de camiones",
   operatorSubtitle:
     "Tablero Kanban, reporte diario de OR y pantalla TV para bodega.",
-  tvTitle: "Dirección de camiones — Pantalla",
+  tvTitle: "Recepción de camiones — Pantalla",
   tvSubtitle: "Actualización en vivo para proveedores y supervisión",
   reportLabel: "Generar reporte",
   reportHint:

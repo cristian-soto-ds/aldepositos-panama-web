@@ -1,3 +1,4 @@
+import { formatMeasure2 } from "@/lib/measureDecimals";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 import { applyPesoTotalToLine, applyUnidadesTotalesToLine } from "@/lib/collectionLineUtils";
 
@@ -250,7 +251,7 @@ export function normalizeCollectionOrderLineFromImport(
   if (!pesoPiezaKg && pbStr && undNum > 0) {
     const pb = parseFloatLoose(pbStr);
     if (Number.isFinite(pb) && pb > 0) {
-      pesoPiezaKg = (pb / undNum).toFixed(4).replace(/\.?0+$/, "");
+      pesoPiezaKg = formatMeasure2(pb / undNum);
       draft.pesoPiezaKg = pesoPiezaKg;
     }
   }
@@ -258,7 +259,7 @@ export function normalizeCollectionOrderLineFromImport(
   if (pesoPiezaKg && undNum > 0 && !String(draft.pesoPorBulto ?? "").trim()) {
     const pp = parseFloatLoose(pesoPiezaKg);
     if (Number.isFinite(pp) && pp > 0) {
-      draft.pesoPorBulto = (pp * undNum).toFixed(2);
+      draft.pesoPorBulto = formatMeasure2(pp * undNum);
     }
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Pantalla TV — Dirección de camiones / Bodega Central
+ * Pantalla TV — Recepción de camiones / Bodega Central
  * Tablero de 3 columnas optimizado para lectura a distancia.
  */
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Módulo Operador — Dirección de camiones
+ * Módulo Operador — Recepción de camiones
  * Tablero Kanban, carga de órdenes, buscador y Recibo de Almacén.
  * Personalización: src/lib/receptionLogistics/config.ts
  */

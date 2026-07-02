@@ -20,11 +20,22 @@ import {
 } from "@/lib/exportInventarioCsv";
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
 import {
+  cubicajeM3FromDims,
+  formatMeasure2,
+  normalizeMeasureField,
+  roundUpMeasure,
+  sanitizeMeasureTyping,
+} from "@/lib/measureDecimals";
+import { stripDetailedMeasureRow } from "@/lib/collectionLineUtils";
+import {
   getSharedWorkPresenceTabId,
   publishWorkPresence,
   clearWorkPresence,
 } from "@/lib/panelPresence";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
+import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
+import { liveOperatorsForRa } from "@/lib/presenceByRa";
+import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
 import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
@@ -176,6 +187,7 @@ export function DetailedInventoryEntry({
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority"
   >("pending");
+  const presenceByRa = useInventoryPresenceByRa();
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -362,7 +374,7 @@ export function DetailedInventoryEntry({
     if (!selectedTask) {
       return {
         bultos: 0,
-        cbm: "0.000",
+        cbm: "0.00",
         weight: 0,
         unidades: 0,
       };
@@ -378,24 +390,29 @@ export function DetailedInventoryEntry({
       const rowPesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
       const rowUnidadesPorBulto =
         parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
-      const l = parseFloat(String(row.l ?? 0)) || 0;
-      const w = parseFloat(String(row.w ?? 0)) || 0;
-      const h = parseFloat(String(row.h ?? 0)) || 0;
       const isReempaque = row.reempaque === true;
       const countedBultos = isReempaque ? 0 : rowBultos;
 
       bultos += countedBultos;
       weight += countedBultos * rowPesoPorBulto;
       unidades += countedBultos * rowUnidadesPorBulto;
-      cbm += isReempaque ? 0 : ((l * w * h) / 1_000_000) * countedBultos;
+      cbm += cubicajeM3FromDims(row.l, row.w, row.h, countedBultos, isReempaque);
     });
 
     return {
       bultos,
-      cbm: cbm.toFixed(2),
-      weight,
+      cbm: formatMeasure2(cbm) || "0.00",
+      weight: roundUpMeasure(weight),
       unidades,
     };
+  };
+
+  const commitMeasureField = (
+    rowId: string,
+    field: "l" | "w" | "h" | "pesoPorBulto",
+    raw: string,
+  ) => {
+    updateRowValue(rowId, field, normalizeMeasureField(raw));
   };
 
   const handleSelectTask = (task: Task) => {
@@ -668,14 +685,11 @@ export function DetailedInventoryEntry({
     rows.forEach((row) => {
       const rowBultos = parseFloat(String(row.bultos ?? 0)) || 0;
       const rowPesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
-      const l = parseFloat(String(row.l ?? 0)) || 0;
-      const w = parseFloat(String(row.w ?? 0)) || 0;
-      const h = parseFloat(String(row.h ?? 0)) || 0;
       const isReempaque = row.reempaque === true;
       const countedBultos = isReempaque ? 0 : rowBultos;
       bultos += countedBultos;
       weight += countedBultos * rowPesoPorBulto;
-      cbm += isReempaque ? 0 : ((l * w * h) / 1_000_000) * countedBultos;
+      cbm += cubicajeM3FromDims(row.l, row.w, row.h, countedBultos, isReempaque);
     });
 
     const hasCapture = detailedRowsHaveAnyCapture(rows);
@@ -685,7 +699,9 @@ export function DetailedInventoryEntry({
       bultos >= task.expectedBultos &&
       hasDetailedRequiredData(rows);
 
-    const persistedRows = hasCapture ? rows : [];
+    const persistedRows = hasCapture
+      ? rows.map((r) => stripDetailedMeasureRow(r as Record<string, unknown>))
+      : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(detailedDraftKey(task.id));
     }
@@ -694,8 +710,9 @@ export function DetailedInventoryEntry({
       ...task,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
       currentBultos: hasCapture ? bultos : 0,
-      expectedWeight: weight > 0 ? weight : task.expectedWeight,
-      expectedCbm: cbm > 0 ? parseFloat(cbm.toFixed(2)) : task.expectedCbm,
+      expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
+      expectedCbm:
+        cbm > 0 ? roundUpMeasure(cbm) : task.expectedCbm,
       status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
       originalExpectedBultos: originalExpected,
     };
@@ -755,7 +772,9 @@ export function DetailedInventoryEntry({
       bultos >= selectedTask.expectedBultos &&
       hasDetailedRequiredData(measureRows);
 
-    const persistedRows = hasCapture ? measureRows : [];
+    const persistedRows = hasCapture
+      ? measureRows.map((r) => stripDetailedMeasureRow(r as Record<string, unknown>))
+      : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
     }
@@ -897,7 +916,9 @@ export function DetailedInventoryEntry({
                   .
                 </div>
               ) : (
-                displayedTasks.map((t) => (
+                displayedTasks.map((t) => {
+                  const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
+                  return (
                   <div
                     key={t.id}
                     className={`p-5 md:p-6 rounded-[1.5rem] md:rounded-[2rem] border shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between group relative gap-4 ${
@@ -1004,6 +1025,7 @@ export function DetailedInventoryEntry({
                           </span>
                         </div>
                       </div>
+                      <InventoryLiveOperators operators={liveWorkers} />
                       <div className="grid grid-cols-2 gap-4 border-t border-slate-100 dark:border-slate-700 pt-4 mt-2">
                         <div>
                           <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-0.5">
@@ -1027,7 +1049,8 @@ export function DetailedInventoryEntry({
                       <ArrowRight className="w-5 h-5" />
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -1196,15 +1219,21 @@ export function DetailedInventoryEntry({
 
                     const pesoPorBulto =
                       parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
-                    const pesoTotal = bultos * pesoPorBulto;
+                    const pesoTotal = roundUpMeasure(bultos * pesoPorBulto);
 
-                    const l = parseFloat(String(row.l ?? 0)) || 0;
-                    const w = parseFloat(String(row.w ?? 0)) || 0;
-                    const h = parseFloat(String(row.h ?? 0)) || 0;
                     const isReempaque =
                       detailedMode === "reempaque" && row.reempaque === true;
-                    const cbmPorBulto = isReempaque ? 0 : (l * w * h) / 1_000_000;
-                    const cubicajeTotal = cbmPorBulto * bultos;
+                    const cubicajeTotal = cubicajeM3FromDims(
+                      row.l,
+                      row.w,
+                      row.h,
+                      row.bultos,
+                      isReempaque,
+                    );
+                    const cbmPorBulto =
+                      bultos > 0
+                        ? roundUpMeasure(cubicajeTotal / bultos)
+                        : cubicajeM3FromDims(row.l, row.w, row.h, 1, isReempaque);
                     const containerRefOptions = measureRows
                       .filter((candidate) => candidate.id !== row.id && candidate.reempaque !== true)
                       .filter((candidate) => (parseFloat(String(candidate.bultos ?? 0)) || 0) > 0)
@@ -1294,17 +1323,20 @@ export function DetailedInventoryEntry({
                               updateRowValue(
                                 row.id,
                                 "pesoPorBulto",
-                                e.target.value,
+                                sanitizeMeasureTyping(e.target.value),
                               )
+                            }
+                            onBlur={(e) =>
+                              commitMeasureField(row.id, "pesoPorBulto", e.target.value)
                             }
                             value={row.pesoPorBulto ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-slate-400"
-                            placeholder="0.0"
+                            placeholder="0.00"
                           />
                         </td>
 
                         <td className="bg-slate-50 dark:bg-slate-800/60 px-2 py-1 text-center text-sm font-black text-[#16263F] dark:text-slate-100">
-                          {pesoTotal.toFixed(2)}
+                          {formatMeasure2(pesoTotal) || "0.00"}
                         </td>
                         {detailedMode === "reempaque" && (
                           <td className="px-2 py-1 text-center">
@@ -1352,7 +1384,14 @@ export function DetailedInventoryEntry({
                             type="number"
                             disabled={isReempaque}
                             onChange={(e) =>
-                              updateRowValue(row.id, "l", e.target.value)
+                              updateRowValue(
+                                row.id,
+                                "l",
+                                sanitizeMeasureTyping(e.target.value),
+                              )
+                            }
+                            onBlur={(e) =>
+                              commitMeasureField(row.id, "l", e.target.value)
                             }
                             value={row.l ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-slate-400"
@@ -1364,7 +1403,14 @@ export function DetailedInventoryEntry({
                             type="number"
                             disabled={isReempaque}
                             onChange={(e) =>
-                              updateRowValue(row.id, "w", e.target.value)
+                              updateRowValue(
+                                row.id,
+                                "w",
+                                sanitizeMeasureTyping(e.target.value),
+                              )
+                            }
+                            onBlur={(e) =>
+                              commitMeasureField(row.id, "w", e.target.value)
                             }
                             value={row.w ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-slate-400"
@@ -1376,7 +1422,14 @@ export function DetailedInventoryEntry({
                             type="number"
                             disabled={isReempaque}
                             onChange={(e) =>
-                              updateRowValue(row.id, "h", e.target.value)
+                              updateRowValue(
+                                row.id,
+                                "h",
+                                sanitizeMeasureTyping(e.target.value),
+                              )
+                            }
+                            onBlur={(e) =>
+                              commitMeasureField(row.id, "h", e.target.value)
                             }
                             value={row.h ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 py-1 text-center text-sm font-bold text-[#16263F] dark:text-slate-100 outline-none transition-all focus:border-slate-400"
@@ -1385,11 +1438,11 @@ export function DetailedInventoryEntry({
                         </td>
 
                         <td className="bg-slate-50 dark:bg-slate-800/60 px-2 py-1 text-center text-xs font-bold text-slate-500 dark:text-slate-400">
-                          {cbmPorBulto.toFixed(2)}
+                          {formatMeasure2(cbmPorBulto) || "0.00"}
                         </td>
 
                         <td className="bg-blue-50 dark:bg-blue-950/50 px-2 py-1 text-center text-sm font-black text-blue-700 dark:text-blue-300">
-                          {cubicajeTotal.toFixed(2)}
+                          {formatMeasure2(cubicajeTotal) || "0.00"}
                         </td>
 
                         <td className="px-2 py-1 text-center">

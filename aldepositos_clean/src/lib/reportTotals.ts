@@ -1,5 +1,10 @@
 import type { Task } from "@/lib/types/task";
 import {
+  cubicajeM3FromDims,
+  formatMeasure2,
+  roundUpMeasure,
+} from "@/lib/measureDecimals";
+import {
   stripQuickRowsForPersist,
   type QuickMeasureRow,
 } from "@/lib/quickInventoryTypes";
@@ -38,12 +43,14 @@ export function computeReportData(task: Task): ReportComputed {
   let totalUnidades = 0;
 
   if (isDetailed) {
-    totalWeight = measureRows.reduce(
-      (acc, row) =>
-        acc +
-        (parseFloat(String(row.pesoPorBulto ?? 0)) || 0) *
-          (parseFloat(String(row.bultos ?? 0)) || 0),
-      0,
+    totalWeight = roundUpMeasure(
+      measureRows.reduce(
+        (acc, row) =>
+          acc +
+          (parseFloat(String(row.pesoPorBulto ?? 0)) || 0) *
+            (parseFloat(String(row.bultos ?? 0)) || 0),
+        0,
+      ),
     );
     totalUnidades = measureRows.reduce(
       (acc, row) =>
@@ -53,12 +60,14 @@ export function computeReportData(task: Task): ReportComputed {
       0,
     );
   } else if (task.weightMode === "per_bundle") {
-    const calcWeight = measureRows.reduce(
-      (acc, row) =>
-        acc +
-        (parseFloat(String(row.weight ?? 0)) || 0) *
-          (parseFloat(String(row.bultos ?? 0)) || 0),
-      0,
+    const calcWeight = roundUpMeasure(
+      measureRows.reduce(
+        (acc, row) =>
+          acc +
+          (parseFloat(String(row.weight ?? 0)) || 0) *
+            (parseFloat(String(row.bultos ?? 0)) || 0),
+        0,
+      ),
     );
     if (calcWeight > 0) totalWeight = calcWeight;
   }
@@ -68,17 +77,21 @@ export function computeReportData(task: Task): ReportComputed {
       (a, b) => a + (parseFloat(String(b.bultos ?? 0)) || 0),
       0,
     ),
-    cbm: measureRows
-      .reduce((acc, row) => {
-        const l = parseFloat(String(row.l ?? 0)) || 0;
-        const w = parseFloat(String(row.w ?? 0)) || 0;
-        const h = parseFloat(String(row.h ?? 0)) || 0;
-        const b = parseFloat(String(row.bultos ?? 0)) || 0;
-        const isReempaque = row.reempaque === true;
-        return acc + (isReempaque ? 0 : ((l * w * h) / 1_000_000) * b);
-      }, 0)
-      .toFixed(2),
-    weight: totalWeight,
+    cbm: formatMeasure2(
+      measureRows.reduce(
+        (acc, row) =>
+          acc +
+          cubicajeM3FromDims(
+            row.l,
+            row.w,
+            row.h,
+            row.bultos,
+            row.reempaque === true,
+          ),
+        0,
+      ),
+    ) || "0.00",
+    weight: roundUpMeasure(totalWeight),
     unidades: totalUnidades,
   };
 

@@ -13,7 +13,6 @@ import {
   CloudOff,
   Edit,
   Download,
-  FileSpreadsheet,
   LayoutGrid,
   Loader2,
   Plane,
@@ -50,27 +49,34 @@ import {
   countInventarioCsvRows,
   downloadInventarioCsv,
 } from "@/lib/exportInventarioCsv";
-import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
 import {
   getSharedWorkPresenceTabId,
   publishWorkPresence,
   clearWorkPresence,
-  subscribeWorkPresence,
-  type WorkPresenceEntry,
 } from "@/lib/panelPresence";
-import { peerPresenceVisibleName, presenceVisibleLabel } from "@/lib/viewerIdentity";
+import { presenceVisibleLabel } from "@/lib/viewerIdentity";
+import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
+import { liveOperatorsForRa } from "@/lib/presenceByRa";
+import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
 } from "@/lib/taskContributors";
+import {
+  cubicajeM3FromDims,
+  formatMeasure2,
+  normalizeMeasureField,
+  roundUpMeasure,
+  sanitizeMeasureTyping,
+} from "@/lib/measureDecimals";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import {
   buildMeasurePatchFromCatalog,
   getReferenceCatalogItem,
-  mergeCatalogIntoImportedRows,
   normalizePartNumber,
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
+import { formatRaFieldLabel, raClientGroupLabel } from "@/lib/collectionOrderToTask";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -258,26 +264,7 @@ export function QuickInventoryEntry({
     "pending" | "completed" | "priority"
   >("pending");
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
-  const [presenceList, setPresenceList] = useState<WorkPresenceEntry[]>([]);
-
-  useEffect(() => {
-    return subscribeWorkPresence(setPresenceList);
-  }, []);
-
-  const presenceByRa = useMemo(() => {
-    const targetModule = moduleType === "airway" ? "airway" : "quick";
-    const map = new Map<string, string[]>();
-    for (const e of presenceList) {
-      if (e.module !== targetModule) continue;
-      const raKey = String(e.ra || "").trim().toUpperCase();
-      if (!raKey) continue;
-      const name = peerPresenceVisibleName(e.userLabel, e.userKey);
-      const list = map.get(raKey) ?? [];
-      if (!list.includes(name)) list.push(name);
-      map.set(raKey, list);
-    }
-    return map;
-  }, [presenceList, moduleType]);
+  const presenceByRa = useInventoryPresenceByRa();
 
   useEffect(() => {
     const closeTransfer = () => setTransferOpenId(null);
@@ -321,8 +308,6 @@ export function QuickInventoryEntry({
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
-  const referenciasExcelRef = useRef<HTMLInputElement>(null);
-  const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
@@ -475,7 +460,7 @@ export function QuickInventoryEntry({
   const groupedTasks = useMemo(
     () =>
       moduleTasks.reduce<Record<string, Task[]>>((groups, task) => {
-        const client = task.mainClient || "Sin Cliente";
+        const client = raClientGroupLabel(task.mainClient);
         if (!groups[client]) groups[client] = [];
         groups[client].push(task);
         return groups;
@@ -494,27 +479,43 @@ export function QuickInventoryEntry({
   }, [moduleTasks, groupedTasks, clientFilter, clients]);
 
   const calculateTotals = () => {
-    if (!selectedTask) return { bultos: 0, cbm: "0.000", weight: 0 };
+    if (!selectedTask) return { bultos: 0, cbm: "0.00", weight: 0 };
 
     const bultos = measureRows.reduce(
       (a, row) => a + (parseFloat(String(row.bultos)) || 0),
       0,
     );
-    const cbmNumber = measureRows.reduce((acc, row) => {
-      const l = parseFloat(String(row.l)) || 0;
-      const w = parseFloat(String(row.w)) || 0;
-      const h = parseFloat(String(row.h)) || 0;
-      const b = parseFloat(String(row.bultos)) || 0;
-      return acc + ((l * w * h) / 1_000_000) * b;
-    }, 0);
+    const cbmNumber = measureRows.reduce(
+      (acc, row) =>
+        acc +
+        cubicajeM3FromDims(
+          row.l,
+          row.w,
+          row.h,
+          row.bultos,
+          row.reempaque === true,
+        ),
+      0,
+    );
 
-    let weight = measureRows.reduce((acc, row) => {
-      const rowWeight = parseFloat(String(row.weight)) || 0;
-      const b = parseFloat(String(row.bultos)) || 0;
-      return acc + rowWeight * b;
-    }, 0);
+    const weight = roundUpMeasure(
+      measureRows.reduce((acc, row) => {
+        const rowWeight = parseFloat(String(row.weight)) || 0;
+        const b = parseFloat(String(row.bultos)) || 0;
+        return acc + rowWeight * b;
+      }, 0),
+    );
 
-    return { bultos, cbm: cbmNumber.toFixed(2), weight };
+    return { bultos, cbm: formatMeasure2(cbmNumber) || "0.00", weight };
+  };
+
+  const commitMeasureField = (
+    rowId: string,
+    field: "l" | "w" | "h" | "weight",
+    raw: string,
+  ) => {
+    const normalized = normalizeMeasureField(raw);
+    updateRowValue(rowId, field, normalized);
   };
 
   const handleSelectTask = (task: Task) => {
@@ -666,123 +667,6 @@ export function QuickInventoryEntry({
     });
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
-    }
-  };
-
-  const onReferenciasExcelSelected: React.ChangeEventHandler<
-    HTMLInputElement
-  > = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setReferenciasImportBusy(true);
-    try {
-      const { rows, sourceColumnLabel, error } =
-        await parseReferenciasFromExcel(file);
-      if (error) {
-        // eslint-disable-next-line no-alert
-        alert(error);
-        return;
-      }
-      if (rows.length === 0) {
-        // eslint-disable-next-line no-alert
-        alert("No hay referencias para importar.");
-        return;
-      }
-      const mod: InventoryCatalogModule =
-        moduleType === "airway" ? "airway" : "quick";
-
-      setMeasureRows((prev) => {
-        const existing = new Set(
-          prev
-            .map((r) => String(r.referencia ?? "").trim().toUpperCase())
-            .filter(Boolean),
-        );
-        const additions: MeasureRow[] = [];
-        let skipped = 0;
-        for (const r of rows) {
-          const ref = r.referencia.trim();
-          if (!ref) continue;
-          const k = ref.toUpperCase();
-          if (existing.has(k)) {
-            skipped += 1;
-            continue;
-          }
-          existing.add(k);
-          additions.push({
-            id: generateId(),
-            referencia: ref,
-            bultos: r.bultos !== undefined ? String(r.bultos) : "",
-            l: "",
-            w: "",
-            h: "",
-            weight: "",
-            reempaque: false,
-            bultoContenedor: "",
-            referenciasContenedor: "",
-            reempaqueRefs: [],
-            referenciaContenedora: "",
-          });
-        }
-        if (additions.length === 0) {
-          // eslint-disable-next-line no-alert
-          alert(
-            skipped > 0
-              ? "Todas las referencias del archivo ya están en la tabla."
-              : "No se añadieron filas nuevas.",
-          );
-          return prev;
-        }
-
-        setReferenceMode("with");
-        for (const row of additions) {
-          sourceReferencesRef.current[row.id] = String(row.referencia ?? "");
-        }
-
-        const appendDeduped = (p: MeasureRow[], toAppend: MeasureRow[]) => {
-          const ex = new Set(
-            p.map((r) => String(r.referencia ?? "").trim().toUpperCase()).filter(Boolean),
-          );
-          const reallyNew = toAppend.filter((row) => {
-            const key = String(row.referencia ?? "").trim().toUpperCase();
-            return key && !ex.has(key);
-          });
-          if (reallyNew.length === 0) return p;
-          return [...p, ...reallyNew];
-        };
-
-        void mergeCatalogIntoImportedRows(mod, additions)
-          .then(({ rows: enriched, catalogMatched }) => {
-            setMeasureRows((p) => appendDeduped(p, stripQuickRowsForPersist(enriched)));
-            // eslint-disable-next-line no-alert
-            alert(
-              `Añadidas ${enriched.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
-                (skipped ? ` Omitidas ${skipped} duplicada(s).` : "") +
-                (catalogMatched > 0
-                  ? ` ${catalogMatched} reconocida(s) en el catálogo (medidas y datos rellenados).`
-                  : ""),
-            );
-          })
-          .catch((err) => {
-            console.error(err);
-            setMeasureRows((p) =>
-              appendDeduped(p, stripQuickRowsForPersist(additions)),
-            );
-            // eslint-disable-next-line no-alert
-            alert(
-              `Añadidas ${additions.length} fila(s). No se pudo consultar el catálogo; revisa la conexión.` +
-                (skipped ? ` Omitidas ${skipped} duplicada(s).` : ""),
-            );
-          });
-
-        return prev;
-      });
-    } catch (err) {
-      console.error(err);
-      // eslint-disable-next-line no-alert
-      alert("No se pudo leer el archivo. Usa formato .xlsx o .xls.");
-    } finally {
-      setReferenciasImportBusy(false);
     }
   };
 
@@ -1141,8 +1025,7 @@ export function QuickInventoryEntry({
                 </div>
               ) : (
                 displayedTasks.map((t) => {
-                  const raKey = String(t.ra ?? "").trim().toUpperCase();
-                  const liveWorkers = presenceByRa.get(raKey) ?? [];
+                  const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
                   const completedBy = inventoryCompletedByLabel(t);
 
                   return (
@@ -1174,18 +1057,6 @@ export function QuickInventoryEntry({
                     >
                       RA {t.ra}
                     </h3>
-                    {liveWorkers.length > 0 ? (
-                      <span
-                        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-bold text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
-                        title={`Capturando ahora: ${liveWorkers.join(", ")}`}
-                      >
-                        <span className="relative flex h-2 w-2 shrink-0">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-500 opacity-60" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-500" />
-                        </span>
-                        <span className="truncate">{liveWorkers.join(" · ")}</span>
-                      </span>
-                    ) : null}
                     {t.status === "in_progress" && liveWorkers.length === 0 ? (
                       <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
                         En curso
@@ -1209,10 +1080,12 @@ export function QuickInventoryEntry({
                   >
                     <span className="text-[9px] font-semibold leading-none">Bultos</span>
                     <span className="text-lg font-bold tabular-nums leading-tight">
-                      {t.expectedBultos}
+                      {t.expectedBultos > 0 ? t.expectedBultos : "—"}
                     </span>
                   </div>
                 </div>
+
+                <InventoryLiveOperators operators={liveWorkers} compact />
 
                 <div
                   className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-700"
@@ -1225,7 +1098,7 @@ export function QuickInventoryEntry({
                         Proveedor
                       </p>
                       <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
-                        {t.provider}
+                        {formatRaFieldLabel(t.provider)}
                       </p>
                     </div>
                     <div className="min-w-0">
@@ -1233,7 +1106,7 @@ export function QuickInventoryEntry({
                         Marca / tracking
                       </p>
                       <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
-                        {t.brand || "—"}
+                        {formatRaFieldLabel(t.brand)}
                       </p>
                     </div>
                   </div>
@@ -1387,6 +1260,7 @@ export function QuickInventoryEntry({
             void runCatalogLookup(id, value);
           }}
           onAddRow={addRow}
+          onDeleteRow={deleteRow}
           raLabel={String(t.ra ?? "")}
           declaredBultos={originalExpected}
           physicalBultos={totals.bultos}
@@ -1639,13 +1513,17 @@ export function QuickInventoryEntry({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {measureRows.map((row, idx) => {
-                  const l = parseFloat(String(row.l)) || 0;
-                  const w = parseFloat(String(row.w)) || 0;
-                  const h = parseFloat(String(row.h)) || 0;
                   const b = parseFloat(String(row.bultos)) || 0;
-                  const pesoPorBulto = parseFloat(String(row.weight)) || 0;
-                  const rowCbm = ((l * w * h) / 1_000_000) * b;
-                  const rowPesoTotal = b * pesoPorBulto;
+                  const rowCbm = cubicajeM3FromDims(
+                    row.l,
+                    row.w,
+                    row.h,
+                    row.bultos,
+                    row.reempaque === true,
+                  );
+                  const rowPesoTotal = roundUpMeasure(
+                    b * (parseFloat(String(row.weight)) || 0),
+                  );
                   const rowComplete = isQuickRowComplete(row);
                   const rowPartial = !rowComplete && quickRowHasPartialData(row);
 
@@ -1723,7 +1601,14 @@ export function QuickInventoryEntry({
                           <input
                             type="number"
                             onChange={(e) =>
-                              updateRowValue(row.id, "weight", e.target.value)
+                              updateRowValue(
+                                row.id,
+                                "weight",
+                                sanitizeMeasureTyping(e.target.value),
+                              )
+                            }
+                            onBlur={(e) =>
+                              commitMeasureField(row.id, "weight", e.target.value)
                             }
                             value={row.weight ?? ""}
                             className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
@@ -1737,8 +1622,9 @@ export function QuickInventoryEntry({
                         <input
                           type="number"
                           onChange={(e) =>
-                            updateRowValue(row.id, "l", e.target.value)
+                            updateRowValue(row.id, "l", sanitizeMeasureTyping(e.target.value))
                           }
+                          onBlur={(e) => commitMeasureField(row.id, "l", e.target.value)}
                           value={row.l ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                           placeholder="cm"
@@ -1748,8 +1634,9 @@ export function QuickInventoryEntry({
                         <input
                           type="number"
                           onChange={(e) =>
-                            updateRowValue(row.id, "w", e.target.value)
+                            updateRowValue(row.id, "w", sanitizeMeasureTyping(e.target.value))
                           }
+                          onBlur={(e) => commitMeasureField(row.id, "w", e.target.value)}
                           value={row.w ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                           placeholder="cm"
@@ -1759,8 +1646,9 @@ export function QuickInventoryEntry({
                         <input
                           type="number"
                           onChange={(e) =>
-                            updateRowValue(row.id, "h", e.target.value)
+                            updateRowValue(row.id, "h", sanitizeMeasureTyping(e.target.value))
                           }
+                          onBlur={(e) => commitMeasureField(row.id, "h", e.target.value)}
                           value={row.h ?? ""}
                           className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                           placeholder="cm"
@@ -1768,11 +1656,11 @@ export function QuickInventoryEntry({
                       </td>
 
                       <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
-                        {rowCbm.toFixed(2)}
+                        {formatMeasure2(rowCbm) || "0.00"}
                       </td>
                       {showWeightColumn && (
                         <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
-                          {rowPesoTotal > 0 ? rowPesoTotal.toFixed(1) : "0.0"}
+                          {formatMeasure2(rowPesoTotal) || "0.00"}
                         </td>
                       )}
                       <td className="px-2 py-1.5 text-center">
@@ -1795,31 +1683,13 @@ export function QuickInventoryEntry({
           </div>
 
           <div className="isolate z-10 shrink-0 space-y-1.5 border-t border-slate-200 pt-2 dark:border-slate-600 sm:space-y-2 sm:pt-3">
-            <input
-              ref={referenciasExcelRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={onReferenciasExcelSelected}
-            />
-            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-              <button
-                type="button"
-                onClick={addRow}
-                className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
-              >
-                <Plus className="icon-sm" /> Agregar
-              </button>
-              <button
-                type="button"
-                disabled={referenciasImportBusy}
-                onClick={() => referenciasExcelRef.current?.click()}
-                className="flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-emerald-300 bg-emerald-50/50 py-2 text-[11px] font-semibold text-emerald-800 transition-all hover:border-emerald-400 hover:bg-emerald-50 disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
-              >
-                <FileSpreadsheet className="icon-sm text-emerald-600 dark:text-emerald-400" />
-                Excel
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={addRow}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
+            >
+              <Plus className="icon-sm" /> Agregar
+            </button>
             <button
               type="button"
               onClick={saveOrder}

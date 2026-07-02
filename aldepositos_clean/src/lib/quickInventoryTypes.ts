@@ -1,3 +1,5 @@
+import { normalizeMeasureFieldsOnRow } from "@/lib/measureDecimals";
+
 /** Tipos y utilidades compartidas — ingreso rápido / vista Reekon */
 
 export type QuickMeasureRow = {
@@ -224,7 +226,7 @@ export function stripQuickMeasureRow<T extends QuickMeasureRow>(row: T): T {
     if (Array.isArray(v) && v.length === 0) continue;
     (out as Record<string, unknown>)[key] = v;
   }
-  return out as T;
+  return normalizeMeasureFieldsOnRow(out as Record<string, unknown>) as T;
 }
 
 export function stripQuickRowsForPersist<T extends QuickMeasureRow>(rows: T[]): T[] {

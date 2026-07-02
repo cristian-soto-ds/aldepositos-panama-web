@@ -41,9 +41,11 @@ function parseNumeric(value: string | number | null | undefined): number | null 
   return Number.isFinite(n) ? n : null;
 }
 
+import { formatMeasure2 } from "@/lib/measureDecimals";
+
 function formatCatalogNumber(value: number | null): string {
   if (value === null) return "";
-  return String(value);
+  return formatMeasure2(value) || "";
 }
 
 function mapRow(row: ReferenceCatalogRow): ReferenceCatalogItem {

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Edit3, X } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
+import { emptyManualRaTaskFields } from "@/lib/collectionOrderToTask";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -61,6 +62,8 @@ export function ManualEntryModal({
     }
   }, [initialData, defaultModule]);
 
+  const isEditing = !!initialData;
+
   const handleChange: React.ChangeEventHandler<
     HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   > = (e) => {
@@ -71,21 +74,40 @@ export function ManualEntryModal({
   const handleSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
     e.preventDefault();
 
+    const ra = formData.ra.toString().trim();
+    if (!ra) return;
+
+    const emptyFields = isEditing ? null : emptyManualRaTaskFields();
+
     const taskData: Task = {
       id: initialData ? initialData.id : generateId(),
-      ra: formData.ra.toString().trim(),
-      mainClient: formData.mainClient.trim() || "Sin Cliente",
-      provider: formData.provider.trim() || "N/A",
-      subClient: formData.subClient.trim() || "N/A",
-      brand: formData.brand.trim() || "N/A",
-      expectedBultos: parseFloat(formData.expectedBultos) || 0,
+      ra,
+      mainClient: isEditing
+        ? formData.mainClient.trim() || "Sin Cliente"
+        : emptyFields!.mainClient,
+      provider: isEditing
+        ? formData.provider.trim() || "N/A"
+        : emptyFields!.provider,
+      subClient: isEditing
+        ? formData.subClient.trim() || "N/A"
+        : emptyFields!.subClient,
+      brand: isEditing ? formData.brand.trim() || "N/A" : emptyFields!.brand,
+      expectedBultos: isEditing
+        ? parseFloat(formData.expectedBultos) || 0
+        : emptyFields!.expectedBultos,
       originalExpectedBultos: initialData
         ? initialData.originalExpectedBultos
-        : parseFloat(formData.expectedBultos) || 0,
-      expectedCbm: parseFloat(formData.expectedCbm) || 0,
-      expectedWeight: parseFloat(formData.expectedWeight) || 0,
-      notes: formData.notes.trim() || "",
-      type: formData.module as Task["type"],
+        : isEditing
+          ? parseFloat(formData.expectedBultos) || 0
+          : emptyFields!.originalExpectedBultos,
+      expectedCbm: isEditing
+        ? parseFloat(formData.expectedCbm) || 0
+        : emptyFields!.expectedCbm,
+      expectedWeight: isEditing
+        ? parseFloat(formData.expectedWeight) || 0
+        : emptyFields!.expectedWeight,
+      notes: isEditing ? formData.notes.trim() || "" : emptyFields!.notes,
+      type: (isEditing ? formData.module : defaultModule) as Task["type"],
       currentBultos: initialData ? initialData.currentBultos : 0,
       status: initialData ? initialData.status : "pending",
       measureData: initialData ? initialData.measureData : [],
@@ -95,8 +117,6 @@ export function ManualEntryModal({
 
     onSave(taskData);
   };
-
-  const isEditing = !!initialData;
 
   return (
     <div className="modal-overlay flex animate-fade items-end justify-center bg-[#16263F]/60 backdrop-blur-sm sm:items-center">
@@ -119,144 +139,169 @@ export function ManualEntryModal({
           onSubmit={handleSubmit}
           className="p-5 md:p-8 space-y-4 overflow-y-auto flex-1"
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Número de RA *
-              </label>
-              <input
-                required
-                name="ra"
-                value={formData.ra}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
-                placeholder="Ej: 54069"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Cliente / Consignatario *
-              </label>
-              <input
-                required
-                name="mainClient"
-                value={formData.mainClient}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
-                placeholder="Ej: LOGI TRADING"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Proveedor
-              </label>
-              <input
-                name="provider"
-                value={formData.provider}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
-                placeholder="Nombre del proveedor"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Marca / Tracking
-              </label>
-              <input
-                name="brand"
-                value={formData.brand}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
-                placeholder="Marca o # de seguimiento"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Expedidor
-              </label>
-              <input
-                name="subClient"
-                value={formData.subClient}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
-                placeholder="Ej: EFRAIN ROJAS"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Módulo de Destino *
-              </label>
-              <select
-                name="module"
-                value={formData.module}
-                onChange={handleChange}
-                className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100 cursor-pointer"
-              >
-                <option value="quick">Ingreso Rápido</option>
-                <option value="detailed">Ingreso Detallado</option>
-                <option value="airway">Guía Aérea</option>
-              </select>
-            </div>
-          </div>
+          {isEditing ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Número de RA *
+                  </label>
+                  <input
+                    required
+                    name="ra"
+                    value={formData.ra}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                    placeholder="Ej: 54069"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Cliente / Consignatario *
+                  </label>
+                  <input
+                    required
+                    name="mainClient"
+                    value={formData.mainClient}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                    placeholder="Ej: LOGI TRADING"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Proveedor
+                  </label>
+                  <input
+                    name="provider"
+                    value={formData.provider}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
+                    placeholder="Nombre del proveedor"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Marca / Tracking
+                  </label>
+                  <input
+                    name="brand"
+                    value={formData.brand}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
+                    placeholder="Marca o # de seguimiento"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Expedidor
+                  </label>
+                  <input
+                    name="subClient"
+                    value={formData.subClient}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none text-sm text-[#16263F] dark:text-slate-100"
+                    placeholder="Ej: EFRAIN ROJAS"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Módulo de Destino *
+                  </label>
+                  <select
+                    name="module"
+                    value={formData.module}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100 cursor-pointer"
+                  >
+                    <option value="quick">Ingreso Rápido</option>
+                    <option value="detailed">Ingreso Detallado</option>
+                    <option value="airway">Guía Aérea</option>
+                  </select>
+                </div>
+              </div>
 
-          <div className="grid grid-cols-3 gap-4 pt-2">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Bultos *
-              </label>
-              <input
-                required
-                type="number"
-                name="expectedBultos"
-                value={formData.expectedBultos}
-                onChange={handleChange}
-                className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none font-black text-blue-600 dark:text-blue-400"
-                placeholder="0"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Volumen (m³)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                name="expectedCbm"
-                value={formData.expectedCbm}
-                onChange={handleChange}
-                className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
-                placeholder="0.00"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                Peso (kg)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                name="expectedWeight"
-                value={formData.expectedWeight}
-                onChange={handleChange}
-                className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
-                placeholder="0.0"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-3 gap-4 pt-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Bultos *
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    name="expectedBultos"
+                    value={formData.expectedBultos}
+                    onChange={handleChange}
+                    className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none font-black text-blue-600 dark:text-blue-400"
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Volumen (m³)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="expectedCbm"
+                    value={formData.expectedCbm}
+                    onChange={handleChange}
+                    className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Peso (kg)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="expectedWeight"
+                    value={formData.expectedWeight}
+                    onChange={handleChange}
+                    className="no-spinners w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
+                    placeholder="0.0"
+                  />
+                </div>
+              </div>
 
-          <div className="space-y-1 pt-2">
-            <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-              Notas Adicionales
-            </label>
-            <textarea
-              name="notes"
-              value={formData.notes}
-              onChange={handleChange}
-              className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
-              placeholder="Observaciones de la carga..."
-              rows={2}
-            />
-          </div>
+              <div className="space-y-1 pt-2">
+                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                  Notas Adicionales
+                </label>
+                <textarea
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleChange}
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 outline-none text-sm"
+                  placeholder="Observaciones de la carga..."
+                  rows={2}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                  Número de RA *
+                </label>
+                <input
+                  required
+                  autoFocus
+                  name="ra"
+                  value={formData.ra}
+                  onChange={handleChange}
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                  placeholder="Ej: 54069"
+                />
+              </div>
+              <p className="rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm leading-relaxed text-slate-600 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-slate-300">
+                Solo necesitas el número de RA. Cliente, proveedor, bultos y demás datos se
+                completan al asignar una orden de recolección a este RA.
+              </p>
+            </>
+          )}
 
           <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-700">
             <button

@@ -1,4 +1,9 @@
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
+import {
+  cubicajeM3FromDims,
+  formatMeasure2,
+  normalizeMeasureFieldsOnRow,
+} from "@/lib/measureDecimals";
 
 function parseN(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -66,8 +71,7 @@ export function applyPesoTotalToLine(
     return { ...line };
   }
   const pesoPorBulto = total / b;
-  const rounded = pesoPorBulto.toFixed(2);
-  return { ...line, pesoPorBulto: rounded };
+  return { ...line, pesoPorBulto: formatMeasure2(pesoPorBulto) };
 }
 
 export function lineHasData(line: CollectionOrderLine): boolean {
@@ -86,13 +90,8 @@ export function lineHasData(line: CollectionOrderLine): boolean {
  * Solo incluye campos que existen en el módulo de ingreso detallado.
  */
 function cubicajeTotalM3FromLine(line: CollectionOrderLine): string {
-  const l = parseN(line.l);
-  const w = parseN(line.w);
-  const h = parseN(line.h);
-  const b = parseIntN(line.bultos);
-  if (l <= 0 || w <= 0 || h <= 0 || b <= 0) return "";
-  const tot = ((l * w * h) / 1_000_000) * b;
-  return tot > 0 ? tot.toFixed(4) : "";
+  const tot = cubicajeM3FromDims(line.l, line.w, line.h, line.bultos, false);
+  return tot > 0 ? formatMeasure2(tot) : "";
 }
 
 export function collectionLinesToDetailedMeasureData(
@@ -152,7 +151,7 @@ export function collectionLinesToQuickMeasureData(
 export function stripDetailedMeasureRow(
   row: Record<string, unknown>,
 ): Record<string, unknown> {
-  return {
+  return normalizeMeasureFieldsOnRow({
     id: row.id,
     referencia: row.referencia ?? "",
     descripcion: row.descripcion ?? "",
@@ -168,7 +167,7 @@ export function stripDetailedMeasureRow(
     bultoContenedor: row.bultoContenedor ?? "",
     referenciasContenedor: row.referenciasContenedor ?? "",
     referenciaContenedora: row.referenciaContenedora ?? "",
-  };
+  });
 }
 
 export function sanitizeMeasureDataForTarget(

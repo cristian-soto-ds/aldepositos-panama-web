@@ -183,7 +183,7 @@ export function ControlPanelLayout({
           />
           <NavItem
             icon={<NavIcon Icon={Route} />}
-            text="Dirección de Camiones"
+            text="Recepción de Camiones"
             active={currentView === "truck-direction"}
             onClick={() => {
               setCurrentView("truck-direction");

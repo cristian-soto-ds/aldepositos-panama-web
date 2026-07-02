@@ -1,107 +1,96 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
   Loader2,
-  SkipForward,
+  Plus,
+  Save,
+  Trash2,
 } from "lucide-react";
+import type { QuickMeasureRow } from "@/lib/quickInventoryTypes";
+import { isQuickRowComplete } from "@/lib/quickInventoryTypes";
+import { cubicajeM3FromDims, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
-import {
-  isQuickRowComplete,
-  type QuickMeasureRow,
-  type ReferenceCaptureMode,
-} from "@/lib/quickInventoryTypes";
 
-export type ReekonAutosaveState = "idle" | "saving" | "saved" | "error";
+type ReekonField = "referencia" | "bultos" | "weight" | "l" | "w" | "h";
 
-export type ReekonCaptureViewProps = {
+type ReekonCaptureViewProps = {
   measureRows: QuickMeasureRow[];
-  referenceMode: ReferenceCaptureMode;
+  referenceMode: "with" | "without";
   activeRowId: string | null;
-  onActiveRowChange: (id: string | null) => void;
-  onUpdateRow: (id: string, field: keyof QuickMeasureRow, value: string) => void;
-  onReferenceChange?: (id: string, value: string) => void;
-  onReferenceBlur?: (id: string, value: string) => void;
-  onAddRow?: () => void;
+  onActiveRowChange: (id: string) => void;
+  onUpdateRow: (id: string, field: keyof QuickMeasureRow, value: string | boolean | string[]) => void;
+  onReferenceChange: (id: string, value: string) => void;
+  onReferenceBlur: (id: string, value: string) => void;
+  onAddRow: () => void;
+  onDeleteRow: (id: string) => void;
   raLabel: string;
   declaredBultos: number;
   physicalBultos: number;
   faltantes: number;
-  totalCbm: string;
+  totalCbm: number;
   totalWeight: number;
   completedCount: number;
   onBack: () => void;
   onSwitchToTable: () => void;
   onSave: () => void;
-  autosaveState?: ReekonAutosaveState;
+  autosaveState: "idle" | "saving" | "saved" | "error";
+  isSaving: boolean;
 };
 
-function valClass(val: string | number | undefined): string {
-  const s = String(val ?? "").trim();
-  return s ? "reekon-input-filled" : "";
+const FIELD_LABELS: Record<ReekonField, string> = {
+  referencia: "Referencia",
+  bultos: "Bultos",
+  weight: "Peso (kg)",
+  l: "Largo (cm)",
+  w: "Ancho (cm)",
+  h: "Alto (cm)",
+};
+
+function strVal(v: string | number | undefined): string {
+  return String(v ?? "").trim();
 }
 
-function rowCbm(row: QuickMeasureRow): number {
-  const l = parseFloat(String(row.l)) || 0;
-  const w = parseFloat(String(row.w)) || 0;
-  const h = parseFloat(String(row.h)) || 0;
-  const b = parseFloat(String(row.bultos)) || 0;
-  if (l <= 0 || w <= 0 || h <= 0 || b <= 0) return 0;
-  return ((l * w * h) / 1_000_000) * b;
+function fieldPreview(row: QuickMeasureRow, field: ReekonField): string {
+  switch (field) {
+    case "referencia":
+      return strVal(row.referencia) || "—";
+    case "bultos":
+      return strVal(row.bultos) || "—";
+    case "weight":
+      return strVal(row.weight) ? `${formatMeasure2(row.weight)} kg` : "—";
+    case "l":
+    case "w":
+    case "h":
+      return strVal(row[field]) ? `${formatMeasure2(row[field])} cm` : "—";
+    default:
+      return "—";
+  }
 }
 
-function dimsFilled(row: QuickMeasureRow): boolean {
-  const l = parseFloat(String(row.l)) || 0;
-  const w = parseFloat(String(row.w)) || 0;
-  const h = parseFloat(String(row.h)) || 0;
-  return l > 0 && w > 0 && h > 0;
+function fieldFilled(row: QuickMeasureRow, field: ReekonField): boolean {
+  switch (field) {
+    case "referencia":
+      return Boolean(strVal(row.referencia));
+    case "bultos":
+      return Boolean(strVal(row.bultos));
+    case "weight":
+      return Boolean(strVal(row.weight));
+    case "l":
+    case "w":
+    case "h":
+      return Boolean(strVal(row[field]));
+    default:
+      return false;
+  }
 }
 
-function useImmersiveShell() {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const html = document.documentElement;
-    html.classList.add("reekon-immersive-active");
-    document.body.classList.add("reekon-immersive-active");
-
-    const themeMeta = document.querySelector('meta[name="theme-color"]');
-    const prevTheme = themeMeta?.getAttribute("content") ?? "";
-    themeMeta?.setAttribute("content", "#16263F");
-
-    const hideBrowserChrome = () => {
-      window.scrollTo(0, 1);
-      requestAnimationFrame(() => window.scrollTo(0, 0));
-    };
-    hideBrowserChrome();
-    window.addEventListener("orientationchange", hideBrowserChrome);
-
-    return () => {
-      html.classList.remove("reekon-immersive-active");
-      document.body.classList.remove("reekon-immersive-active");
-      if (prevTheme) themeMeta?.setAttribute("content", prevTheme);
-      window.removeEventListener("orientationchange", hideBrowserChrome);
-    };
-  }, []);
-
-  return mounted;
-}
-
-export function ReekonCaptureView(props: ReekonCaptureViewProps) {
-  const mounted = useImmersiveShell();
-  if (!mounted) return null;
-  return createPortal(<ReekonCaptureContent {...props} />, document.body);
-}
-
-function ReekonCaptureContent({
+export function ReekonCaptureView({
   measureRows,
   referenceMode,
   activeRowId,
@@ -110,6 +99,7 @@ function ReekonCaptureContent({
   onReferenceChange,
   onReferenceBlur,
   onAddRow,
+  onDeleteRow,
   raLabel,
   declaredBultos,
   physicalBultos,
@@ -120,415 +110,403 @@ function ReekonCaptureContent({
   onBack,
   onSwitchToTable,
   onSave,
-  autosaveState = "idle",
+  autosaveState,
+  isSaving,
 }: ReekonCaptureViewProps) {
-  const [refFilter, setRefFilter] = useState<"all" | "pending">("all");
-  const formRef = useRef<HTMLDivElement | null>(null);
-  const refStripRef = useRef<HTMLDivElement | null>(null);
-  const { handleDimensionKeyDown, focusFirstDimension } = useReekonTapeInput();
+  const formRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { handleDimensionKeyDown } = useReekonTapeInput();
 
-  const activeIndex = measureRows.findIndex((r) => r.id === activeRowId);
+  const [editingField, setEditingField] = useState<ReekonField | null>(null);
+
+  const activeIndex = useMemo(
+    () => measureRows.findIndex((r) => r.id === activeRowId),
+    [measureRows, activeRowId],
+  );
   const activeRow = activeIndex >= 0 ? measureRows[activeIndex] : measureRows[0] ?? null;
-  const firstPendingId = measureRows.find((r) => !isQuickRowComplete(r))?.id ?? null;
+  const activeId = activeRow?.id ?? null;
 
-  const progressPct =
-    declaredBultos > 0
-      ? Math.min(100, Math.round((physicalBultos / declaredBultos) * 100))
-      : completedCount > 0
-        ? 100
-        : 0;
+  const availableFields = useMemo((): ReekonField[] => {
+    const base: ReekonField[] = referenceMode === "with" ? ["referencia", "bultos", "weight", "l", "w", "h"] : ["bultos", "weight", "l", "w", "h"];
+    return base;
+  }, [referenceMode]);
 
-  const liveCbm = activeRow ? rowCbm(activeRow) : 0;
+  const rowCbm = activeRow
+    ? cubicajeM3FromDims(activeRow.l, activeRow.w, activeRow.h, activeRow.bultos, activeRow.reempaque)
+    : 0;
+  const rowComplete = activeRow ? isQuickRowComplete(activeRow) : false;
 
   useEffect(() => {
-    if (!activeRowId && firstPendingId) {
-      onActiveRowChange(firstPendingId);
-    } else if (activeRowId && !measureRows.some((r) => r.id === activeRowId)) {
-      onActiveRowChange(firstPendingId ?? measureRows[0]?.id ?? null);
+    document.documentElement.classList.add("reekon-immersive-active");
+    document.body.classList.add("reekon-immersive-active");
+    return () => {
+      document.documentElement.classList.remove("reekon-immersive-active");
+      document.body.classList.remove("reekon-immersive-active");
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeRowId && measureRows.length > 0) {
+      onActiveRowChange(measureRows[0].id);
     }
-  }, [activeRowId, firstPendingId, measureRows, onActiveRowChange]);
+  }, [activeRowId, measureRows, onActiveRowChange]);
 
-  useEffect(() => {
-    if (!activeRowId) return;
-    const t = setTimeout(() => focusFirstDimension(formRef.current), 200);
-    return () => clearTimeout(t);
-  }, [activeRowId, focusFirstDimension]);
-
-  useEffect(() => {
-    if (!activeRowId || !refStripRef.current) return;
-    const chip = refStripRef.current.querySelector<HTMLElement>(
-      `[data-ref-id="${activeRowId}"]`,
-    );
-    chip?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [activeRowId]);
-
-  const advanceToNext = useCallback(
-    (fromId: string) => {
-      const idx = measureRows.findIndex((r) => r.id === fromId);
-      for (let i = idx + 1; i < measureRows.length; i++) {
-        if (!isQuickRowComplete(measureRows[i])) {
-          onActiveRowChange(measureRows[i].id);
-          return;
-        }
-      }
-      if (faltantes > 0 && onAddRow) {
-        onAddRow();
-        return;
-      }
-      const anyPending = measureRows.find((r) => !isQuickRowComplete(r));
-      if (anyPending) onActiveRowChange(anyPending.id);
+  const selectRow = useCallback(
+    (id: string) => {
+      onActiveRowChange(id);
+      setEditingField(null);
     },
-    [faltantes, measureRows, onActiveRowChange, onAddRow],
+    [onActiveRowChange],
   );
 
+  const openField = useCallback((field: ReekonField) => {
+    setEditingField(field);
+  }, []);
+
+  useEffect(() => {
+    if (!editingField) return;
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+      if (editingField !== "referencia") {
+        inputRef.current?.select();
+      }
+    }, 80);
+    return () => clearTimeout(t);
+  }, [editingField, activeId]);
+
   const goPrev = () => {
-    if (activeIndex <= 0) return;
-    onActiveRowChange(measureRows[activeIndex - 1].id);
+    if (activeIndex > 0) selectRow(measureRows[activeIndex - 1].id);
   };
-
   const goNext = () => {
-    if (activeIndex < 0 || activeIndex >= measureRows.length - 1) return;
-    onActiveRowChange(measureRows[activeIndex + 1].id);
+    if (activeIndex < measureRows.length - 1) selectRow(measureRows[activeIndex + 1].id);
   };
 
-  const jumpToNextPending = () => {
-    const start = activeIndex >= 0 ? activeIndex + 1 : 0;
-    for (let i = start; i < measureRows.length; i++) {
-      if (!isQuickRowComplete(measureRows[i])) {
-        onActiveRowChange(measureRows[i].id);
-        return;
-      }
+  const handleDeleteCurrent = () => {
+    if (!activeId || measureRows.length <= 1) return;
+    const idx = activeIndex;
+    const nextId = measureRows[idx + 1]?.id ?? measureRows[idx - 1]?.id;
+    onDeleteRow(activeId);
+    setEditingField(null);
+    if (nextId) onActiveRowChange(nextId);
+  };
+
+  const handleAddLine = () => {
+    onAddRow();
+    setEditingField(null);
+  };
+
+  const handleMeasureBlur = (field: "l" | "w" | "h") => {
+    if (!activeId || !activeRow) return;
+    const normalized = normalizeMeasureField(activeRow[field]);
+    if (normalized !== activeRow[field]) {
+      onUpdateRow(activeId, field, normalized);
     }
-    for (let i = 0; i < start; i++) {
-      if (!isQuickRowComplete(measureRows[i])) {
-        onActiveRowChange(measureRows[i].id);
-        return;
-      }
+  };
+
+  const handleWeightBlur = () => {
+    if (!activeId || !activeRow) return;
+    const normalized = normalizeMeasureField(activeRow.weight);
+    if (normalized !== activeRow.weight) {
+      onUpdateRow(activeId, "weight", normalized);
     }
   };
 
-  const chipLabel = (row: QuickMeasureRow, i: number) => {
-    if (referenceMode === "without") return String(i + 1);
-    const ref = String(row.referencia ?? "").trim();
-    return ref || `#${i + 1}`;
-  };
+  const renderEditor = () => {
+    if (!activeRow || !activeId || !editingField) return null;
 
-  const visibleRows =
-    refFilter === "pending"
-      ? measureRows
-          .map((row, i) => ({ row, i }))
-          .filter(({ row }) => !isQuickRowComplete(row))
-      : measureRows.map((row, i) => ({ row, i }));
+    if (editingField === "referencia") {
+      return (
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="text"
+          autoComplete="off"
+          className="reekon-input reekon-input-immersive w-full"
+          value={activeRow.referencia}
+          placeholder="Referencia"
+          onChange={(e) => onReferenceChange(activeId, e.target.value)}
+          onBlur={(e) => onReferenceBlur(activeId, e.target.value)}
+        />
+      );
+    }
 
-  const pendingCount = measureRows.filter((r) => !isQuickRowComplete(r)).length;
+    if (editingField === "bultos") {
+      return (
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          className="reekon-input reekon-input-immersive w-full text-center"
+          value={String(activeRow.bultos ?? "")}
+          placeholder="0"
+          onChange={(e) => onUpdateRow(activeId, "bultos", e.target.value.replace(/\D/g, ""))}
+        />
+      );
+    }
 
-  const allDone =
-    measureRows.length > 0 && measureRows.every((r) => isQuickRowComplete(r));
+    if (editingField === "weight") {
+      return (
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="decimal"
+          className="reekon-input reekon-input-immersive w-full text-center"
+          value={activeRow.weight}
+          placeholder="0.00"
+          onChange={(e) => onUpdateRow(activeId, "weight", e.target.value)}
+          onBlur={handleWeightBlur}
+        />
+      );
+    }
 
-  const saveLabel = autosaveState === "saving" ? "Guardando…" : "Guardar recepción";
-
-  if (!activeRow) {
+    const dim = editingField;
     return (
-      <div className="reekon-immersive flex flex-col items-center justify-center gap-4 p-6">
-        <p className="text-center text-sm text-slate-500">No hay líneas para capturar.</p>
-        <button
-          type="button"
-          onClick={onAddRow}
-          className="rounded-xl bg-[#16263F] px-6 py-3 text-sm font-bold text-white"
-        >
-          Agregar bulto
-        </button>
-      </div>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        data-reekon-field={dim}
+        className={`reekon-input reekon-input-immersive w-full text-center ${fieldFilled(activeRow, dim) ? "reekon-input-filled" : ""}`}
+        value={activeRow[dim]}
+        placeholder="0.00"
+        onChange={(e) => onUpdateRow(activeId, dim, e.target.value)}
+        onBlur={() => handleMeasureBlur(dim)}
+        onKeyDown={(e) =>
+          handleDimensionKeyDown(e, dim, formRef.current, () => {
+            const order: ReekonField[] = ["l", "w", "h"];
+            const i = order.indexOf(dim);
+            if (i < 2) {
+              openField(order[i + 1]);
+            } else {
+              setEditingField(null);
+            }
+          })
+        }
+      />
     );
-  }
+  };
 
-  const rowDone = isQuickRowComplete(activeRow);
-  const refLabel = String(activeRow.referencia ?? "").trim();
-  const title =
-    referenceMode === "with"
-      ? refLabel || `Línea ${activeIndex + 1}`
-      : `Bulto ${activeIndex + 1}`;
-  const refNeedsInput = referenceMode === "with" && !refLabel;
+  const progressPct = measureRows.length ? Math.round((completedCount / measureRows.length) * 100) : 0;
 
   return (
-    <div className="reekon-immersive flex min-h-0 flex-col">
-      {/* Header mínimo */}
-      <header className="reekon-safe-top shrink-0 bg-[#16263F] text-white">
-        <div className="flex items-center gap-2 px-3 py-2">
+    <div className="reekon-immersive text-slate-900 dark:text-slate-100">
+      {/* Header compacto */}
+      <header className="reekon-safe-top shrink-0 border-b border-slate-200/80 bg-white/95 px-3 py-2 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onBack}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 active:bg-white/20"
-            aria-label="Salir"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 active:bg-slate-100 dark:text-slate-300 dark:active:bg-slate-800"
+            aria-label="Volver"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold leading-tight">RA-{raLabel}</p>
-            <p className="text-[11px] font-medium text-white/75">
-              {physicalBultos}/{declaredBultos} bultos · {totalCbm} m³
+            <p className="truncate text-sm font-bold">{raLabel || "Inventario"}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              {completedCount}/{measureRows.length} líneas · {physicalBultos}/{declaredBultos} bultos
+              {faltantes > 0 ? ` · faltan ${faltantes}` : ""}
             </p>
           </div>
           <button
             type="button"
             onClick={onSwitchToTable}
-            className="flex h-9 shrink-0 items-center gap-1 rounded-lg bg-white/10 px-2.5 text-[11px] font-bold active:bg-white/20"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
+            aria-label="Vista tabla"
           >
             <LayoutGrid className="h-4 w-4" />
-            Tabla
           </button>
         </div>
-        <div className="px-3 pb-2">
-          <div className="h-1 overflow-hidden rounded-full bg-white/20">
-            <div
-              className="h-full rounded-full bg-emerald-400 transition-all duration-300"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-        <div className="reekon-header-stats grid grid-cols-3 gap-px border-t border-white/10 bg-white/5 text-center text-[11px]">
-          <div className="py-1.5">
-            <span className="text-white/60">Faltan </span>
-            <span className={`font-black ${faltantes <= 0 ? "text-emerald-300" : "text-amber-300"}`}>
-              {Math.max(0, faltantes)}
-            </span>
-          </div>
-          <div className="py-1.5">
-            <span className="text-white/60">Vol. </span>
-            <span className="font-black">{totalCbm}</span>
-            <span className="text-white/50"> m³</span>
-          </div>
-          <div className="py-1.5">
-            <span className="text-white/60">Peso </span>
-            <span className="font-black">{totalWeight.toFixed(0)}</span>
-            <span className="text-white/50"> kg</span>
-          </div>
+        <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div
+            className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+            style={{ width: `${progressPct}%` }}
+          />
         </div>
       </header>
 
-      {/* Cuerpo — sin espacio vacío, todo junto */}
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="shrink-0 border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-center gap-2 px-3 py-2">
+      {/* Selector de líneas */}
+      <div className="reekon-ref-strip shrink-0 border-b border-slate-100 dark:border-slate-800">
+        {measureRows.map((row, i) => {
+          const done = isQuickRowComplete(row);
+          const isActive = row.id === activeId;
+          const label =
+            referenceMode === "with" && row.referencia?.trim()
+              ? row.referencia.trim()
+              : `#${i + 1}`;
+          return (
             <button
+              key={row.id}
               type="button"
-              onClick={goPrev}
-              disabled={activeIndex <= 0}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 disabled:opacity-25 dark:bg-slate-800 dark:text-slate-200"
-              aria-label="Anterior"
+              onClick={() => selectRow(row.id)}
+              className={`reekon-ref-chip border ${
+                isActive
+                  ? "border-blue-500 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
+                  : done
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : "border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+              }`}
             >
-              <ChevronLeft className="h-5 w-5" />
+              {done ? <Check className="h-3 w-3 shrink-0" /> : null}
+              <span className="max-w-[7rem] truncate">{label}</span>
             </button>
-            <div className="min-w-0 flex-1 text-center">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                {referenceMode === "with" ? "Referencia" : "Bulto"} {activeIndex + 1} de{" "}
-                {measureRows.length}
-              </p>
-              <h1 className="truncate text-xl font-black text-[#16263F] dark:text-white">
-                {title}
-              </h1>
-            </div>
-            <button
-              type="button"
-              onClick={goNext}
-              disabled={activeIndex >= measureRows.length - 1}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 disabled:opacity-25 dark:bg-slate-800 dark:text-slate-200"
-              aria-label="Siguiente"
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={handleAddLine}
+          className="reekon-ref-chip border border-dashed border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300"
+          aria-label="Nueva línea"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Nueva
+        </button>
+      </div>
 
-          <div className="flex items-center gap-2 border-t border-slate-100 px-3 py-1.5 dark:border-slate-800">
-            <div className="inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-              <button
-                type="button"
-                onClick={() => setRefFilter("all")}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold ${
-                  refFilter === "all"
-                    ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-white"
-                    : "text-slate-500"
-                }`}
-              >
-                Todas ({measureRows.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRefFilter("pending");
-                  const first = measureRows.find((r) => !isQuickRowComplete(r));
-                  if (first) onActiveRowChange(first.id);
-                }}
-                className={`rounded-md px-2.5 py-1 text-[10px] font-bold ${
-                  refFilter === "pending"
-                    ? "bg-white text-[#16263F] shadow-sm dark:bg-slate-900 dark:text-white"
-                    : "text-slate-500"
-                }`}
-              >
-                Pendientes ({pendingCount})
-              </button>
-            </div>
-            {pendingCount > 0 && (
-              <button
-                type="button"
-                onClick={jumpToNextPending}
-                className="ml-auto inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-[10px] font-bold text-amber-900 active:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200"
-              >
-                <SkipForward className="h-3.5 w-3.5" />
-                Sig. pendiente
-              </button>
-            )}
-          </div>
+      {/* Navegación entre líneas */}
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-1.5 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={goPrev}
+          disabled={activeIndex <= 0}
+          className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-30 dark:text-slate-400"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Ant.
+        </button>
+        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+          Línea {activeIndex + 1} de {measureRows.length}
+        </span>
+        <button
+          type="button"
+          onClick={goNext}
+          disabled={activeIndex >= measureRows.length - 1}
+          className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-30 dark:text-slate-400"
+        >
+          Sig.
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
 
-          <div ref={refStripRef} className="reekon-ref-strip border-t border-slate-100 dark:border-slate-800">
-            {visibleRows.map(({ row, i }) => {
-              const done = isQuickRowComplete(row);
-              const current = row.id === activeRow.id;
-              const label = chipLabel(row, i);
-              return (
+      {/* Panel principal */}
+      <main ref={formRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
+        {activeRow ? (
+          <>
+            {editingField ? (
+              <div className="flex flex-col gap-3">
                 <button
-                  key={row.id}
                   type="button"
-                  data-ref-id={row.id}
-                  onClick={() => onActiveRowChange(row.id)}
-                  className={`reekon-ref-chip border ${
-                    current
-                      ? "border-[#16263F] bg-[#16263F] text-white shadow-md ring-2 ring-[#16263F]/20"
-                      : done
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                        : "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                  }`}
+                  onClick={() => setEditingField(null)}
+                  className="self-start text-sm font-semibold text-blue-600 dark:text-blue-400"
                 >
-                  {done ? <Check className="h-3 w-3 shrink-0" /> : null}
-                  <span>{label}</span>
+                  ← Elegir otro campo
                 </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {refNeedsInput && (
-          <div className="shrink-0 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-            <input
-              type="text"
-              value={activeRow.referencia ?? ""}
-              onChange={(e) => onReferenceChange?.(activeRow.id, e.target.value)}
-              onBlur={(e) => onReferenceBlur?.(activeRow.id, e.target.value)}
-              className="w-full rounded-xl border-2 border-[#16263F]/30 bg-white px-3 py-3 text-center text-lg font-bold text-[#16263F] outline-none focus:border-[#16263F] dark:bg-slate-950 dark:text-white"
-              placeholder="Escribe la referencia"
-            />
-          </div>
-        )}
-
-        {/* Strip: bultos · peso · cubicaje línea */}
-        <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
-          <label className="flex flex-col">
-            <span className="mb-0.5 text-center text-[10px] font-bold text-slate-500">Bultos</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={activeRow.bultos ?? ""}
-              onChange={(e) => onUpdateRow(activeRow.id, "bultos", e.target.value)}
-              className="no-spinners rounded-lg border-2 border-blue-300 bg-blue-50 py-2 text-center text-xl font-black text-blue-900 dark:border-blue-700 dark:bg-blue-950/50 dark:text-blue-100"
-              placeholder="1"
-            />
-          </label>
-          <label className="flex flex-col">
-            <span className="mb-0.5 text-center text-[10px] font-bold text-slate-500">Kg/bulto</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={activeRow.weight ?? ""}
-              onChange={(e) => onUpdateRow(activeRow.id, "weight", e.target.value)}
-              className="no-spinners rounded-lg border border-slate-300 bg-white py-2 text-center text-xl font-bold text-[#16263F] dark:border-slate-600 dark:bg-slate-950 dark:text-white"
-              placeholder="—"
-            />
-          </label>
-          <div className="flex flex-col rounded-lg border border-slate-200 bg-white py-1 dark:border-slate-600 dark:bg-slate-800">
-            <span className="text-center text-[10px] font-bold text-slate-500">m³ línea</span>
-            <p className="flex flex-1 items-center justify-center text-xl font-black tabular-nums text-[#16263F] dark:text-white">
-              {liveCbm > 0 ? liveCbm.toFixed(2) : "—"}
-            </p>
-          </div>
-        </div>
-
-        {/* Medidas — altura fija, no estirar */}
-        <section ref={formRef} className="shrink-0 px-3 py-2">
-          <p className="mb-1.5 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500">
-            Medición (cm)
-          </p>
-          <div className="reekon-measure-grid">
-            {(
-              [
-                { field: "l" as const, label: "Largo", short: "L" },
-                { field: "w" as const, label: "Ancho", short: "A" },
-                { field: "h" as const, label: "Alto", short: "H" },
-              ] as const
-            ).map(({ field, label, short }, dimIdx) => (
-              <div key={field} className="reekon-measure-cell">
-                <span className="mb-0.5 block text-center text-[10px] font-bold text-slate-600 dark:text-slate-300">
-                  {label}
-                </span>
-                <div className="relative">
-                  <span className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 text-xs font-black text-slate-300">
-                    {short}
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    enterKeyHint={dimIdx < 2 ? "next" : "done"}
-                    data-reekon-field={field}
-                    value={activeRow[field] ?? ""}
-                    onChange={(e) =>
-                      onUpdateRow(activeRow.id, field, e.target.value)
-                    }
-                    onKeyDown={(e) =>
-                      handleDimensionKeyDown(e, field, formRef.current)
-                    }
-                    className={`no-spinners reekon-input reekon-input-immersive ${valClass(activeRow[field])}`}
-                    placeholder="—"
-                  />
-                </div>
+                <p className="text-center text-sm font-bold text-slate-600 dark:text-slate-300">
+                  {FIELD_LABELS[editingField]}
+                </p>
+                {renderEditor()}
+                {editingField === "l" || editingField === "w" || editingField === "h" ? (
+                  <p className="text-center text-[11px] text-slate-400">Enter confirma y pasa al siguiente lado</p>
+                ) : null}
               </div>
-            ))}
-          </div>
-        </section>
-
-        {dimsFilled(activeRow) && (
-          <div className="flex shrink-0 items-center justify-center gap-1.5 bg-emerald-50 py-1.5 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-            <CheckCircle2 className="h-4 w-4" />
-            <span className="text-xs font-bold">Medidas listas — completa peso y toca Siguiente</span>
-          </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="mb-1 text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Toca el campo que quieres llenar
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {availableFields.map((field) => {
+                    const filled = fieldFilled(activeRow, field);
+                    return (
+                      <button
+                        key={field}
+                        type="button"
+                        onClick={() => openField(field)}
+                        className={`flex min-h-[4.25rem] flex-col items-start justify-center rounded-xl border px-3 py-2 text-left transition active:scale-[0.98] ${
+                          filled
+                            ? "border-emerald-300 bg-emerald-50/80 dark:border-emerald-700 dark:bg-emerald-950/30"
+                            : "border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800/60"
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                          {FIELD_LABELS[field].replace(/ \(.*\)/, "")}
+                        </span>
+                        <span
+                          className={`mt-0.5 truncate text-sm font-bold ${filled ? "text-emerald-800 dark:text-emerald-200" : "text-slate-400"}`}
+                        >
+                          {fieldPreview(activeRow, field)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {rowCbm > 0 ? (
+                  <p className="mt-2 text-center text-xs text-slate-500">
+                    Cubicaje línea: <span className="font-bold">{formatMeasure2(rowCbm)} m³</span>
+                  </p>
+                ) : null}
+                {rowComplete ? (
+                  <p className="text-center text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    Línea completa
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="py-8 text-center text-sm text-slate-500">Agrega una línea para comenzar.</p>
         )}
       </main>
 
-      <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
-        {allDone ? (
+      {/* Footer */}
+      <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+        <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+          <span>Total {formatMeasure2(totalCbm)} m³</span>
+          <span>{formatMeasure2(totalWeight)} kg</span>
+          <span>
+            {autosaveState === "saving" ? (
+              <span className="inline-flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Guardando…
+              </span>
+            ) : autosaveState === "saved" ? (
+              "Guardado"
+            ) : autosaveState === "error" ? (
+              "Error al guardar"
+            ) : (
+              "Borrador"
+            )}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleDeleteCurrent}
+            disabled={measureRows.length <= 1}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"
+            aria-label="Eliminar línea"
+          >
+            <Trash2 className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleAddLine}
+            className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <Plus className="h-4 w-4" />
+            Línea
+          </button>
           <button
             type="button"
             onClick={onSave}
-            disabled={autosaveState === "saving"}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3.5 text-base font-bold text-white active:scale-[0.99] disabled:opacity-70"
+            disabled={isSaving}
+            className="flex h-11 flex-[1.4] items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-bold text-white disabled:opacity-60"
           >
-            {autosaveState === "saving" ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-5 w-5" />
-            )}
-            {saveLabel}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Guardar
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              if (dimsFilled(activeRow) || rowDone) advanceToNext(activeRow.id);
-              else focusFirstDimension(formRef.current);
-            }}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] py-3.5 text-base font-bold text-white active:scale-[0.99]"
-          >
-            {dimsFilled(activeRow) || rowDone ? "Siguiente →" : "Medir Largo"}
-          </button>
-        )}
+        </div>
       </footer>
     </div>
   );

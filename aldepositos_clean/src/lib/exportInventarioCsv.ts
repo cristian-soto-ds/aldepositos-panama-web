@@ -5,6 +5,8 @@
  * Primera línea `sep=,` para que Excel abra por columnas aunque el sistema regional use `;`.
  */
 
+import { cubicajeM3FromDims, csvMeasureNum, roundUpMeasure } from "@/lib/measureDecimals";
+
 export type InventarioCsvModule = "quick" | "airway" | "detailed";
 
 const HEADERS = [
@@ -80,11 +82,7 @@ function volumenM3ForRow(
 ): number {
   const fromField = parseNum(row.volumenM3);
   if (fromField > 0) return fromField;
-  if (isReempaque) return 0;
-  if (l > 0 && w > 0 && h > 0 && bultos > 0) {
-    return ((l * w * h) / 1_000_000) * bultos;
-  }
-  return 0;
+  return cubicajeM3FromDims(l, w, h, bultos, isReempaque);
 }
 
 function buildLineCells(
@@ -119,12 +117,12 @@ function buildLineCells(
     String(row.descripcion ?? "").trim(),
     csvNum(bultos),
     csvNum(cantidad),
-    csvNum(l),
-    csvNum(h),
-    csvNum(w),
-    csvNum(pesoPorPiezas),
-    csvNum(pesoTotal),
-    csvNum(vol),
+    csvMeasureNum(l),
+    csvMeasureNum(h),
+    csvMeasureNum(w),
+    csvMeasureNum(pesoPorPiezas),
+    csvMeasureNum(pesoTotal),
+    csvMeasureNum(vol),
     CSV_UNIDAD_FIJA,
     CSV_TIPO_EMBALAJE_FIJO,
   ];
@@ -157,7 +155,7 @@ export function buildInventarioExcelRowValues(
     pesoPorPiezas = parseNum(row.weight);
   }
 
-  const pesoTotal = bultos * pesoPorPiezas;
+  const pesoTotal = roundUpMeasure(bultos * pesoPorPiezas);
   const vol = volumenM3ForRow(row, bultos, l, w, h, reempaque);
 
   const numeroCell: string | number = (() => {
@@ -176,10 +174,10 @@ export function buildInventarioExcelRowValues(
     String(row.descripcion ?? "").trim(),
     bultos,
     cantidad,
-    l,
-    h,
-    w,
-    pesoPorPiezas,
+    roundUpMeasure(l),
+    roundUpMeasure(h),
+    roundUpMeasure(w),
+    roundUpMeasure(pesoPorPiezas),
     pesoTotal,
     vol,
     CSV_UNIDAD_FIJA,

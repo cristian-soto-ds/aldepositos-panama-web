@@ -29,6 +29,13 @@ import {
   upsertCollectionOrderInList,
 } from "@/lib/collectionOrders";
 import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
+import {
+  cubicajeM3FromDims,
+  formatMeasure2,
+  normalizeMeasureField,
+  roundUpMeasure,
+  sanitizeMeasureTyping,
+} from "@/lib/measureDecimals";
 import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
 import {
   countOrdersForCollectionListTab,
@@ -83,6 +90,7 @@ import {
   sanitizeMeasureDataForTarget,
   unidadesTotalesFromLine,
 } from "@/lib/collectionLineUtils";
+import { mergeCollectionOrderIntoTask } from "@/lib/collectionOrderToTask";
 import {
   normalizeCollectionOrderFields,
   reconcileCollectionOrder,
@@ -145,10 +153,7 @@ function sanitizeQtyPerBundleInput(raw: string): string {
 }
 
 function formatWeight(value: string | number | undefined): string {
-  if (value === "" || value === undefined || value === null) return "";
-  const n = parseFloat(String(value).replace(",", "."));
-  if (!Number.isFinite(n)) return "";
-  return n.toFixed(2);
+  return formatMeasure2(value);
 }
 
 /** Referencias con número de parte en la lista de órdenes (no cuenta filas vacías). */
@@ -1107,11 +1112,15 @@ export function CollectionOrderModule({
         nextMeasure as Record<string, unknown>[],
         targetType,
       );
-      const updatedTask: Task = {
-        ...task,
-        measureData: sanitizedMeasure,
-        linkedCollectionOrderId: baseOrder.id,
-      };
+      const updatedTask: Task = mergeCollectionOrderIntoTask(
+        {
+          ...task,
+          measureData: sanitizedMeasure,
+          linkedCollectionOrderId: baseOrder.id,
+        },
+        baseOrder,
+        lines,
+      );
       await onUpdateTask(updatedTask);
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(`detailed_inventory_draft_v1_${task.id}`);
@@ -2037,14 +2046,14 @@ export function CollectionOrderModule({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {e.lines.map((row, idx) => {
                   const totUnd = unidadesTotalesFromLine(row);
-                  const pesoTot = pesoTotalFromLine(row);
+                  const pesoTot = roundUpMeasure(pesoTotalFromLine(row));
                   const totalUndRounded = Math.round(totUnd);
                   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-                  const l = parseFloat(String(row.l ?? 0)) || 0;
-                  const w = parseFloat(String(row.w ?? 0)) || 0;
-                  const h = parseFloat(String(row.h ?? 0)) || 0;
-                  const cbmBulto = (l * w * h) / 1_000_000;
-                  const cubicajeTot = cbmBulto * bultos;
+                  const cubicajeTot = cubicajeM3FromDims(row.l, row.w, row.h, row.bultos);
+                  const cbmBulto =
+                    bultos > 0
+                      ? roundUpMeasure(cubicajeTot / bultos)
+                      : cubicajeM3FromDims(row.l, row.w, row.h, 1);
                   const refUnknown =
                     unresolvedRefByRow[row.id] === true &&
                     String(row.referencia ?? "").trim().length > 0;
@@ -2281,7 +2290,16 @@ export function CollectionOrderModule({
                         <input
                           type="number"
                           value={row.l ?? ""}
-                          onChange={(ev) => updateLine(row.id, { l: ev.target.value })}
+                          onChange={(ev) =>
+                            updateLine(row.id, {
+                              l: sanitizeMeasureTyping(ev.target.value),
+                            })
+                          }
+                          onBlur={(ev) =>
+                            updateLine(row.id, {
+                              l: normalizeMeasureField(ev.target.value),
+                            })
+                          }
                           className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
                         />
                       </td>
@@ -2289,7 +2307,16 @@ export function CollectionOrderModule({
                         <input
                           type="number"
                           value={row.w ?? ""}
-                          onChange={(ev) => updateLine(row.id, { w: ev.target.value })}
+                          onChange={(ev) =>
+                            updateLine(row.id, {
+                              w: sanitizeMeasureTyping(ev.target.value),
+                            })
+                          }
+                          onBlur={(ev) =>
+                            updateLine(row.id, {
+                              w: normalizeMeasureField(ev.target.value),
+                            })
+                          }
                           className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
                         />
                       </td>
@@ -2297,15 +2324,24 @@ export function CollectionOrderModule({
                         <input
                           type="number"
                           value={row.h ?? ""}
-                          onChange={(ev) => updateLine(row.id, { h: ev.target.value })}
+                          onChange={(ev) =>
+                            updateLine(row.id, {
+                              h: sanitizeMeasureTyping(ev.target.value),
+                            })
+                          }
+                          onBlur={(ev) =>
+                            updateLine(row.id, {
+                              h: normalizeMeasureField(ev.target.value),
+                            })
+                          }
                           className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
                         />
                       </td>
                       <td className="bg-slate-50/80 px-2 py-1 text-center text-xs font-black text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                        {cbmBulto.toFixed(2)}
+                        {formatMeasure2(cbmBulto) || "0.00"}
                       </td>
                       <td className="bg-blue-50/80 px-2 py-1 text-center text-sm font-black text-blue-700 dark:bg-blue-950/45 dark:text-blue-300">
-                        {cubicajeTot.toFixed(2)}
+                        {formatMeasure2(cubicajeTot) || "0.00"}
                       </td>
                       <td className="px-1 py-1">
                         <button

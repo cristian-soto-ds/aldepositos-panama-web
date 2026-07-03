@@ -1248,6 +1248,8 @@ export function QuickInventoryEntry({
             const trimmed = String(value ?? "").trim();
             if (trimmed) {
               sourceReferencesRef.current[id] = trimmed;
+            } else {
+              delete sourceReferencesRef.current[id];
             }
             scheduleCatalogLookup(id, value);
           }}
@@ -1566,6 +1568,8 @@ export function QuickInventoryEntry({
                               const trimmed = v.trim();
                               if (trimmed) {
                                 sourceReferencesRef.current[row.id] = trimmed;
+                              } else {
+                                delete sourceReferencesRef.current[row.id];
                               }
                               scheduleCatalogLookup(row.id, v);
                             }}

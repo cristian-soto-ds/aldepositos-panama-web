@@ -105,10 +105,12 @@ export async function setRampOccupancy(
 }
 
 const RAMP_OCCUPANCY_REALTIME_CHANNEL_ID = "ramp-occupancy-live";
+const RAMP_OCCUPANCY_POLL_MS = 12_000;
 
 let rampOccupancyListeners = new Set<() => void>();
 let rampBroadcastChannel: BroadcastChannel | null = null;
 let rampRealtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+let rampPollIntervalId: number | null = null;
 
 function notifyRampOccupancyListeners() {
   for (const listener of rampOccupancyListeners) {
@@ -119,6 +121,9 @@ function notifyRampOccupancyListeners() {
 function ensureRampRealtimeChannel() {
   if (rampRealtimeChannel) return;
   try {
+    // Escucha TODOS los cambios de la tabla (igual que la cola de camiones):
+    // más robusto que un filtro por id, que en algunos proyectos no entrega
+    // los eventos del registro meta a otros usuarios/dispositivos.
     rampRealtimeChannel = supabase
       .channel(RAMP_OCCUPANCY_REALTIME_CHANNEL_ID)
       .on(
@@ -127,7 +132,6 @@ function ensureRampRealtimeChannel() {
           event: "*",
           schema: "public",
           table: RECEPTION_TABLE,
-          filter: `id=eq.${RAMP_OCCUPANCY_META_ID}`,
         },
         () => notifyRampOccupancyListeners(),
       )
@@ -163,15 +167,30 @@ export function subscribeRampOccupancy(onSync: () => void): () => void {
     }
   }
 
+  // Respaldo por sondeo: garantiza la sincronización entre usuarios/dispositivos
+  // aunque el realtime de Supabase no entregue el evento.
+  if (rampPollIntervalId == null && typeof window !== "undefined") {
+    rampPollIntervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      notifyRampOccupancyListeners();
+    }, RAMP_OCCUPANCY_POLL_MS);
+  }
+
   ensureRampRealtimeChannel();
 
   return () => {
     rampOccupancyListeners.delete(onSync);
     window.removeEventListener("storage", onStorage);
     teardownRampRealtimeChannelIfIdle();
-    if (rampOccupancyListeners.size === 0 && rampBroadcastChannel) {
-      rampBroadcastChannel.close();
-      rampBroadcastChannel = null;
+    if (rampOccupancyListeners.size === 0) {
+      if (rampPollIntervalId != null) {
+        window.clearInterval(rampPollIntervalId);
+        rampPollIntervalId = null;
+      }
+      if (rampBroadcastChannel) {
+        rampBroadcastChannel.close();
+        rampBroadcastChannel = null;
+      }
     }
   };
 }

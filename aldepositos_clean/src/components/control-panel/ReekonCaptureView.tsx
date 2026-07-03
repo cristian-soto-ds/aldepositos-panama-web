@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -8,6 +8,8 @@ import {
   ChevronRight,
   LayoutGrid,
   Loader2,
+  Maximize2,
+  Minimize2,
   Plus,
   Save,
   Trash2,
@@ -76,6 +78,8 @@ export function ReekonCaptureView({
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   // Cuando saltamos de línea con la cinta, enfocamos el Largo de la nueva línea.
   const focusLargoOnNext = useRef(false);
 
@@ -98,6 +102,31 @@ export function ReekonCaptureView({
       document.documentElement.classList.remove("reekon-immersive-active");
       document.body.classList.remove("reekon-immersive-active");
     };
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFs);
+    onFs();
+    // Al salir de la vista, abandonar pantalla completa si sigue activa.
+    return () => {
+      document.removeEventListener("fullscreenchange", onFs);
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => {});
+      }
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      /* Algunos navegadores móviles no lo permiten; se ignora. */
+    }
   }, []);
 
   useEffect(() => {
@@ -183,6 +212,14 @@ export function ReekonCaptureView({
               {faltantes > 0 ? ` · faltan ${faltantes}` : ""}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => void toggleFullscreen()}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
+            aria-label={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+          >
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
           <button
             type="button"
             onClick={onSwitchToTable}
@@ -332,7 +369,7 @@ export function ReekonCaptureView({
                         </span>
                         <input
                           type="text"
-                          inputMode="decimal"
+                          inputMode="none"
                           data-reekon-field={dim}
                           className={`reekon-input reekon-input-immersive w-full text-center ${filled ? "reekon-input-filled" : ""}`}
                           value={String(activeRow[dim] ?? "")}

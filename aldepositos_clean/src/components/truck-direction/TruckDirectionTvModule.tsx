@@ -6,8 +6,10 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Clock3, Maximize2, Minimize2, Package, Radio, X } from "lucide-react";
+import logoAldepositos from "@/assets/brand/logo-aldepositos.png";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import {
   RECEPTION_COPY,
@@ -491,6 +493,20 @@ export function TruckDirectionTvModule({
         }}
         aria-hidden
       />
+
+      <div
+        className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center"
+        aria-hidden
+      >
+        <Image
+          src={logoAldepositos}
+          alt=""
+          width={900}
+          height={900}
+          className="w-[46vw] max-w-[720px] object-contain opacity-[0.16]"
+          priority={false}
+        />
+      </div>
 
       <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-md md:px-6 md:py-4">
         <div className="min-w-0">

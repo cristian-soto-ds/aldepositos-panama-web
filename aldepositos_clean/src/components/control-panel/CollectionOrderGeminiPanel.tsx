@@ -6,6 +6,7 @@ import {
   Loader2,
   MessageSquarePlus,
   Plus,
+  ScanText,
   Send,
   Table2,
   Trash2,
@@ -51,11 +52,25 @@ type CollectionOrderGeminiPanelProps = {
   existingReferencias: string[];
   job: CollectionOrderGeminiJobState;
   onChangeJob: (patch: Partial<CollectionOrderGeminiJobState>) => void;
-  onSend: (args: { text: string; file: File | null }) => Promise<void>;
+  onSend: (args: {
+    text: string;
+    file: File | null;
+    onlyRefsBultos?: boolean;
+  }) => Promise<void>;
   onApplyLines: () => void;
 };
 
 const ACCEPT_FILES = ".pdf,.png,.jpg,.jpeg,.webp";
+
+/** Prompt del botón rápido: leer documento y extraer referencias + bultos. */
+const EXTRACT_REFERENCIAS_PROMPT =
+  "Lee con cuidado el documento adjunto y extrae ÚNICAMENTE dos datos por fila: " +
+  "la referencia (puede ser código, SKU, modelo, estilo, artículo, etc.) y la cantidad de bultos. " +
+  "Coloca cada referencia en el campo Referencia y su cantidad de bultos en el campo Bultos. " +
+  "NO completes descripción, unidades, peso, medidas, género ni ningún otro campo: esos los " +
+  "tomará después el RA de Ingreso Rápido. Genera una fila por cada referencia. " +
+  "Si el documento no indica los bultos de una referencia, deja los bultos vacíos en vez de " +
+  "inventar un número. No inventes referencias que no aparezcan en el documento.";
 
 function greetingFirstName(displayName: string | null | undefined): string | null {
   const full = sanitizeViewerDisplayNameHint(displayName);
@@ -79,6 +94,7 @@ export function CollectionOrderGeminiPanel({
   const { input, history, busy, errorBanner, lastLines, usageSummary } = job;
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const autoExtractRef = useRef(false);
 
   const [learningNotes, setLearningNotes] = useState<GeminiLearningNote[]>([]);
   const [learningLoading, setLearningLoading] = useState(false);
@@ -150,6 +166,33 @@ export function CollectionOrderGeminiPanel({
     } catch (e) {
       scrollBottom();
     }
+  };
+
+  /** Envía el prompt fijo de extracción con el archivo indicado. */
+  const runExtract = async (file: File) => {
+    try {
+      onChangeJob({ input: "" });
+      await onSend({
+        text: EXTRACT_REFERENCIAS_PROMPT,
+        file,
+        onlyRefsBultos: true,
+      });
+      if (fileRef.current) fileRef.current.value = "";
+    } catch {
+      scrollBottom();
+    }
+  };
+
+  /** Botón rápido: usa el archivo ya adjunto o abre el selector y auto-envía. */
+  const quickExtract = () => {
+    if (busy) return;
+    const f = fileRef.current?.files?.[0] ?? null;
+    if (f) {
+      void runExtract(f);
+      return;
+    }
+    autoExtractRef.current = true;
+    fileRef.current?.click();
   };
 
   if (!open) return null;
@@ -317,6 +360,24 @@ export function CollectionOrderGeminiPanel({
               <h2 className="text-[1.35rem] font-normal leading-snug tracking-tight text-slate-800 dark:text-slate-100 sm:text-2xl">
                 {emptyGreeting}
               </h2>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={quickExtract}
+                className="group inline-flex max-w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/60 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/30"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  <ScanText className="h-5 w-5" aria-hidden />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    Leer documento
+                  </span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400">
+                    Extraer referencias y bultos automáticamente
+                  </span>
+                </span>
+              </button>
             </div>
           )}
 
@@ -385,6 +446,19 @@ export function CollectionOrderGeminiPanel({
         )}
 
         <div className="shrink-0 px-4 pb-5 pt-2">
+          {history.length > 0 && (
+            <div className="mb-2 flex justify-center">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={quickExtract}
+                className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+              >
+                <ScanText className="h-4 w-4" aria-hidden />
+                Leer documento: referencias y bultos
+              </button>
+            </div>
+          )}
           {job.pendingFileName && (
             <p className="mb-2 truncate text-center text-xs text-slate-500">
               {job.pendingFileName}
@@ -397,8 +471,15 @@ export function CollectionOrderGeminiPanel({
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (!f) return;
+              if (!f) {
+                autoExtractRef.current = false;
+                return;
+              }
               onChangeJob({ pendingFileName: f.name });
+              if (autoExtractRef.current) {
+                autoExtractRef.current = false;
+                void runExtract(f);
+              }
             }}
           />
           <div className="alde-ia-composer flex items-end gap-2 rounded-[28px] bg-white px-2 py-2 shadow-[0_1px_6px_rgba(60,64,67,0.15)] dark:bg-[#1e1f20] dark:shadow-none">

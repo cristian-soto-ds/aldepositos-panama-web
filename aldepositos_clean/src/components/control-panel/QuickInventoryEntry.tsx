@@ -1215,13 +1215,16 @@ export function QuickInventoryEntry({
     );
   }
 
-  // Vista de captura de medidas
+  // Vista de captura de medidas.
+  // El "declarado" del detalle debe coincidir con el de la tarjeta (expectedBultos,
+  // que es el valor editable). Así, si el usuario cambia los bultos del RA, el
+  // detalle (DECL / progreso) se actualiza de inmediato.
   const t = selectedTask;
   const totals = calculateTotals();
   const originalExpected =
-    t?.originalExpectedBultos !== undefined && t.originalExpectedBultos !== 0
-      ? t.originalExpectedBultos
-      : t?.expectedBultos || 0;
+    t?.expectedBultos && t.expectedBultos > 0
+      ? t.expectedBultos
+      : t?.originalExpectedBultos || 0;
   const faltantes = originalExpected - totals.bultos;
 
   const showWeightColumn = true;

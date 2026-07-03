@@ -1492,9 +1492,14 @@ export function CollectionOrderModule({
   const orderId = e.id;
   const geminiJob = getGeminiJob(orderId);
 
-  const sendToGemini = async (args: { text: string; file: File | null }) => {
+  const sendToGemini = async (args: {
+    text: string;
+    file: File | null;
+    onlyRefsBultos?: boolean;
+  }) => {
     const text = String(args.text ?? "").trim();
     const f = args.file;
+    const onlyRefsBultos = args.onlyRefsBultos === true;
     if (!text && !f) return;
 
     const userVisible = [text, f ? `📎 ${f.name}` : ""].filter(Boolean).join("\n");
@@ -1611,7 +1616,17 @@ export function CollectionOrderModule({
       }
 
       const reply = String(data.reply ?? "");
-      const lines = Array.isArray(data.lines) ? data.lines : [];
+      const rawLines = Array.isArray(data.lines) ? data.lines : [];
+      // Botón «Leer documento»: solo referencias y bultos. El resto (medidas,
+      // peso por bulto, etc.) lo completará el RA de Ingreso Rápido.
+      const lines = onlyRefsBultos
+        ? rawLines
+            .map((l) => ({
+              referencia: String(l.referencia ?? "").trim(),
+              bultos: String(l.bultos ?? "").trim(),
+            }))
+            .filter((l) => l.referencia || l.bultos)
+        : rawLines;
       const usageSummary = recordGeminiRequestSuccess(data.usage ?? null);
 
       patchGeminiJob(orderId, {
@@ -1677,6 +1692,11 @@ export function CollectionOrderModule({
       lines: [...(baseOrder.lines || []), ...additions],
     };
     patchGeminiJob(orderId, { lastLines: [] });
+    // Reflejar de inmediato las líneas extraídas en el editor visible.
+    // (persistOrder conserva las ediciones del usuario y no siempre repinta.)
+    setEditing((prev) =>
+      prev && prev.id === orderId ? nextOrder : prev,
+    );
     void persistOrder({ order: nextOrder, showAlerts: false });
   };
 
@@ -1777,11 +1797,11 @@ export function CollectionOrderModule({
         </p>
 
         <section className="mb-3 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex flex-col 2xl:flex-row 2xl:items-stretch">
+          <div className="flex flex-col lg:flex-row lg:items-stretch">
             {/* Totales documento — horizontal */}
-            <div className="flex flex-row border-b border-slate-100 dark:border-slate-800 2xl:shrink-0 2xl:border-b-0 2xl:border-r">
+            <div className="flex flex-row border-b border-slate-100 dark:border-slate-800 lg:shrink-0 lg:border-b-0 lg:border-r">
               <div
-                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 last:border-r-0 dark:border-slate-800 2xl:min-w-[7.25rem] 2xl:flex-none ${
+                className={`flex min-w-[5.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 last:border-r-0 dark:border-slate-800 lg:flex-none ${
                   bultosReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : bultosReconcile
@@ -1789,7 +1809,7 @@ export function CollectionOrderModule({
                       : ""
                 }`}
               >
-                <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1.5">
                   <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     Bultos
                   </span>
@@ -1837,7 +1857,7 @@ export function CollectionOrderModule({
               </div>
 
               <div
-                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 dark:border-slate-800 2xl:min-w-[7.25rem] 2xl:flex-none ${
+                className={`flex min-w-[5.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 dark:border-slate-800 lg:flex-none ${
                   pesoReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : pesoReconcile
@@ -1845,7 +1865,7 @@ export function CollectionOrderModule({
                       : ""
                 }`}
               >
-                <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1.5">
                   <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     Peso kg
                   </span>
@@ -1891,7 +1911,7 @@ export function CollectionOrderModule({
               </div>
 
               <div
-                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 px-3 py-2.5 2xl:min-w-[7.25rem] 2xl:flex-none ${
+                className={`flex min-w-[5.5rem] flex-1 flex-col justify-center gap-1 px-3 py-2.5 lg:flex-none ${
                   cbmReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : cbmReconcile
@@ -1899,7 +1919,7 @@ export function CollectionOrderModule({
                       : ""
                 }`}
               >
-                <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center gap-1.5">
                   <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     CBM m³
                   </span>

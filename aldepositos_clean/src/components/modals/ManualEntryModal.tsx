@@ -95,11 +95,11 @@ export function ManualEntryModal({
       expectedBultos: isEditing
         ? parseFloat(formData.expectedBultos) || 0
         : emptyFields!.expectedBultos,
-      originalExpectedBultos: initialData
-        ? initialData.originalExpectedBultos
-        : isEditing
-          ? parseFloat(formData.expectedBultos) || 0
-          : emptyFields!.originalExpectedBultos,
+      // Al editar los bultos, el "declarado original" debe seguir el nuevo valor
+      // para que la tarjeta y el detalle (DECL / progreso) coincidan.
+      originalExpectedBultos: isEditing
+        ? parseFloat(formData.expectedBultos) || 0
+        : emptyFields!.originalExpectedBultos,
       expectedCbm: isEditing
         ? parseFloat(formData.expectedCbm) || 0
         : emptyFields!.expectedCbm,

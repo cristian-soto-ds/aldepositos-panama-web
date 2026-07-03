@@ -320,7 +320,7 @@ body.reekon-immersive-active {
   padding-top: max(env(safe-area-inset-top, 0px), 0px);
 }
 .reekon-safe-bottom {
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), 0px) + 1.5rem);
 }
 .reekon-input-immersive {
   width: 100%;

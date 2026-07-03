@@ -117,17 +117,45 @@ export function ReekonCaptureView({
     };
   }, []);
 
+  const enterFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      /* Bloqueado por el navegador (sin gesto o no soportado). */
+    }
+  }, []);
+
   const toggleFullscreen = useCallback(async () => {
     try {
       if (document.fullscreenElement) {
         await document.exitFullscreen();
       } else {
-        await document.documentElement.requestFullscreen();
+        await enterFullscreen();
       }
     } catch {
       /* Algunos navegadores móviles no lo permiten; se ignora. */
     }
-  }, []);
+  }, [enterFullscreen]);
+
+  // Pantalla completa automática en móvil al abrir el RA (y al cambiar de RA).
+  // Si el navegador exige gesto, entra con el primer toque dentro de la vista.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const isMobile =
+      window.matchMedia("(max-width: 900px)").matches &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (!isMobile) return;
+
+    void enterFullscreen();
+
+    const onFirstGesture = () => {
+      void enterFullscreen();
+    };
+    document.addEventListener("pointerdown", onFirstGesture, { once: true });
+    return () => document.removeEventListener("pointerdown", onFirstGesture);
+  }, [raLabel, enterFullscreen]);
 
   useEffect(() => {
     if (!activeRowId && measureRows.length > 0) {
@@ -409,7 +437,7 @@ export function ReekonCaptureView({
       </main>
 
       {/* Footer */}
-      <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 pt-2 pb-3 dark:border-slate-700 dark:bg-slate-900">
+      <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 pt-2 dark:border-slate-700 dark:bg-slate-900">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
             <span>Total {formatMeasure2(totalCbm)} m³</span>

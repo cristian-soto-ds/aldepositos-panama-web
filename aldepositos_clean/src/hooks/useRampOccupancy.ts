@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RampOccupancyRampId, RampOccupancyState } from "@/lib/receptionLogistics/rampOccupancy";
+import type {
+  RampOccupancyRampId,
+  RampOccupancyState,
+} from "@/lib/receptionLogistics/rampOccupancy";
 import {
   fetchRampOccupancy,
   setRampOccupancy,

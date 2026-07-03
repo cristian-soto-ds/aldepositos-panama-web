@@ -46,48 +46,44 @@ export function ReceptionKanbanCardContent({
   const secondaryCompanyLabel =
     !isCollection && client && provider ? provider : null;
 
-  if (density === "dense") {
-    return (
-      <DenseQueueRow
-        truck={truck}
-        orNum={orNum}
-        isCollection={isCollection}
-        mainCompanyLabel={mainCompanyLabel}
-        queuePosition={queuePosition}
-        variant={variant}
-      />
-    );
-  }
-
+  const isDense = density === "dense";
   const isCompact = density === "compact";
 
-  const orTitleClass = isCompact
+  const orTitleClass = isDense
     ? variant === "tv"
       ? "text-lg md:text-xl"
       : "text-base sm:text-lg"
-    : variant === "tv"
-      ? "text-3xl md:text-4xl"
-      : "text-xl sm:text-2xl";
-  const companyClass = isCompact
+    : isCompact
+      ? variant === "tv"
+        ? "text-xl md:text-2xl"
+        : "text-lg sm:text-xl"
+      : variant === "tv"
+        ? "text-3xl md:text-4xl"
+        : "text-xl sm:text-2xl";
+
+  const companyClass = isDense
     ? variant === "tv"
-      ? "text-sm"
+      ? "text-sm md:text-base"
       : "text-xs sm:text-sm"
-    : variant === "tv"
-      ? "text-lg md:text-xl"
-      : "text-sm sm:text-base";
-  const bultosNumClass = isCompact
-    ? "text-base sm:text-lg"
-    : variant === "tv"
-      ? "text-3xl md:text-4xl"
-      : "text-xl sm:text-2xl";
+    : isCompact
+      ? variant === "tv"
+        ? "text-base md:text-lg"
+        : "text-sm sm:text-base"
+      : variant === "tv"
+        ? "text-lg md:text-xl"
+        : "text-sm sm:text-base";
+
+  const queueSize = isDense
+    ? "h-7 w-7 text-xs"
+    : isCompact
+      ? "h-8 w-8 text-sm"
+      : "h-10 w-10 text-lg";
 
   return (
     <div className="flex min-w-0 items-start gap-2 sm:gap-2.5">
       {queuePosition != null ? (
         <div
-          className={`flex shrink-0 items-center justify-center rounded-lg border-2 font-black tabular-nums leading-none text-white ${
-            isCompact ? "h-8 w-8 border-slate-700 bg-slate-800 text-sm" : "h-10 w-10 border-slate-700 bg-slate-800 text-lg"
-          }`}
+          className={`flex shrink-0 items-center justify-center rounded-lg border-2 border-slate-700 bg-slate-800 font-black tabular-nums leading-none text-white ${queueSize}`}
           title={`Posición ${queuePosition} en fila`}
           aria-label={`Posición ${queuePosition} en fila`}
         >
@@ -96,41 +92,23 @@ export function ReceptionKanbanCardContent({
       ) : null}
 
       <div className="min-w-0 flex-1">
-        <div
-          className={`flex min-w-0 items-center gap-2 ${
-            isCompact && mainCompanyLabel ? "flex-wrap sm:flex-nowrap" : "flex-wrap"
-          }`}
-        >
-          <div className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            {orNum != null ? (
-              <div
-                className={`flex items-baseline gap-1 font-black leading-none tracking-tight text-slate-900 dark:text-slate-50 ${orTitleClass}`}
-              >
-                <span>OR</span>
-                <span className="tabular-nums">#{orNum}</span>
-              </div>
-            ) : (
-              <p
-                className={`font-black leading-none tracking-tight text-slate-900 dark:text-slate-50 ${orTitleClass}`}
-              >
-                {truck.plate}
-              </p>
-            )}
-            {isCollection ? (
-              <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-white">
-                Rec
-              </span>
-            ) : null}
-          </div>
-
-          {mainCompanyLabel ? (
-            <p
-              className={`min-w-0 flex-1 truncate font-semibold text-slate-700 dark:text-slate-200 ${companyClass}`}
-              title={mainCompanyLabel}
+        {/* Fila superior: OR / placa + bultos */}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          {orNum != null ? (
+            <div
+              className={`flex shrink-0 items-baseline gap-1 font-black leading-none tracking-tight text-slate-900 dark:text-slate-50 ${orTitleClass}`}
             >
-              {mainCompanyLabel}
+              <span>OR</span>
+              <span className="tabular-nums">#{orNum}</span>
+            </div>
+          ) : (
+            <p
+              className={`min-w-0 flex-1 truncate font-black leading-none tracking-tight text-slate-900 dark:text-slate-50 ${orTitleClass}`}
+              title={truck.plate}
+            >
+              {truck.plate}
             </p>
-          ) : null}
+          )}
 
           <BultosPill
             count={truck.expectedBultos}
@@ -140,8 +118,18 @@ export function ReceptionKanbanCardContent({
           />
         </div>
 
+        {/* Proveedor / cliente: SIEMPRE completo (salto de línea, sin recortar) */}
+        {mainCompanyLabel ? (
+          <p
+            className={`mt-1 break-words font-bold leading-snug text-slate-700 dark:text-slate-200 ${companyClass}`}
+            title={mainCompanyLabel}
+          >
+            {mainCompanyLabel}
+          </p>
+        ) : null}
+
         {secondaryCompanyLabel ? (
-          <p className="mt-0.5 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+          <p className="mt-0.5 break-words text-xs font-medium leading-snug text-slate-500 dark:text-slate-400">
             {secondaryCompanyLabel}
           </p>
         ) : null}
@@ -152,7 +140,7 @@ export function ReceptionKanbanCardContent({
           </p>
         ) : null}
 
-        {!isCompact && truck.warehouseReceiptNumber ? (
+        {!isDense && truck.warehouseReceiptNumber ? (
           <div className="mt-2">
             <span className="rounded-lg bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-800">
               {truck.warehouseReceiptNumber}
@@ -160,73 +148,6 @@ export function ReceptionKanbanCardContent({
           </div>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function DenseQueueRow({
-  truck,
-  orNum,
-  isCollection,
-  mainCompanyLabel,
-  queuePosition,
-  variant,
-}: {
-  truck: ReceptionTruck;
-  orNum: string | null;
-  isCollection: boolean;
-  mainCompanyLabel: string | null;
-  queuePosition?: number;
-  variant: "operator" | "tv";
-}) {
-  const orClass =
-    variant === "tv" ? "text-base md:text-lg" : "text-sm sm:text-base";
-
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      {queuePosition != null ? (
-        <div
-          className={`flex shrink-0 items-center justify-center rounded-md bg-slate-800 font-black tabular-nums leading-none text-white ${
-            variant === "tv" ? "h-8 w-8 text-sm" : "h-7 w-7 text-xs"
-          }`}
-          title={`Posición ${queuePosition}`}
-          aria-label={`Posición ${queuePosition}`}
-        >
-          {queuePosition}
-        </div>
-      ) : null}
-
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="flex shrink-0 items-baseline gap-1">
-          {orNum != null ? (
-            <span
-              className={`whitespace-nowrap font-black leading-none text-slate-900 ${orClass}`}
-            >
-              OR <span className="tabular-nums">#{orNum}</span>
-            </span>
-          ) : (
-            <span className={`whitespace-nowrap font-black text-slate-900 ${orClass}`}>
-              {truck.plate}
-            </span>
-          )}
-          {isCollection ? (
-            <span className="ml-1 rounded bg-indigo-600 px-1 py-px text-[7px] font-black uppercase text-white">
-              Rec
-            </span>
-          ) : null}
-        </div>
-
-        <p
-          className={`min-w-0 flex-1 truncate font-semibold uppercase tracking-wide text-slate-600 ${
-            variant === "tv" ? "text-sm md:text-base" : "text-[11px] sm:text-xs"
-          }`}
-          title={mainCompanyLabel ?? undefined}
-        >
-          {mainCompanyLabel ?? "—"}
-        </p>
-      </div>
-
-      <BultosPill count={truck.expectedBultos} variant={variant} density="dense" />
     </div>
   );
 }

@@ -25,6 +25,8 @@ export const RECEPTION_STATUS = {
   EN_FILA: "EN_FILA",
   RAMPA_1: "RAMPA_1",
   RAMPA_2: "RAMPA_2",
+  RAMPA_EXTRA: "RAMPA_EXTRA",
+  CARRETILLADO: "CARRETILLADO",
   COMPLETADO: "COMPLETADO",
 } as const;
 
@@ -36,16 +38,29 @@ export const RECEPTION_STATUS_LABELS: Record<ReceptionStatusId, string> = {
   EN_FILA: "En Fila",
   RAMPA_1: "Rampa 1",
   RAMPA_2: "Rampa 2",
+  RAMPA_EXTRA: "Rampa Extra",
+  CARRETILLADO: "Carretillado",
   COMPLETADO: "Completado",
 };
 
 /**
+ * Estados especiales (poco frecuentes): solo se muestran como columna cuando
+ * tienen al menos una orden asignada. Se activan por orden desde Recepcionista.
+ */
+export const RECEPTION_OPTIONAL_STATUS: ReceptionStatusId[] = [
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
+];
+
+/**
  * Estados que disparan la generación del Recibo de Almacén al mover un camión.
- * Por defecto: solo al entrar a una rampa.
+ * Por defecto: al entrar a una rampa (incluida la extra) o al carretillar.
  */
 export const RECEPTION_RECEIPT_ON_STATUS: ReceptionStatusId[] = [
   RECEPTION_STATUS.RAMPA_1,
   RECEPTION_STATUS.RAMPA_2,
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
 ];
 
 /** Columnas del tablero Kanban del módulo Operador (orden de izquierda a derecha). */
@@ -53,17 +68,21 @@ export const RECEPTION_KANBAN_COLUMNS: ReceptionStatusId[] = [
   RECEPTION_STATUS.EN_FILA,
   RECEPTION_STATUS.RAMPA_1,
   RECEPTION_STATUS.RAMPA_2,
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
   RECEPTION_STATUS.COMPLETADO,
 ];
 
 /**
  * Estados visibles en la Pantalla TV (solo lectura).
- * Por defecto: fila + rampas (sin completados).
+ * Por defecto: fila + rampas (sin completados). Las especiales aparecen solas.
  */
 export const RECEPTION_TV_STATUS_IDS: ReceptionStatusId[] = [
   RECEPTION_STATUS.EN_FILA,
   RECEPTION_STATUS.RAMPA_1,
   RECEPTION_STATUS.RAMPA_2,
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
 ];
 
 /** Título agrupado en TV para todas las rampas. */
@@ -104,6 +123,26 @@ export const RECEPTION_COLUMN_THEME: Record<
       "border-2 border-orange-300 bg-orange-50 text-orange-900 hover:border-orange-400 hover:bg-orange-100",
     actionActive:
       "border-2 border-orange-600 bg-orange-500 text-white shadow-md ring-2 ring-orange-300/70 ring-offset-1",
+  },
+  RAMPA_EXTRA: {
+    header: "bg-sky-600 text-white border-sky-500",
+    card: "bg-sky-50 border-sky-200 text-sky-950",
+    badge: "bg-sky-100 text-sky-800",
+    stripe: "from-sky-400 to-sky-600",
+    actionIdle:
+      "border-2 border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100",
+    actionActive:
+      "border-2 border-sky-600 bg-sky-500 text-white shadow-md ring-2 ring-sky-300/70 ring-offset-1",
+  },
+  CARRETILLADO: {
+    header: "bg-violet-600 text-white border-violet-500",
+    card: "bg-violet-50 border-violet-200 text-violet-950",
+    badge: "bg-violet-100 text-violet-800",
+    stripe: "from-violet-400 to-violet-600",
+    actionIdle:
+      "border-2 border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100",
+    actionActive:
+      "border-2 border-violet-600 bg-violet-500 text-white shadow-md ring-2 ring-violet-300/70 ring-offset-1",
   },
   COMPLETADO: {
     header: "bg-emerald-700 text-white border-emerald-600",

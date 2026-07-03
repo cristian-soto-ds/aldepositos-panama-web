@@ -134,10 +134,21 @@ function TvAutoScrollQueueList({
   );
 }
 
-const TV_COLUMNS: ReceptionStatusId[] = [
+const TV_BASE_COLUMNS: ReceptionStatusId[] = [
   RECEPTION_STATUS.EN_FILA,
   RECEPTION_STATUS.RAMPA_1,
   RECEPTION_STATUS.RAMPA_2,
+];
+
+/** Estados especiales: solo aparecen como columna cuando tienen órdenes. */
+const TV_OPTIONAL_COLUMNS: ReceptionStatusId[] = [
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
+];
+
+const TV_ALL_COLUMNS: ReceptionStatusId[] = [
+  ...TV_BASE_COLUMNS,
+  ...TV_OPTIONAL_COLUMNS,
 ];
 
 const TV_COLUMN_UI: Record<
@@ -178,6 +189,24 @@ const TV_COLUMN_UI: Record<
     countBg: "bg-white/25 text-white",
     stripe: "from-orange-400 to-orange-600",
     emptyIcon: "text-orange-300",
+  },
+  RAMPA_EXTRA: {
+    headerGradient: "from-sky-500 via-sky-600 to-sky-700",
+    headerGlow: "shadow-sky-200/80",
+    panelBg: "bg-sky-50/80",
+    panelBorder: "border-sky-200",
+    countBg: "bg-white/25 text-white",
+    stripe: "from-sky-400 to-sky-600",
+    emptyIcon: "text-sky-300",
+  },
+  CARRETILLADO: {
+    headerGradient: "from-violet-500 via-violet-600 to-violet-700",
+    headerGlow: "shadow-violet-200/80",
+    panelBg: "bg-violet-50/80",
+    panelBorder: "border-violet-200",
+    countBg: "bg-white/25 text-white",
+    stripe: "from-violet-400 to-violet-600",
+    emptyIcon: "text-violet-300",
   },
   COMPLETADO: {
     headerGradient: "from-emerald-600 to-emerald-800",
@@ -368,10 +397,12 @@ export function TruckDirectionTvModule({
       EN_FILA: [],
       RAMPA_1: [],
       RAMPA_2: [],
+      RAMPA_EXTRA: [],
+      CARRETILLADO: [],
       COMPLETADO: [],
     };
 
-    for (const statusId of TV_COLUMNS) {
+    for (const statusId of TV_ALL_COLUMNS) {
       map[statusId] = trucks
         .filter((t) => t.status === statusId)
         .sort((a, b) => {
@@ -387,8 +418,21 @@ export function TruckDirectionTvModule({
     return map;
   }, [trucks]);
 
+  const visibleColumns = useMemo(
+    () =>
+      TV_ALL_COLUMNS.filter(
+        (id) =>
+          TV_BASE_COLUMNS.includes(id) || (trucksByColumn[id]?.length ?? 0) > 0,
+      ),
+    [trucksByColumn],
+  );
+
   const totalActive = useMemo(
-    () => TV_COLUMNS.reduce((sum, id) => sum + (trucksByColumn[id]?.length ?? 0), 0),
+    () =>
+      TV_ALL_COLUMNS.reduce(
+        (sum, id) => sum + (trucksByColumn[id]?.length ?? 0),
+        0,
+      ),
     [trucksByColumn],
   );
 
@@ -512,8 +556,16 @@ export function TruckDirectionTvModule({
           </p>
         </div>
       ) : (
-        <div className="relative z-10 grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:grid-cols-3 md:gap-4 md:p-5">
-          {TV_COLUMNS.map((statusId) => (
+        <div
+          className={`relative z-10 grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:gap-4 md:p-5 ${
+            visibleColumns.length >= 5
+              ? "md:grid-cols-5"
+              : visibleColumns.length === 4
+                ? "md:grid-cols-4"
+                : "md:grid-cols-3"
+          }`}
+        >
+          {visibleColumns.map((statusId) => (
             <KanbanColumn
               key={statusId}
               statusId={statusId}

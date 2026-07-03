@@ -395,6 +395,12 @@ export function CollectionOrderModule({
    */
   const [focusedUndBultoRowId, setFocusedUndBultoRowId] = useState<string | null>(null);
   const [undBultoDraft, setUndBultoDraft] = useState<Record<string, string>>({});
+  /**
+   * Peso/CBM del documento: se guardan como número, pero al escribir hay que
+   * conservar el texto crudo (p.ej. "12.") para poder teclear el punto decimal.
+   */
+  const [expectedPesoDraft, setExpectedPesoDraft] = useState<string | null>(null);
+  const [expectedCbmDraft, setExpectedCbmDraft] = useState<string | null>(null);
   /** Selección múltiple en la lista de órdenes (eliminar en lote). */
   const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
   const [listTab, setListTab] = useState<CollectionOrderListTab>("general");
@@ -541,6 +547,8 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setExpectedPesoDraft(null);
+    setExpectedCbmDraft(null);
     setSelectedOrderIds({});
   };
 
@@ -555,6 +563,8 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setExpectedPesoDraft(null);
+    setExpectedCbmDraft(null);
     setSelectedOrderIds({});
   };
 
@@ -565,6 +575,8 @@ export function CollectionOrderModule({
     setPendingPesoTot({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
+    setExpectedPesoDraft(null);
+    setExpectedCbmDraft(null);
     setSelectedOrderIds({});
     void reloadOrders();
   };
@@ -689,6 +701,7 @@ export function CollectionOrderModule({
         numero,
         updatedAt: new Date().toISOString(),
       };
+      const snapshotHash = JSON.stringify(order);
       const exists = orders.some((o) => o.id === payload.id);
       if (showAlerts) setSaveBusy(true);
       isOrderSavingRef.current = true;
@@ -696,7 +709,18 @@ export function CollectionOrderModule({
         if (exists) await updateCollectionOrder(payload);
         else await insertCollectionOrder(payload);
         setOrders((prev) => upsertCollectionOrderInList(prev, payload));
-        setEditing((prev) => (prev && prev.id === payload.id ? payload : prev));
+        setEditing((prev) => {
+          if (!prev || prev.id !== payload.id) return prev;
+          // El guardado (red) es asíncrono: si el usuario siguió escribiendo
+          // mientras se guardaba, NO pisamos su texto con la instantánea vieja.
+          if (JSON.stringify(prev) === snapshotHash) return payload;
+          // Sí conservamos sus ediciones; solo rellenamos el número de orden
+          // que el servidor pudo haber asignado cuando el campo estaba vacío.
+          if (!String(prev.numero ?? "").trim() && numero) {
+            return { ...prev, numero };
+          }
+          return prev;
+        });
         lastSavedOrderHashRef.current = JSON.stringify(payload);
         lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
         if (showAlerts) alert(`Orden guardada. Número: ${numero}.`);
@@ -1192,37 +1216,37 @@ export function CollectionOrderModule({
     };
 
     return (
-      <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-4 md:px-0 md:py-6 dark:from-indigo-950/20">
-        <header className="mb-6 shrink-0 rounded-3xl border border-indigo-300/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-5 text-white shadow-2xl shadow-indigo-500/30 dark:border-indigo-900/40 md:p-7">
+      <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-3 sm:px-3 md:px-0 md:py-6 dark:from-indigo-950/20">
+        <header className="mb-3 shrink-0 rounded-2xl border border-indigo-300/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-xl shadow-indigo-500/25 dark:border-indigo-900/40 sm:mb-4 sm:rounded-3xl sm:p-5 md:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 text-indigo-100">
-                <HandHelping className="h-8 w-8" />
-                <h1 className="text-2xl font-black uppercase tracking-tight text-white md:text-3xl">
+                <HandHelping className="h-6 w-6 shrink-0 sm:h-8 sm:w-8" />
+                <h1 className="text-xl font-black uppercase tracking-tight text-white sm:text-2xl md:text-3xl">
                   Orden de recolección
                 </h1>
               </div>
-              <p className="mt-2 max-w-2xl text-sm font-semibold text-indigo-100/95">
+              <p className="mt-1.5 hidden max-w-2xl text-xs font-semibold text-indigo-100/95 sm:mt-2 sm:block sm:text-sm">
                 Anotá qué se va a traer del proveedor. Después podés pasar estas líneas al RA de
                 almacén con medidas y cantidades. Misma importación Excel y CSV que en ingreso
                 detallado.
               </p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+            <div className="flex shrink-0 gap-2 max-sm:flex-wrap sm:flex-row">
               <button
                 type="button"
                 onClick={() => setHtmImportOpen(true)}
-                className="flex items-center justify-center gap-2 rounded-2xl border-2 border-emerald-300/60 bg-emerald-500/20 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg backdrop-blur-sm transition hover:bg-emerald-500/30"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-emerald-300/60 bg-emerald-500/20 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-lg backdrop-blur-sm transition hover:bg-emerald-500/30 sm:flex-none sm:rounded-2xl sm:px-5 sm:py-3"
               >
-                <FileCode className="h-5 w-5" aria-hidden />
-                Importar HTM
+                <FileCode className="h-5 w-5 shrink-0" aria-hidden />
+                <span className="whitespace-nowrap">Importar HTM</span>
               </button>
               <button
                 type="button"
                 onClick={openNew}
-                className="flex items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-xs font-black uppercase tracking-widest text-[#1b2d58] shadow-xl transition hover:scale-[1.01] hover:bg-indigo-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-black uppercase tracking-widest text-[#1b2d58] shadow-xl transition hover:scale-[1.01] hover:bg-indigo-50 sm:flex-none sm:rounded-2xl sm:px-5 sm:py-3"
               >
-                <Plus className="h-5 w-5" /> Nueva orden
+                <Plus className="h-5 w-5 shrink-0" /> <span className="whitespace-nowrap">Nueva orden</span>
               </button>
             </div>
           </div>
@@ -1298,7 +1322,7 @@ export function CollectionOrderModule({
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {displayedListOrders.map((o) => {
               const job = geminiJobByOrderId[o.id];
               const analyzing = job?.busy === true;
@@ -1323,7 +1347,7 @@ export function CollectionOrderModule({
                     }
                   }}
                   aria-label={`Abrir orden #${orderLabel}`}
-                  className="group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-3.5 pl-3 text-left shadow-sm ring-1 ring-slate-900/[0.03] transition duration-200 hover:-translate-y-0.5 hover:border-indigo-200/80 hover:shadow-md hover:ring-indigo-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600/80 dark:bg-slate-900 dark:ring-white/[0.04] dark:hover:border-indigo-500/40 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                  className="group relative flex cursor-pointer flex-col gap-2 overflow-hidden rounded-xl border border-slate-200/90 bg-white p-2.5 pl-3.5 text-left shadow-sm ring-1 ring-slate-900/[0.03] transition duration-200 hover:-translate-y-0.5 hover:border-indigo-200/80 hover:shadow-md hover:ring-indigo-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600/80 dark:bg-slate-900 dark:ring-white/[0.04] dark:hover:border-indigo-500/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                 >
                   <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
                   <label
@@ -1367,12 +1391,12 @@ export function CollectionOrderModule({
                         </span>
                       </p>
                     )}
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <span
-                        className="inline-flex items-baseline gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-800/90"
+                        className="inline-flex items-baseline gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800/90"
                         title="Referencias con número de parte"
                       >
-                        <span className="text-base font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">
+                        <span className="text-sm font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">
                           {refCount}
                         </span>
                         <span className="text-[10px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -1380,13 +1404,13 @@ export function CollectionOrderModule({
                         </span>
                       </span>
                       <span
-                        className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 shadow-sm dark:border-violet-500/35 dark:bg-violet-950/45 dark:shadow-violet-950/20"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 shadow-sm dark:border-violet-500/35 dark:bg-violet-950/45 dark:shadow-violet-950/20"
                         title="Total de bultos en la orden"
                       >
                         <span className="text-[10px] font-black uppercase tracking-wide text-violet-600 dark:text-violet-300">
                           Bultos
                         </span>
-                        <span className="text-xl font-black tabular-nums leading-none text-violet-600 dark:text-violet-200">
+                        <span className="text-lg font-black tabular-nums leading-none text-violet-600 dark:text-violet-200">
                           {bultosTot}
                         </span>
                       </span>
@@ -1413,17 +1437,17 @@ export function CollectionOrderModule({
                       )}
                     </div>
                   </div>
-                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+                  <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
                     {clienteLabel ? (
                       <span
-                        className="max-w-[min(100%,220px)] truncate text-xs font-semibold text-[#16263F] dark:text-slate-100"
+                        className="max-w-[min(100%,180px)] truncate text-xs font-semibold text-[#16263F] dark:text-slate-100"
                         title={`Cliente: ${clienteLabel}`}
                       >
                         {clienteLabel}
                       </span>
                     ) : null}
                     <span
-                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
+                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
                         inWarehouse && !hasRa
                           ? "bg-amber-600 group-hover:bg-amber-700"
                           : "bg-[#16263F] group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500"
@@ -1438,7 +1462,7 @@ export function CollectionOrderModule({
                         ev.stopPropagation();
                         void deleteOrder(o);
                       }}
-                      className="relative z-[1] rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                      className="relative z-[1] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                     >
                       Eliminar
                     </button>
@@ -1752,12 +1776,12 @@ export function CollectionOrderModule({
           Paso 1 · Número de orden · Paso 2 · Líneas · Paso 3 · Pasar al RA
         </p>
 
-        <section className="mb-4 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex flex-col lg:flex-row lg:items-stretch">
+        <section className="mb-3 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex flex-col 2xl:flex-row 2xl:items-stretch">
             {/* Totales documento — horizontal */}
-            <div className="flex shrink-0 flex-row border-b border-slate-100 lg:border-b-0 lg:border-r dark:border-slate-800">
+            <div className="flex flex-row border-b border-slate-100 dark:border-slate-800 2xl:shrink-0 2xl:border-b-0 2xl:border-r">
               <div
-                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-4 py-3 last:border-r-0 dark:border-slate-800 lg:min-w-[7.25rem] lg:flex-none ${
+                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 last:border-r-0 dark:border-slate-800 2xl:min-w-[7.25rem] 2xl:flex-none ${
                   bultosReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : bultosReconcile
@@ -1813,7 +1837,7 @@ export function CollectionOrderModule({
               </div>
 
               <div
-                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-4 py-3 dark:border-slate-800 lg:min-w-[7.25rem] lg:flex-none ${
+                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 border-r border-slate-100 px-3 py-2.5 dark:border-slate-800 2xl:min-w-[7.25rem] 2xl:flex-none ${
                   pesoReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : pesoReconcile
@@ -1837,18 +1861,22 @@ export function CollectionOrderModule({
                   type="text"
                   inputMode="decimal"
                   value={
-                    e.expectedPesoKg != null && e.expectedPesoKg > 0
-                      ? String(e.expectedPesoKg)
-                      : ""
+                    expectedPesoDraft !== null
+                      ? expectedPesoDraft
+                      : e.expectedPesoKg != null && e.expectedPesoKg > 0
+                        ? String(e.expectedPesoKg)
+                        : ""
                   }
                   onChange={(ev) => {
                     const raw = sanitizeDecimalInput(ev.target.value, 2);
+                    setExpectedPesoDraft(raw);
                     const n = parseFloat(raw.replace(",", "."));
                     updateEditing({
                       expectedPesoKg:
                         raw && Number.isFinite(n) && n > 0 ? n : undefined,
                     });
                   }}
+                  onBlur={() => setExpectedPesoDraft(null)}
                   className="no-spinners w-full bg-transparent text-lg font-black tabular-nums text-[#16263F] outline-none dark:text-slate-100"
                   placeholder="0"
                   aria-label="Peso kg documento"
@@ -1863,7 +1891,7 @@ export function CollectionOrderModule({
               </div>
 
               <div
-                className={`flex min-w-[6.5rem] flex-1 flex-col justify-center gap-1 px-4 py-3 lg:min-w-[7.25rem] lg:flex-none ${
+                className={`flex min-w-[6rem] flex-1 flex-col justify-center gap-1 px-3 py-2.5 2xl:min-w-[7.25rem] 2xl:flex-none ${
                   cbmReconcile?.ok
                     ? "bg-emerald-50/50 dark:bg-emerald-950/20"
                     : cbmReconcile
@@ -1886,14 +1914,22 @@ export function CollectionOrderModule({
                 <input
                   type="text"
                   inputMode="decimal"
-                  value={e.expectedCbm != null && e.expectedCbm > 0 ? String(e.expectedCbm) : ""}
+                  value={
+                    expectedCbmDraft !== null
+                      ? expectedCbmDraft
+                      : e.expectedCbm != null && e.expectedCbm > 0
+                        ? String(e.expectedCbm)
+                        : ""
+                  }
                   onChange={(ev) => {
                     const raw = sanitizeDecimalInput(ev.target.value, 2);
+                    setExpectedCbmDraft(raw);
                     const n = parseFloat(raw.replace(",", "."));
                     updateEditing({
                       expectedCbm: raw && Number.isFinite(n) && n > 0 ? n : undefined,
                     });
                   }}
+                  onBlur={() => setExpectedCbmDraft(null)}
                   className="no-spinners w-full bg-transparent text-lg font-black tabular-nums text-[#16263F] outline-none dark:text-slate-100"
                   placeholder="0"
                   aria-label="Cubicaje documento"
@@ -1909,7 +1945,7 @@ export function CollectionOrderModule({
             </div>
 
             {/* Datos de la orden — una fila ancha */}
-            <div className="grid min-w-0 flex-1 grid-cols-2 items-end gap-x-4 gap-y-2 px-4 py-3 xl:grid-cols-4">
+            <div className="grid min-w-0 flex-1 grid-cols-2 items-end gap-x-4 gap-y-2.5 px-3 py-3 sm:px-4 lg:grid-cols-4">
               <div className="min-w-0">
                 <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
                   Nº orden
@@ -2117,7 +2153,7 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-20">
                         <input
-                          type={focusedUndBultoRowId === row.id ? "number" : "text"}
+                          type="text"
                           value={displayUndBultoValue({
                             rowId: row.id,
                             raw: String(row.unidadesPorBulto ?? ""),
@@ -2144,7 +2180,6 @@ export function CollectionOrderModule({
                             setFocusedUndBultoRowId((prev) => (prev === row.id ? null : prev));
                           }}
                           inputMode="decimal"
-                          step="any"
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs transition dark:bg-slate-950 ${
                             unitsMode === "total"
                               ? "border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
@@ -2209,7 +2244,7 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-24">
                         <input
-                          type="number"
+                          type="text"
                           value={row.pesoPorBulto ?? ""}
                           disabled={weightMode === "total"}
                           onChange={(ev) =>
@@ -2223,7 +2258,6 @@ export function CollectionOrderModule({
                             })
                           }
                           inputMode="decimal"
-                          step={0.01}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs transition dark:bg-slate-950 ${
                             weightMode === "total"
                               ? "border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
@@ -2233,7 +2267,7 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-24 bg-slate-50/70 dark:bg-slate-800/60">
                         <input
-                          type="number"
+                          type="text"
                           title="Al salir del campo recalcula peso por bulto con los bultos actuales"
                           disabled={weightMode === "per_bundle"}
                           value={
@@ -2283,12 +2317,12 @@ export function CollectionOrderModule({
                           }`}
                           placeholder="Tot."
                           inputMode="decimal"
-                          step={0.01}
                         />
                       </td>
                       <td className="px-2 py-1 w-16">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={row.l ?? ""}
                           onChange={(ev) =>
                             updateLine(row.id, {
@@ -2305,7 +2339,8 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-16">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={row.w ?? ""}
                           onChange={(ev) =>
                             updateLine(row.id, {
@@ -2322,7 +2357,8 @@ export function CollectionOrderModule({
                       </td>
                       <td className="px-2 py-1 w-16">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={row.h ?? ""}
                           onChange={(ev) =>
                             updateLine(row.id, {

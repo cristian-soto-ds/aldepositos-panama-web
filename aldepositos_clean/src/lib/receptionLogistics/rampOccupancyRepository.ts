@@ -104,13 +104,43 @@ export async function setRampOccupancy(
   return next;
 }
 
+const RAMP_OCCUPANCY_REALTIME_CHANNEL_ID = "ramp-occupancy-live";
+
 let rampOccupancyListeners = new Set<() => void>();
 let rampBroadcastChannel: BroadcastChannel | null = null;
+let rampRealtimeChannel: ReturnType<typeof supabase.channel> | null = null;
 
 function notifyRampOccupancyListeners() {
   for (const listener of rampOccupancyListeners) {
     listener();
   }
+}
+
+function ensureRampRealtimeChannel() {
+  if (rampRealtimeChannel) return;
+  try {
+    rampRealtimeChannel = supabase
+      .channel(RAMP_OCCUPANCY_REALTIME_CHANNEL_ID)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: RECEPTION_TABLE,
+          filter: `id=eq.${RAMP_OCCUPANCY_META_ID}`,
+        },
+        () => notifyRampOccupancyListeners(),
+      )
+      .subscribe();
+  } catch {
+    rampRealtimeChannel = null;
+  }
+}
+
+function teardownRampRealtimeChannelIfIdle() {
+  if (rampOccupancyListeners.size > 0 || !rampRealtimeChannel) return;
+  void supabase.removeChannel(rampRealtimeChannel);
+  rampRealtimeChannel = null;
 }
 
 export function subscribeRampOccupancy(onSync: () => void): () => void {
@@ -133,9 +163,12 @@ export function subscribeRampOccupancy(onSync: () => void): () => void {
     }
   }
 
+  ensureRampRealtimeChannel();
+
   return () => {
     rampOccupancyListeners.delete(onSync);
     window.removeEventListener("storage", onStorage);
+    teardownRampRealtimeChannelIfIdle();
     if (rampOccupancyListeners.size === 0 && rampBroadcastChannel) {
       rampBroadcastChannel.close();
       rampBroadcastChannel = null;

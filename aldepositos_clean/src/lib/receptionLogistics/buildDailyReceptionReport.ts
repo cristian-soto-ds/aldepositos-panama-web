@@ -75,6 +75,8 @@ function diffMinutes(startIso: string | undefined, endIso: string | undefined): 
 function rampLabel(status: ReceptionStatusId): string {
   if (status === RECEPTION_STATUS.RAMPA_1) return "Rampa 1";
   if (status === RECEPTION_STATUS.RAMPA_2) return "Rampa 2";
+  if (status === RECEPTION_STATUS.RAMPA_EXTRA) return "Rampa Extra";
+  if (status === RECEPTION_STATUS.CARRETILLADO) return "Carretillado";
   return "—";
 }
 

@@ -19,6 +19,7 @@ import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import {
   RECEPTION_COPY,
   RECEPTION_KANBAN_COLUMNS,
+  RECEPTION_OPTIONAL_STATUS,
   RECEPTION_RECEIPT_ON_STATUS,
   RECEPTION_COLUMN_THEME,
   RECEPTION_STATUS,
@@ -75,6 +76,8 @@ export function TruckDirectionModule() {
       EN_FILA: [],
       RAMPA_1: [],
       RAMPA_2: [],
+      RAMPA_EXTRA: [],
+      CARRETILLADO: [],
       COMPLETADO: [],
     };
     for (const col of RECEPTION_KANBAN_COLUMNS) {
@@ -84,6 +87,16 @@ export function TruckDirectionModule() {
     }
     return map;
   }, [filtered]);
+
+  const visibleColumns = useMemo(
+    () =>
+      RECEPTION_KANBAN_COLUMNS.filter(
+        (col) =>
+          !RECEPTION_OPTIONAL_STATUS.includes(col) ||
+          (byStatus[col]?.length ?? 0) > 0,
+      ),
+    [byStatus],
+  );
 
   const onGenerateReport = useCallback(async () => {
     setReportBusy(true);
@@ -201,8 +214,16 @@ export function TruckDirectionModule() {
           Cargando tablero…
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pb-4 sm:grid-cols-2 xl:grid-cols-4 xl:overflow-hidden">
-          {RECEPTION_KANBAN_COLUMNS.map((statusId) => {
+        <div
+          className={`grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto pb-4 sm:grid-cols-2 xl:overflow-hidden ${
+            visibleColumns.length >= 6
+              ? "xl:grid-cols-6"
+              : visibleColumns.length === 5
+                ? "xl:grid-cols-5"
+                : "xl:grid-cols-4"
+          }`}
+        >
+          {visibleColumns.map((statusId) => {
             const theme = RECEPTION_COLUMN_THEME[statusId];
             const list = byStatus[statusId] ?? [];
             const isQueueColumn = statusId === RECEPTION_STATUS.EN_FILA;

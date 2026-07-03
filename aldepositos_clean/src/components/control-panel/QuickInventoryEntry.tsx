@@ -1103,7 +1103,7 @@ export function QuickInventoryEntry({
                     </div>
                     <div className="min-w-0">
                       <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                        Marca / tracking
+                        Marca
                       </p>
                       <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
                         {formatRaFieldLabel(t.brand)}

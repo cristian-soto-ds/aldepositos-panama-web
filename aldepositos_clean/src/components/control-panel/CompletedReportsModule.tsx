@@ -66,7 +66,7 @@ export function CompletedReportsModule({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  /** Solo el Ã¡rbol de exportaciÃ³n PDF (off-screen), no la vista en pantalla */
+  /** Solo el arbol de exportacion PDF (off-screen), no la vista en pantalla */
   const pdfExportLayoutRef = useRef<HTMLDivElement>(null);
 
   let tasksToPrint: Task[] = [];
@@ -113,7 +113,7 @@ export function CompletedReportsModule({
       if (!root) {
         const err = new Error("[Reports PDF] pdfExportLayoutRef no montado.");
         console.error(err);
-        setExportError("No se pudo acceder al contenedor de exportaciÃ³n PDF.");
+        setExportError("No se pudo acceder al contenedor de exportacion PDF.");
         return;
       }
 
@@ -342,10 +342,10 @@ export function CompletedReportsModule({
                     }
                     className="appearance-none w-full sm:w-48 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 text-[#16263F] dark:text-slate-100 font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
                   >
-                    <option value="Todos">TODOS LOS MÃ“DULOS</option>
-                    <option value="quick">Ingreso RÃ¡pido</option>
+                    <option value="Todos">TODOS LOS MÓDULOS</option>
+                    <option value="quick">Ingreso Rápido</option>
                     <option value="detailed">Ingreso Detallado</option>
-                    <option value="airway">GuÃ­a AÃ©rea</option>
+                    <option value="airway">Guía Aérea</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 </div>
@@ -376,10 +376,10 @@ export function CompletedReportsModule({
                 const isSelected = selectedReportIds.includes(t.id);
                 const moduleName =
                   t.type === "quick"
-                    ? "RÃPIDO"
+                    ? "RÁPIDO"
                     : t.type === "detailed"
                       ? "DETALLADO"
-                      : "AÃ‰REA";
+                      : "AÉREA";
 
                 return (
                   <div
@@ -426,7 +426,7 @@ export function CompletedReportsModule({
                             {t.status === "partial" ? "Parcial" : "Completado"}
                           </span>
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase leading-normal tracking-wide ${
                               t.type === "detailed"
                                 ? "bg-purple-100 text-purple-700"
                                 : "bg-slate-100 text-slate-600 dark:text-slate-300"
@@ -444,7 +444,7 @@ export function CompletedReportsModule({
                         </h3>
                         <p className="text-[10px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">
                           {t.provider}
-                          {t.brand ? ` â€” ${t.brand}` : ""}
+                          {t.brand ? ` — ${t.brand}` : ""}
                         </p>
                       </div>
                       <div className="text-left md:text-right flex items-center gap-2 md:gap-4 justify-end mt-2 md:mt-0">

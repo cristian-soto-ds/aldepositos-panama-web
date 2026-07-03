@@ -22,6 +22,7 @@ import {
   Loader2,
   Printer,
   Search,
+  Trash2,
 } from "lucide-react";
 
 type Task = {
@@ -46,10 +47,13 @@ type Task = {
 
 type CompletedReportsModuleProps = {
   tasks: Task[];
+  /** Elimina un reporte/RA (abre el modal de confirmación global). */
+  onDeleteTask?: (id: string) => void;
 };
 
 export function CompletedReportsModule({
   tasks,
+  onDeleteTask,
 }: CompletedReportsModuleProps) {
   const completedTasks = tasks.filter(
     (t) => t.status === "completed" || t.status === "partial",
@@ -464,6 +468,19 @@ export function CompletedReportsModule({
                             <FileSpreadsheet size={18} />
                           )}
                         </button>
+                        {onDeleteTask && (
+                          <button
+                            type="button"
+                            title="Eliminar reporte"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteTask(t.id);
+                            }}
+                            className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors border border-red-200 dark:bg-red-950/40 dark:border-red-900/60"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
                         <div className="text-right">
                           <p className="text-sm md:text-lg font-black text-[#16263F] dark:text-slate-100 leading-none">
                             {t.currentBultos} BULTOS

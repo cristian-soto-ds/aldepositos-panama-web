@@ -91,7 +91,9 @@ export function ManualEntryModal({
       subClient: isEditing
         ? formData.subClient.trim() || "N/A"
         : emptyFields!.subClient,
-      brand: isEditing ? formData.brand.trim() || "N/A" : emptyFields!.brand,
+      brand: isEditing
+        ? formData.brand.trim() || "N/A"
+        : formData.brand.trim() || emptyFields!.brand,
       expectedBultos: isEditing
         ? parseFloat(formData.expectedBultos) || 0
         : emptyFields!.expectedBultos,
@@ -182,7 +184,7 @@ export function ManualEntryModal({
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                    Marca / Tracking
+                    Marca
                   </label>
                   <input
                     name="brand"
@@ -282,23 +284,37 @@ export function ManualEntryModal({
             </>
           ) : (
             <>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                  Número de RA *
-                </label>
-                <input
-                  required
-                  autoFocus
-                  name="ra"
-                  value={formData.ra}
-                  onChange={handleChange}
-                  className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
-                  placeholder="Ej: 54069"
-                />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Número de RA *
+                  </label>
+                  <input
+                    required
+                    autoFocus
+                    name="ra"
+                    value={formData.ra}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                    placeholder="Ej: 54069"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    Marca
+                  </label>
+                  <input
+                    name="brand"
+                    value={formData.brand}
+                    onChange={handleChange}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                    placeholder="Ej: NIKE"
+                  />
+                </div>
               </div>
               <p className="rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm leading-relaxed text-slate-600 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-slate-300">
-                Solo necesitas el número de RA. Cliente, proveedor, bultos y demás datos se
-                completan al asignar una orden de recolección a este RA.
+                Solo necesitas el número de RA (y opcionalmente la marca). Cliente, proveedor,
+                bultos y demás datos se completan al asignar una orden de recolección a este RA.
               </p>
             </>
           )}

@@ -16,10 +16,7 @@ import { AldeIaBrand } from "@/components/ui/AldeIaBrand";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { sanitizeViewerDisplayNameHint } from "@/lib/geminiCollectionOrderContext";
-import {
-  formatGeminiUsageLines,
-  type GeminiUsageSummary,
-} from "@/lib/geminiClientUsage";
+import type { GeminiUsageSummary } from "@/lib/geminiClientUsage";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   deleteGeminiLearningNote,
@@ -91,7 +88,7 @@ export function CollectionOrderGeminiPanel({
   onSend,
   onApplyLines,
 }: CollectionOrderGeminiPanelProps) {
-  const { input, history, busy, errorBanner, lastLines, usageSummary } = job;
+  const { input, history, busy, errorBanner, lastLines } = job;
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoExtractRef = useRef(false);
@@ -406,16 +403,6 @@ export function CollectionOrderGeminiPanel({
             </p>
           )}
 
-          {usageSummary && history.length > 0 && (
-            <details className="mb-3 text-xs text-slate-500">
-              <summary className="cursor-pointer">Uso de API</summary>
-              <ul className="mt-1 list-inside list-disc">
-                {formatGeminiUsageLines(usageSummary).map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-              </ul>
-            </details>
-          )}
         </div>
 
         {errorBanner && (

@@ -639,76 +639,107 @@ function FriendlyReceptionBar({
       </div>
 
       {/* Tablet / desktop */}
-      <div className="hidden grid-cols-1 gap-2 px-2.5 py-2 sm:grid sm:grid-cols-[minmax(0,1fr)_11.5rem] sm:items-center sm:gap-3 md:grid-cols-[minmax(0,1fr)_13rem] lg:grid-cols-[minmax(0,1fr)_14rem]">
+      <div className="hidden grid-cols-1 gap-3 px-3 py-1.5 sm:grid sm:grid-cols-[minmax(0,1fr)_19rem] sm:items-center md:grid-cols-[minmax(0,1fr)_21rem] lg:grid-cols-[minmax(0,1fr)_23rem]">
         {/* Documento */}
-        <div className="flex min-w-0 items-start gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#16263F] text-white [&_svg]:h-3 [&_svg]:w-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#16263F] text-white shadow-sm [&_svg]:h-4 [&_svg]:w-4">
             {leadingIcon}
           </span>
-          <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="min-w-0 flex-1">
             <p
-              className="truncate text-xs font-semibold leading-snug text-[#16263F] dark:text-slate-100"
+              className="truncate text-sm font-bold leading-tight text-[#16263F] dark:text-slate-100 md:text-base"
               title={`${provider} · ${brand}`}
             >
               {provider}
               <span className="font-normal text-slate-400 dark:text-slate-500"> · </span>
               {brand}
             </p>
-            <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-[10px] text-slate-600 dark:text-slate-400 sm:text-[11px]">
-              <span className="inline-flex items-baseline gap-0.5 font-semibold tabular-nums text-sky-800 dark:text-sky-200">
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+              <span className="inline-flex items-baseline gap-0.5 rounded-md bg-sky-50 px-1.5 py-0.5 font-bold tabular-nums text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
                 {expectedCbm}
-                <M3Unit size="sm" className="text-[8px] font-bold" />
+                <M3Unit size="sm" className="text-[10px] font-bold" />
               </span>
-              <span className="text-slate-300 dark:text-slate-600" aria-hidden>
-                ·
-              </span>
-              <span className="font-semibold tabular-nums">
+              <span className="inline-flex items-baseline gap-0.5 rounded-md bg-slate-100 px-1.5 py-0.5 font-bold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 {expectedWeight}
-                <span className="ml-0.5 font-medium text-slate-400">kg</span>
-              </span>
-              <span className="hidden text-slate-300 dark:text-slate-600 sm:inline" aria-hidden>
-                ·
+                <span className="ml-0.5 text-[10px] font-medium text-slate-400">kg</span>
               </span>
               <span
-                className="hidden max-w-[8rem] truncate rounded-full border border-blue-200/70 bg-blue-50/80 px-1.5 py-px text-[9px] font-medium text-blue-800 dark:border-blue-800/50 dark:bg-blue-950/40 dark:text-blue-100 sm:inline"
+                className="max-w-[11rem] truncate rounded-full border border-blue-200/70 bg-blue-50/80 px-2 py-0.5 text-[11px] font-semibold text-blue-800 dark:border-blue-800/50 dark:bg-blue-950/40 dark:text-blue-100"
                 title={badge}
               >
                 {badge}
               </span>
-            </p>
-            {notesFull ? (
-              <button
-                type="button"
-                onClick={() => setNotesOpen((v) => !v)}
-                className="flex max-w-full items-center gap-0.5 text-left text-[10px] leading-snug text-amber-800 hover:text-amber-900 dark:text-amber-200/90 dark:hover:text-amber-100"
-                title={notesFull}
-              >
-                {notesOpen ? (
-                  <ChevronUp className="h-2.5 w-2.5 shrink-0" aria-hidden />
-                ) : (
-                  <ChevronDown className="h-2.5 w-2.5 shrink-0" aria-hidden />
-                )}
-                <span className={notesOpen ? "whitespace-normal break-words" : "truncate"}>
-                  {notesFull}
-                </span>
-              </button>
-            ) : null}
+              {notesFull ? (
+                <button
+                  type="button"
+                  onClick={() => setNotesOpen((v) => !v)}
+                  className="flex min-w-0 max-w-[14rem] items-center gap-1 text-left text-xs font-medium leading-tight text-amber-800 hover:text-amber-900 dark:text-amber-200/90 dark:hover:text-amber-100"
+                  title={notesFull}
+                >
+                  {notesOpen ? (
+                    <ChevronUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  )}
+                  <span className={notesOpen ? "whitespace-normal break-words" : "truncate"}>
+                    {notesFull}
+                  </span>
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
 
         {/* Progreso y totales — panel fijo a la derecha */}
-        <div className="rounded-md border border-slate-200/90 bg-white px-2 py-1.5 dark:border-slate-600 dark:bg-slate-950/50">
-          <div className="mb-1 grid grid-cols-3 gap-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <span>Decl.</span>
-            <span>Cap.</span>
-            <span>Dif.</span>
+        <div className="rounded-xl border border-slate-200/90 bg-white px-2.5 py-1.5 shadow-sm dark:border-slate-600 dark:bg-slate-950/50">
+          <div className="flex items-center gap-2">
+            <div className="grid flex-1 grid-cols-3 gap-1.5">
+              <div className="flex flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50/80 px-1 py-0.5 dark:border-slate-600 dark:bg-slate-900/60">
+                <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Declarado
+                </span>
+                <span className="text-lg font-black tabular-nums leading-tight text-[#16263F] dark:text-slate-100">
+                  {declared}
+                </span>
+              </div>
+              <div className="flex flex-col items-center justify-center rounded-lg border border-violet-200 bg-violet-50/70 px-1 py-0.5 dark:border-violet-800/50 dark:bg-violet-950/35">
+                <span className="text-[9px] font-bold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                  Capturado
+                </span>
+                <span className="text-lg font-black tabular-nums leading-tight text-violet-800 dark:text-violet-200">
+                  {physical}
+                </span>
+              </div>
+              <div
+                className={`flex flex-col items-center justify-center rounded-lg border px-1 py-0.5 ${
+                  state === "ok"
+                    ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-800/50 dark:bg-emerald-950/30"
+                    : state === "pending"
+                      ? "border-amber-200 bg-amber-50/70 dark:border-amber-800/50 dark:bg-amber-950/25"
+                      : "border-red-200 bg-red-50/70 dark:border-red-800/50 dark:bg-red-950/25"
+                }`}
+              >
+                <span
+                  className={`text-[9px] font-bold uppercase tracking-wide ${
+                    state === "ok"
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : state === "pending"
+                        ? "text-amber-700 dark:text-amber-300"
+                        : "text-red-600 dark:text-red-400"
+                  }`}
+                >
+                  Diferencia
+                </span>
+                <span className={`text-lg font-black tabular-nums leading-tight ${diffNumClass}`}>
+                  {faltantes}
+                </span>
+              </div>
+            </div>
+            <span className="shrink-0 text-sm font-black tabular-nums text-slate-700 dark:text-slate-200">
+              {progressPct}%
+            </span>
           </div>
-          <div className="mb-1.5 grid grid-cols-3 gap-0.5 text-center text-sm font-bold tabular-nums leading-none">
-            <span className="text-[#16263F] dark:text-slate-100">{declared}</span>
-            <span className="text-violet-700 dark:text-violet-300">{physical}</span>
-            <span className={diffNumClass}>{faltantes}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
+          <div className="mt-1.5 flex items-center gap-2">
             <div
               className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
               role="progressbar"
@@ -722,23 +753,15 @@ function FriendlyReceptionBar({
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <span className="shrink-0 text-[10px] font-bold tabular-nums text-slate-700 dark:text-slate-200">
-              {progressPct}%
+            <span className="flex shrink-0 flex-wrap items-baseline gap-x-1.5 text-[11px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+              <span className="inline-flex items-baseline gap-0.5">
+                {Number(totalCbm).toFixed(2)}
+                <M3Unit size="sm" className="text-[9px]" />
+              </span>
+              <span>{Number(totalWeight).toFixed(totalWeightDecimals)} kg</span>
+              {showTotalUnidades ? <span>{totalUnidades} und.</span> : null}
             </span>
           </div>
-          <p className="mt-1 truncate text-center text-[9px] tabular-nums text-slate-500 dark:text-slate-400">
-            {physical}/{declared} bultos
-            <span className="mx-1 text-slate-300 dark:text-slate-600">·</span>
-            {Number(totalCbm).toFixed(2)}
-            <M3Unit size="sm" className="mx-px text-[8px]" />
-            {Number(totalWeight).toFixed(totalWeightDecimals)} kg
-            {showTotalUnidades ? (
-              <>
-                <span className="mx-1 text-slate-300 dark:text-slate-600">·</span>
-                {totalUnidades} und.
-              </>
-            ) : null}
-          </p>
         </div>
       </div>
     </section>

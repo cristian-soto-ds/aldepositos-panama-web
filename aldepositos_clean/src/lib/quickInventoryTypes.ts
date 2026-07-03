@@ -20,9 +20,17 @@ export type QuickMeasureRow = {
   referenciasContenedor?: string;
   reempaqueRefs?: string[];
   referenciaContenedora?: string;
+  /** Modo paletizado: número de paleta al que pertenece la fila (agrupación en captura). */
+  pallet?: number;
+  /** Modo paletizado: peso total de la paleta (kg). Se replica en todas las filas de la paleta. */
+  palletWeight?: string | number;
 };
 
-export type ReferenceCaptureMode = "with" | "without";
+export type ReferenceCaptureMode = "with" | "without" | "palletized";
+
+export function isReferenceCaptureMode(value: unknown): value is ReferenceCaptureMode {
+  return value === "with" || value === "without" || value === "palletized";
+}
 export type CaptureLayout = "table" | "reekon";
 
 export const CAPTURE_LAYOUTS = ["table", "reekon"] as const satisfies readonly CaptureLayout[];
@@ -59,10 +67,12 @@ export function taskHasImportedReferences(rows: QuickMeasureRow[]): boolean {
 }
 
 export function applyConsecutiveReferences<T extends QuickMeasureRow>(rows: T[]): T[] {
-  return rows.map((row, i) => ({
-    ...row,
-    referencia: String(i + 1),
-  }));
+  return rows.map((row, i) => {
+    const ref = String(i + 1);
+    // Conserva la misma referencia de objeto si el número ya es correcto: así la
+    // memoización de las filas no se rompe y no se re-renderiza toda la tabla.
+    return String(row.referencia ?? "") === ref ? row : { ...row, referencia: ref };
+  });
 }
 
 export function buildReferenceSnapshot(rows: QuickMeasureRow[]): Record<string, string> {
@@ -174,6 +184,38 @@ export function nextConsecutiveReference(rows: QuickMeasureRow[]): string {
   return String(max + 1);
 }
 
+/** Modo paletizado: número de paleta más alto presente en las filas (0 si ninguna). */
+export function maxPalletNumber(rows: QuickMeasureRow[]): number {
+  let max = 0;
+  for (const row of rows) {
+    const n = Number(row.pallet);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+/** Asegura que todas las filas tengan un número de paleta válido (por defecto 1). */
+export function ensurePalletNumbers<T extends QuickMeasureRow>(rows: T[]): T[] {
+  return rows.map((row) => {
+    const n = Number(row.pallet);
+    return Number.isFinite(n) && n >= 1 ? row : { ...row, pallet: 1 };
+  });
+}
+
+/** Renumera las paletas a 1..k consecutivas, conservando el orden de aparición. */
+export function renumberPallets<T extends QuickMeasureRow>(rows: T[]): T[] {
+  const order: number[] = [];
+  for (const row of rows) {
+    const p = Math.max(1, Number(row.pallet) || 1);
+    if (!order.includes(p)) order.push(p);
+  }
+  const remap = new Map(order.map((p, i) => [p, i + 1]));
+  return rows.map((row) => ({
+    ...row,
+    pallet: remap.get(Math.max(1, Number(row.pallet) || 1)) ?? 1,
+  }));
+}
+
 export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   const referencia = String(row.referencia ?? "").trim();
   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
@@ -208,6 +250,8 @@ const QUICK_WAREHOUSE_CAPTURE_KEYS = [
   "referenciasContenedor",
   "referenciaContenedora",
   "reempaqueRefs",
+  "pallet",
+  "palletWeight",
 ] as const;
 
 /**

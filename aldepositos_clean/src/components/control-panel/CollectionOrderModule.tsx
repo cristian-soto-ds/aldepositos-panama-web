@@ -79,7 +79,7 @@ import {
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
-import { filterNewHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
+import { classifyHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   applyPesoTotalToLine,
@@ -878,27 +878,37 @@ export function CollectionOrderModule({
   }, [orders, selectedOrderIds]);
 
   const confirmHtmImport = async (imported: CollectionOrder[]) => {
-    const { toCreate, skippedNumeros } = filterNewHtmCollectionOrders(
+    const { toCreate, toUpdate, unchangedNumeros } = classifyHtmCollectionOrders(
       imported,
       orders,
     );
-    if (toCreate.length === 0) {
+    if (toCreate.length === 0 && toUpdate.length === 0) {
       alert(
-        skippedNumeros.length > 0
-          ? "Todas las órdenes del archivo ya existen. No se agregó ninguna."
+        unchangedNumeros.length > 0
+          ? "Todas las órdenes del archivo ya existen y están al día. No se hicieron cambios."
           : "No hay órdenes para importar.",
       );
       setHtmImportOpen(false);
       return;
     }
     setHtmImportBusy(true);
-    let ok = 0;
+    let created = 0;
+    let updated = 0;
     let fail = 0;
     try {
       for (const order of toCreate) {
         try {
           await insertCollectionOrder(order);
-          ok += 1;
+          created += 1;
+        } catch (e) {
+          console.error(e);
+          fail += 1;
+        }
+      }
+      for (const order of toUpdate) {
+        try {
+          await updateCollectionOrder(order);
+          updated += 1;
         } catch (e) {
           console.error(e);
           fail += 1;
@@ -906,19 +916,17 @@ export function CollectionOrderModule({
       }
       await reloadOrders();
       setHtmImportOpen(false);
-      const skipped = skippedNumeros.length;
-      if (fail > 0) {
-        alert(
-          `${ok} orden(es) creadas. ${fail} no se pudieron guardar.` +
-            (skipped > 0 ? ` ${skipped} omitida(s) por número OR duplicado.` : ""),
-        );
-      } else if (skipped > 0) {
-        alert(
-          `${ok} orden(es) creadas desde HTM. ${skipped} omitida(s) porque el número OR ya existía.`,
-        );
-      } else {
-        alert(`${ok} orden(es) de recolección creadas desde HTM.`);
-      }
+
+      const parts: string[] = [];
+      if (created > 0) parts.push(`${created} creada(s)`);
+      if (updated > 0) parts.push(`${updated} actualizada(s) con los cambios del documento`);
+      if (unchangedNumeros.length > 0) parts.push(`${unchangedNumeros.length} sin cambios`);
+      if (fail > 0) parts.push(`${fail} con error`);
+      alert(
+        parts.length > 0
+          ? `Importación HTM: ${parts.join(", ")}.`
+          : "Importación HTM completada.",
+      );
     } finally {
       setHtmImportBusy(false);
     }
@@ -1218,7 +1226,7 @@ export function CollectionOrderModule({
     return (
       <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-3 sm:px-3 md:px-0 md:py-6 dark:from-indigo-950/20">
         <header className="mb-3 shrink-0 rounded-2xl border border-indigo-300/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-xl shadow-indigo-500/25 dark:border-indigo-900/40 sm:mb-4 sm:rounded-3xl sm:p-5 md:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-indigo-100">
                 <HandHelping className="h-6 w-6 shrink-0 sm:h-8 sm:w-8" />
@@ -1226,11 +1234,6 @@ export function CollectionOrderModule({
                   Orden de recolección
                 </h1>
               </div>
-              <p className="mt-1.5 hidden max-w-2xl text-xs font-semibold text-indigo-100/95 sm:mt-2 sm:block sm:text-sm">
-                Anotá qué se va a traer del proveedor. Después podés pasar estas líneas al RA de
-                almacén con medidas y cantidades. Misma importación Excel y CSV que en ingreso
-                detallado.
-              </p>
             </div>
             <div className="flex shrink-0 gap-2 max-sm:flex-wrap sm:flex-row">
               <button
@@ -1792,10 +1795,6 @@ export function CollectionOrderModule({
           </div>
         )}
 
-        <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
-          Paso 1 · Número de orden · Paso 2 · Líneas · Paso 3 · Pasar al RA
-        </p>
-
         <section className="mb-3 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex flex-col lg:flex-row lg:items-stretch">
             {/* Totales documento — horizontal */}
@@ -2019,12 +2018,7 @@ export function CollectionOrderModule({
           </div>
         </section>
 
-        <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <p className="text-xs text-slate-600 dark:text-slate-400">
-            Puedes capturar <strong>Unidades</strong> y <strong>Peso</strong> por bulto o totales.
-            Si capturas el total, el sistema divide automáticamente entre bultos. Si la referencia
-            no existe en catálogo se resalta en rojo.
-          </p>
+        <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
           <div className="flex flex-wrap gap-2">
             <div className="rounded-full border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-900">
               <button

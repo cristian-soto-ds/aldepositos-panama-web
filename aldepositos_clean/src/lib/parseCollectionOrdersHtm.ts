@@ -148,6 +148,116 @@ export function filterNewHtmCollectionOrders(
   return { toCreate, skippedNumeros };
 }
 
+/**
+ * Plan de importación HTM comparando contra las órdenes existentes:
+ * - toCreate: órdenes nuevas (número OR no existe todavía).
+ * - toUpdate: órdenes que ya existen pero cuyo documento trae cambios
+ *   (proveedor, cliente, expedidor, fecha, bultos, peso o cubicaje).
+ *   Se conservan las líneas, estado, RAs vinculados e id del operador.
+ * - unchangedNumeros: existentes sin cambios respecto al documento.
+ */
+export type HtmImportPlan = {
+  toCreate: CollectionOrder[];
+  toUpdate: CollectionOrder[];
+  unchangedNumeros: string[];
+};
+
+function docStr(v: unknown): string {
+  return String(v ?? "").trim();
+}
+
+function docNum(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Fusiona los totales/encabezado del documento sobre una orden existente.
+ * Solo aplica campos que el documento realmente provee (no borra datos con vacíos).
+ */
+function mergeHtmDocumentIntoExisting(
+  existing: CollectionOrder,
+  incoming: CollectionOrder,
+): { merged: CollectionOrder; changed: boolean } {
+  const merged: CollectionOrder = { ...existing };
+  let changed = false;
+
+  const proveedor = docStr(incoming.proveedor);
+  if (proveedor && proveedor !== docStr(existing.proveedor)) {
+    merged.proveedor = proveedor;
+    changed = true;
+  }
+  const cliente = docStr(incoming.cliente);
+  if (cliente && cliente !== docStr(existing.cliente)) {
+    merged.cliente = cliente;
+    changed = true;
+  }
+  const expedidor = docStr(incoming.expedidor);
+  if (expedidor && expedidor !== docStr(existing.expedidor)) {
+    merged.expedidor = expedidor;
+    changed = true;
+  }
+  const fechaEntrega = docStr(incoming.fechaEntrega);
+  if (fechaEntrega && fechaEntrega !== docStr(existing.fechaEntrega)) {
+    merged.fechaEntrega = fechaEntrega;
+    changed = true;
+  }
+
+  const bultos = docNum(incoming.expectedBultos);
+  if (bultos !== undefined && bultos !== docNum(existing.expectedBultos)) {
+    merged.expectedBultos = bultos;
+    changed = true;
+  }
+  const peso = docNum(incoming.expectedPesoKg);
+  if (peso !== undefined && peso !== docNum(existing.expectedPesoKg)) {
+    merged.expectedPesoKg = peso;
+    changed = true;
+  }
+  const cbm = docNum(incoming.expectedCbm);
+  if (cbm !== undefined && cbm !== docNum(existing.expectedCbm)) {
+    merged.expectedCbm = cbm;
+    changed = true;
+  }
+
+  if (changed) merged.updatedAt = new Date().toISOString();
+  return { merged, changed };
+}
+
+export function classifyHtmCollectionOrders(
+  incoming: CollectionOrder[],
+  existing: CollectionOrder[],
+): HtmImportPlan {
+  const existingByNumero = new Map<string, CollectionOrder>();
+  for (const o of existing) {
+    const n = normalizeOrNumero(o.numero);
+    if (n) existingByNumero.set(n, o);
+  }
+
+  const seenIncoming = new Set<string>();
+  const toCreate: CollectionOrder[] = [];
+  const toUpdate: CollectionOrder[] = [];
+  const unchangedNumeros: string[] = [];
+
+  for (const o of incoming) {
+    const n = normalizeOrNumero(o.numero);
+    if (n && seenIncoming.has(n)) continue;
+    if (n) seenIncoming.add(n);
+
+    const existingOrder = n ? existingByNumero.get(n) : undefined;
+    if (!existingOrder) {
+      toCreate.push(o);
+      continue;
+    }
+
+    const { merged, changed } = mergeHtmDocumentIntoExisting(existingOrder, o);
+    if (changed) toUpdate.push(merged);
+    else unchangedNumeros.push(String(o.numero ?? "").trim() || n);
+  }
+
+  return { toCreate, toUpdate, unchangedNumeros };
+}
+
 function isGroupHeaderText(text: string): boolean {
   const t = text.trim();
   if (!t) return false;

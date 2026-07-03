@@ -40,7 +40,6 @@ export function useInventoryRealtimeSync<TRow>({
   setSelectedTask,
   setMeasureRows,
   isSavingRef,
-  isEditingRef,
   lastSavedHashRef,
   latestRowsRef,
   latestTaskRef,
@@ -70,6 +69,22 @@ export function useInventoryRealtimeSync<TRow>({
   const applyRemote = useCallback(
     (remote: Task, fromLive = false) => {
       const newRows = prepareRowsFromRemote(remote);
+
+      // Si el contenido no cambió (caso típico tras un autosave propio), no
+      // reemplazamos las filas: así evitamos repintar toda la tabla y perder la
+      // memoización de filas. Solo refrescamos los metadatos de la tarea.
+      if (buildHash(newRows) === buildHash(latestRowsRef.current)) {
+        setSelectedTask(remote);
+        latestTaskRef.current = remote;
+        if (!fromLive) {
+          lastSavedHashRef.current = buildHash(newRows);
+        }
+        lastRemoteMeasureHashRef.current = JSON.stringify(remote.measureData ?? []);
+        pendingRemoteTaskRef.current = null;
+        setRemoteUpdatePending(false);
+        return;
+      }
+
       setMeasureRows(newRows);
       setSelectedTask(remote);
       latestRowsRef.current = newRows;
@@ -114,11 +129,9 @@ export function useInventoryRealtimeSync<TRow>({
 
       const localHash = buildHash(latestRowsRef.current);
       const isDirty = localHash !== lastSavedHashRef.current;
-      const isEditing = isEditingRef?.current === true;
 
-      if (isDirty && isEditing) {
-        pendingRemoteTaskRef.current = remote;
-        setRemoteUpdatePending(true);
+      // No pisar cambios locales sin guardar con un broadcast entrante.
+      if (isDirty) {
         lastRemoteMeasureHashRef.current = liveHash;
         return;
       }
@@ -128,7 +141,6 @@ export function useInventoryRealtimeSync<TRow>({
     [
       applyRemote,
       buildHash,
-      isEditingRef,
       isSavingRef,
       lastSavedHashRef,
       latestRowsRef,
@@ -143,15 +155,13 @@ export function useInventoryRealtimeSync<TRow>({
   }, [applyRemote]);
 
   const onLocalSaveCompleted = useCallback(() => {
-    const remote = pendingRemoteTaskRef.current;
-    if (!remote) return;
-    const localHash = buildHash(latestRowsRef.current);
-    if (localHash === lastSavedHashRef.current) {
-      applyRemote(remote);
-    } else {
-      setRemoteUpdatePending(true);
-    }
-  }, [applyRemote, buildHash, lastSavedHashRef, latestRowsRef]);
+    // Tras guardar, el estado local es la autoridad recién persistida. Descartamos
+    // cualquier actualización remota pendiente (que puede ser un eco de un guardado
+    // anterior con menos filas) para no revertir lo recién capturado. Un cambio
+    // remoto real se re-aplicará en el siguiente refetch cuando no haya pendientes.
+    pendingRemoteTaskRef.current = null;
+    setRemoteUpdatePending(false);
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -190,12 +200,11 @@ export function useInventoryRealtimeSync<TRow>({
 
     const localHash = buildHash(latestRowsRef.current);
     const isDirty = localHash !== lastSavedHashRef.current;
-    const isEditing = isEditingRef?.current === true;
 
-    if (isDirty && isEditing) {
-      pendingRemoteTaskRef.current = remote;
-      setRemoteUpdatePending(true);
-      lastRemoteMeasureHashRef.current = remoteMeasureHash;
+    // Nunca pisar cambios locales sin guardar (p. ej. una fila recién añadida):
+    // el autosave los persistirá y el siguiente refetch ya coincidirá. Esto evita
+    // que un eco de la BD a mitad del autosave revierta lo que acabas de capturar.
+    if (isDirty) {
       return;
     }
 
@@ -205,7 +214,6 @@ export function useInventoryRealtimeSync<TRow>({
     selectedId,
     applyRemote,
     buildHash,
-    isEditingRef,
     isSavingRef,
     lastSavedHashRef,
     latestRowsRef,

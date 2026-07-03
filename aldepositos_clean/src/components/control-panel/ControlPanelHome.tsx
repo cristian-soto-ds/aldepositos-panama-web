@@ -1,16 +1,8 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  User,
-  Plus,
-  UploadCloud,
-  Loader2,
   Users,
-  FileSpreadsheet,
-  Box,
-  FileText,
-  Plane,
   Activity,
   Package,
   Truck,
@@ -20,10 +12,18 @@ import {
   Search,
   Clock3,
   Zap,
+  Boxes,
+  ClipboardList,
+  TrendingUp,
 } from "lucide-react";
 
 import type { Task } from "@/lib/types/task";
 import type { UserPreferences } from "@/lib/userPreferences";
+import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
+import type { CollectionOrder } from "@/lib/types/collectionOrder";
+import { useReceptionQueue } from "@/hooks/useReceptionQueue";
+import { fetchCollectionOrders } from "@/lib/collectionOrders";
+import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import {
   clearWorkPresence,
   getSharedWorkPresenceTabId,
@@ -48,8 +48,6 @@ type ControlPanelHomeProps = {
   userAvatarSrc?: string | null;
   preferences?: UserPreferences;
 };
-
-const generateId = () => Math.random().toString(36).substr(2, 9);
 
 function formatNumber(n: number): string {
   return new Intl.NumberFormat("es-PA").format(Math.round(n));
@@ -166,8 +164,6 @@ function getTaskProgressPercent(task: Task): number {
 
 export function ControlPanelHome({
   tasks,
-  onImport,
-  openManualModal,
   userDisplayName,
   profileFullName = null,
   userEmail = null,
@@ -255,22 +251,55 @@ export function ControlPanelHome({
     };
   }, [preferences?.showSeconds]);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [parsedData, setParsedData] = useState<Task[]>([]);
-  const [extractedClient, setExtractedClient] = useState("");
+  // Datos de los nuevos módulos para el resumen del panel.
+  const { trucks: receptionTrucks } = useReceptionQueue();
+  const [collectionOrders, setCollectionOrders] = useState<CollectionOrder[]>([]);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && !(window as unknown as { XLSX?: unknown }).XLSX) {
-      const script = document.createElement("script");
-      script.src =
-        "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-      script.async = true;
-      document.head.appendChild(script);
-    }
+    let alive = true;
+    const load = async () => {
+      try {
+        const list = await fetchCollectionOrders();
+        if (alive) setCollectionOrders(list);
+      } catch {
+        /* Silencioso: el panel sigue funcionando sin órdenes de recolección. */
+      }
+    };
+    void load();
+    const intervalId = window.setInterval(() => void load(), 30_000);
+    return () => {
+      alive = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
+
+  const receptionStats = useMemo(() => {
+    const count = (status: string) =>
+      receptionTrucks.filter((t: ReceptionTruck) => t.status === status).length;
+    const enFila = count(RECEPTION_STATUS.EN_FILA);
+    const enRampa =
+      count(RECEPTION_STATUS.RAMPA_1) +
+      count(RECEPTION_STATUS.RAMPA_2) +
+      count(RECEPTION_STATUS.RAMPA_EXTRA);
+    const carretillado = count(RECEPTION_STATUS.CARRETILLADO);
+    const completado = count(RECEPTION_STATUS.COMPLETADO);
+    return {
+      total: receptionTrucks.length,
+      enFila,
+      enRampa,
+      carretillado,
+      completado,
+      activos: enFila + enRampa + carretillado,
+    };
+  }, [receptionTrucks]);
+
+  const collectionStats = useMemo(() => {
+    const total = collectionOrders.length;
+    const enBodega = collectionOrders.filter(
+      (o) => (o.linkedRaNumbers?.length ?? 0) > 0,
+    ).length;
+    return { total, enBodega, pendientes: Math.max(0, total - enBodega) };
+  }, [collectionOrders]);
 
   const dashboard = useMemo(() => {
     const total = tasks.length;
@@ -447,107 +476,13 @@ export function ControlPanelHome({
     hour12: preferences?.timeFormat === "12h",
   });
 
-  const handleFileChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const XLSX = (window as unknown as { XLSX?: unknown }).XLSX;
-    if (!XLSX) {
-      alert(
-        "El procesador de archivos se está cargando. Inténtalo de nuevo en unos segundos.",
-      );
-      return;
-    }
-
-    setSelectedFile(file);
-    setIsProcessing(true);
-    setShowImportModal(true);
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const X = (window as any).XLSX;
-        const workbook = X.read(
-          new Uint8Array(evt.target?.result as ArrayBuffer),
-          { type: "array" },
-        );
-        const rows = X.utils.sheet_to_json(
-          workbook.Sheets[workbook.SheetNames[0]],
-          { header: 1 },
-        );
-
-        if (rows.length < 7) {
-          alert("⚠️ Archivo inválido o sin formato correcto (Fila 6/7).");
-          setShowImportModal(false);
-          return;
-        }
-
-        let mainClient = "Desconocido";
-        const row6 = rows[5] || [];
-        for (const cell of row6) {
-          if (cell && cell.toString().trim().length > 2) {
-            mainClient = cell
-              .toString()
-              .replace(/\s*\(\d+\)\s*$/, "")
-              .trim();
-            break;
-          }
-        }
-
-        const extracted: Task[] = [];
-        for (let i = 6; i < rows.length; i++) {
-          const r = rows[i] as unknown[];
-          if (r && r[1]) {
-            extracted.push({
-              id: generateId(),
-              ra: r[1].toString().trim(),
-              mainClient,
-              provider: String(r[3] ?? "N/A"),
-              subClient: String(r[4] ?? "N/A"),
-              brand: String(r[5] ?? "N/A"),
-              expectedBultos: parseFloat(String(r[6])) || 0,
-              originalExpectedBultos: parseFloat(String(r[6])) || 0,
-              expectedCbm: parseFloat(String(r[7])) || 0,
-              expectedWeight: parseFloat(String(r[8])) || 0,
-              notes: String(r[9] ?? ""),
-              currentBultos: 0,
-              status: "pending",
-              measureData: [],
-              weightMode: "no_weight",
-              manualTotalWeight: 0,
-            });
-          }
-        }
-
-        if (extracted.length > 0) {
-          setExtractedClient(mainClient);
-          setParsedData(extracted);
-          setIsProcessing(false);
-        } else {
-          alert("No se encontraron RAs válidos.");
-          setShowImportModal(false);
-        }
-      } catch (error) {
-        console.error(error);
-        alert("Error procesando el archivo Excel.");
-        setShowImportModal(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = "";
-  };
-
-  const confirmImport = (type: Task["type"]) => {
-    const finalTasks = parsedData.map((t) => ({ ...t, type }));
-    onImport(finalTasks);
-    setShowImportModal(false);
-    setSelectedFile(null);
-    setParsedData([]);
-  };
-
   const completionDonutPct =
     dashboard.total > 0
       ? Math.round((dashboard.completed / dashboard.total) * 100)
+      : 0;
+  const bultosPct =
+    dashboard.expectedBultos > 0
+      ? Math.min(100, Math.round((dashboard.currentBultos / dashboard.expectedBultos) * 100))
       : 0;
   const visibleModuleTotal =
     dashboard.byType.quick + dashboard.byType.detailed + dashboard.byType.airway;
@@ -681,7 +616,7 @@ export function ControlPanelHome({
             </div>
           </div>
 
-          <div className="flex w-full min-w-0 flex-col gap-2.5 sm:gap-3 lg:max-w-2xl lg:flex-shrink-0">
+          <div className="flex w-full min-w-0 flex-col gap-2.5 sm:gap-3 lg:max-w-xl lg:flex-shrink-0">
             <div
               className={`flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 backdrop-blur-sm transition-shadow focus-within:ring-2 sm:rounded-2xl sm:px-4 md:rounded-full ${
                 isDark
@@ -698,46 +633,43 @@ export function ControlPanelHome({
                 className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
             </div>
-            <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:items-center">
-              <select
-                value={filterStatus}
-                onChange={(e) =>
-                  setFilterStatus(e.target.value as "all" | "in_progress" | "pending")
-                }
-                className={`w-full min-w-0 cursor-pointer rounded-xl border py-2.5 pl-3 pr-8 text-[10px] font-black uppercase tracking-wider outline-none sm:rounded-full sm:py-1.5 ${
-                  isDark
-                    ? "border-slate-600 bg-slate-900/80 text-slate-100"
-                    : "border-slate-200 bg-slate-50 text-[#16263F]"
-                }`}
-                aria-label="Filtrar por estado"
-              >
-                <option value="all">Todos</option>
-                <option value="in_progress">En proceso</option>
-                <option value="pending">Pendiente</option>
-              </select>
-              <button
-                type="button"
-                onClick={openManualModal}
-                className="inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#16263F] to-[#1a3560] px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-[#16263F]/20 transition hover:brightness-110 active:scale-[0.98] sm:rounded-full sm:px-5"
-              >
-                <Plus className="h-4 w-4 shrink-0" /> Manual
-              </button>
-              <label className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-md shadow-emerald-700/20 transition hover:brightness-110 active:scale-[0.98] sm:rounded-full sm:px-5">
-                <UploadCloud className="h-4 w-4 shrink-0" /> Excel
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  className="hidden"
-                  onChange={handleFileChange}
-                  accept=".xlsx, .xls, .csv"
-                />
-              </label>
+            <div
+              className={`grid grid-cols-3 gap-1 rounded-full p-1 ${
+                isDark ? "border border-slate-700 bg-slate-900/70" : "border border-slate-200 bg-slate-100/80"
+              }`}
+              role="group"
+              aria-label="Filtrar por estado"
+            >
+              {([
+                { id: "all", label: "Todos" },
+                { id: "in_progress", label: "En proceso" },
+                { id: "pending", label: "Pendiente" },
+              ] as const).map((opt) => {
+                const active = filterStatus === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setFilterStatus(opt.id)}
+                    aria-pressed={active}
+                    className={`rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition ${
+                      active
+                        ? "bg-gradient-to-r from-[#16263F] to-blue-600 text-white shadow-sm"
+                        : isDark
+                          ? "text-slate-400 hover:text-slate-200"
+                          : "text-slate-500 hover:text-[#16263F]"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </header>
 
-        {/* Hero + donut + KPIs compactos */}
-        <div className="mb-5 grid min-w-0 grid-cols-1 gap-3 sm:mb-6 sm:gap-4 lg:grid-cols-12 lg:gap-5">
+        {/* Hero resumen operativo + cierre de inventario */}
+        <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 sm:mb-5 sm:gap-4 lg:grid-cols-12 lg:gap-5">
           <div className="relative min-w-0 overflow-hidden rounded-xl border border-white/12 bg-gradient-to-br from-[#16263F] via-[#1a3a66] to-[#2563eb] p-4 text-white shadow-lg shadow-[#16263F]/15 sm:rounded-2xl sm:p-6 md:rounded-[2rem] md:p-8 lg:col-span-7">
             <div
               className="pointer-events-none absolute inset-0 bg-[linear-gradient(105deg,transparent_40%,rgba(255,255,255,0.06)_50%,transparent_60%)]"
@@ -748,7 +680,7 @@ export function ControlPanelHome({
               aria-hidden
             />
             <div className="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full bg-emerald-400/10 blur-3xl" aria-hidden />
-            <div className="relative z-10 flex min-w-0 flex-col gap-4 sm:gap-6 md:flex-row md:items-end md:justify-between">
+            <div className="relative z-10 flex min-w-0 flex-col gap-4 sm:gap-6 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200/90 sm:tracking-[0.25em]">
                   Resumen operativo
@@ -757,16 +689,7 @@ export function ControlPanelHome({
                   {formatNumber(activeOrders)}
                 </p>
                 <p className="mt-1 text-pretty text-sm font-semibold leading-snug text-blue-100/95">
-                  órdenes activas (pendientes + en proceso)
-                </p>
-                <p className="mt-3 text-pretty text-[11px] leading-relaxed text-blue-200/80 sm:text-xs">
-                  Total en sistema:{" "}
-                  <span className="font-bold text-white">{formatNumber(dashboard.total)}</span>{" "}
-                  RAs · Bultos capturados{" "}
-                  <span className="font-bold text-white">
-                    {formatNumber(dashboard.currentBultos)} /{" "}
-                    {formatNumber(dashboard.expectedBultos)}
-                  </span>
+                  órdenes activas (pendientes + en proceso) de {formatNumber(dashboard.total)} RAs
                 </p>
               </div>
               <div className="flex min-w-0 flex-col items-stretch gap-2 sm:gap-3 md:items-end">
@@ -776,7 +699,27 @@ export function ControlPanelHome({
                 </p>
               </div>
             </div>
-            <div className="relative z-10 mt-6 flex flex-wrap gap-2">
+
+            {/* Progreso de bultos (Ingreso Rápido) */}
+            <div className="relative z-10 mt-5 rounded-2xl border border-white/15 bg-white/10 p-3.5 backdrop-blur-sm sm:p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-wider text-blue-100/90">
+                  <Boxes className="h-4 w-4 text-[#FFC400]" aria-hidden /> Bultos capturados
+                </span>
+                <span className="text-sm font-black tabular-nums text-white">
+                  {formatNumber(dashboard.currentBultos)}
+                  <span className="text-blue-200/80"> / {formatNumber(dashboard.expectedBultos)}</span>
+                </span>
+              </div>
+              <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/15">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#FFC400] to-emerald-300 transition-all"
+                  style={{ width: `${bultosPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="relative z-10 mt-4 flex flex-wrap gap-2">
               <HeroChip label="Pendiente" value={`${sharePending}%`} />
               <HeroChip label="En proceso" value={`${shareProgress}%`} />
               <HeroChip label="Completado" value={`${shareDone}%`} />
@@ -802,9 +745,59 @@ export function ControlPanelHome({
             <div className="grid min-w-0 grid-cols-2 gap-2 rounded-xl border border-slate-200/80 bg-white p-3 shadow-md shadow-slate-200/30 sm:gap-3 sm:rounded-2xl sm:p-4 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/30">
               <MiniStat icon={<Truck className="h-3.5 w-3.5" />} label="Despachados" value={dashboard.dispatched} />
               <MiniStat icon={<AlertCircle className="h-3.5 w-3.5 text-red-500" />} label="Prioridad" value={dashboard.priority} />
-              <MiniStat icon={<Package className="h-3.5 w-3.5" />} label="Progreso real" value={`${overallProgressPct}%`} />
+              <MiniStat icon={<TrendingUp className="h-3.5 w-3.5" />} label="Progreso real" value={`${overallProgressPct}%`} />
               <MiniStat icon={<Users className="h-3.5 w-3.5" />} label="En vivo" value={presenceGrouped.length} />
             </div>
+          </div>
+        </div>
+
+        {/* Flujo del depósito: módulos conectados */}
+        <div className="mb-5 sm:mb-6">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="h-4 w-1 rounded-full bg-[#FFC400]" aria-hidden />
+            <h2 className="text-[11px] font-black uppercase tracking-[0.18em] text-[#16263F] dark:text-slate-200">
+              Flujo del depósito
+            </h2>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3">
+            <ModuleFlowCard
+              icon={<ClipboardList className="h-5 w-5" aria-hidden />}
+              accent="from-amber-400 to-amber-500"
+              tint="bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              title="Órdenes de recolección"
+              headline={formatNumber(collectionStats.total)}
+              headlineLabel="órdenes registradas"
+              chips={[
+                { label: "En bodega", value: collectionStats.enBodega, tone: "emerald" },
+                { label: "Por llegar", value: collectionStats.pendientes, tone: "slate" },
+              ]}
+            />
+            <ModuleFlowCard
+              icon={<Truck className="h-5 w-5" aria-hidden />}
+              accent="from-sky-500 to-blue-600"
+              tint="bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
+              title="Recepción de camiones"
+              headline={formatNumber(receptionStats.activos)}
+              headlineLabel="camiones en proceso"
+              chips={[
+                { label: "En fila", value: receptionStats.enFila, tone: "amber" },
+                { label: "En rampa", value: receptionStats.enRampa, tone: "sky" },
+                { label: "Completados", value: receptionStats.completado, tone: "emerald" },
+              ]}
+            />
+            <ModuleFlowCard
+              icon={<Boxes className="h-5 w-5" aria-hidden />}
+              accent="from-emerald-500 to-teal-500"
+              tint="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+              title="Ingreso de inventario"
+              headline={formatNumber(activeOrders)}
+              headlineLabel="RAs activas por capturar"
+              chips={[
+                { label: "Rápido", value: dashboard.byType.quick, tone: "sky" },
+                { label: "Detallado", value: dashboard.byType.detailed, tone: "violet" },
+                { label: "Aéreo", value: dashboard.byType.airway, tone: "amber" },
+              ]}
+            />
           </div>
         </div>
 
@@ -1060,112 +1053,37 @@ export function ControlPanelHome({
               )}
             </div>
 
-            <div className="rounded-xl border border-dashed border-slate-300/90 bg-gradient-to-br from-slate-50 to-white p-3 sm:rounded-2xl sm:p-4 md:rounded-[2rem] dark:border-slate-600 dark:from-slate-900 dark:to-slate-950">
-              <div className="mb-2 flex items-center gap-2 text-[#16263F] dark:text-slate-100">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200">
-                  <User className="h-4 w-4" aria-hidden />
+            <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-md shadow-slate-200/30 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+              <div className="mb-3 flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300">
+                  <ClipboardList className="h-5 w-5" aria-hidden />
                 </span>
-                <span className="text-[10px] font-black uppercase tracking-wider">
-                  Tip
-                </span>
+                <h3 className="text-xs font-black uppercase tracking-widest text-[#16263F] dark:text-slate-100">
+                  Resumen de flujo
+                </h3>
               </div>
-              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 leading-relaxed">
-                Usa la búsqueda y el filtro para enfocar pendientes o lo que está en
-                proceso. Los avatares apilados indican más de un operador con foco en
-                el mismo RA.
-              </p>
+              <div className="space-y-2">
+                <FlowSummaryRow
+                  label="Órdenes de recolección"
+                  value={collectionStats.total}
+                  hint={`${formatNumber(collectionStats.enBodega)} en bodega`}
+                />
+                <FlowSummaryRow
+                  label="Camiones en proceso"
+                  value={receptionStats.activos}
+                  hint={`${formatNumber(receptionStats.enRampa)} en rampa`}
+                />
+                <FlowSummaryRow
+                  label="RAs por capturar"
+                  value={activeOrders}
+                  hint={`${formatNumber(dashboard.completed)} completadas`}
+                />
+              </div>
             </div>
           </aside>
         </div>
         </div>
       </div>
-
-      {showImportModal && (
-        <div className="fixed inset-0 bg-[#16263F]/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade">
-          <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl md:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="bg-[#16263F] p-5 md:p-8 text-white shrink-0">
-              <h3 className="text-lg md:text-2xl font-black tracking-tight flex items-center gap-2 md:gap-3">
-                <FileSpreadsheet className="text-[#FFC400] w-5 h-5 md:w-6 md:h-6" />{" "}
-                Relación de Carga
-              </h3>
-              <p className="text-blue-200 text-xs md:text-sm mt-1 truncate">
-                {selectedFile?.name}
-              </p>
-            </div>
-            <div className="p-5 md:p-8 space-y-5 md:space-y-6 overflow-y-auto">
-              {isProcessing ? (
-                <div className="text-center py-8">
-                  <Loader2 className="w-12 h-12 mx-auto text-[#16263F] dark:text-slate-100 animate-spin mb-4" />
-                  <h3 className="text-lg font-bold text-[#16263F] dark:text-slate-100">
-                    Procesando Excel...
-                  </h3>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-[#F8FAFC] border border-slate-200 dark:border-slate-600 p-4 md:p-6 rounded-2xl md:rounded-3xl flex items-start gap-4 md:gap-5 shadow-sm">
-                    <div className="bg-blue-100 p-3 rounded-xl">
-                      <Users className="text-blue-600 dark:text-blue-400 w-5 h-5 md:w-6 md:h-6" />
-                    </div>
-                    <div>
-                      <p className="text-[#16263F] dark:text-slate-100 font-black text-sm md:text-lg uppercase tracking-tight">
-                        {extractedClient}
-                      </p>
-                      <p className="text-slate-500 dark:text-slate-400 text-[10px] md:text-xs font-bold mt-1 uppercase tracking-widest">
-                        Se detectaron{" "}
-                        <span className="text-blue-600 dark:text-blue-400">
-                          {parsedData.length} RA&apos;s
-                        </span>{" "}
-                        listos.
-                      </p>
-                    </div>
-                  </div>
-
-                  <p className="font-black text-[#16263F] dark:text-slate-100 text-center uppercase text-[10px] md:text-xs tracking-[0.2em]">
-                    Asignar órdenes a módulo:
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                    <button
-                      type="button"
-                      onClick={() => confirmImport("quick")}
-                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-blue-500 hover:bg-blue-50 dark:bg-blue-950/45 transition-all group shadow-sm"
-                    >
-                      <Box className="text-blue-500 sm:mb-3 group-hover:rotate-12 transition-transform w-6 h-6 md:w-8 md:h-8 shrink-0" />
-                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
-                        Captura de
-                        <br className="hidden sm:block" />
-                        Medidas
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => confirmImport("detailed")}
-                      className="flex flex-row sm:flex-col items-center justify-center gap-3 sm:gap-0 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-purple-500 hover:bg-purple-50 transition-all group shadow-sm"
-                    >
-                      <FileText className="text-purple-600 sm:mb-3 group-hover:rotate-12 transition-transform w-6 h-6 md:w-8 md:h-8 shrink-0" />
-                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest text-center leading-tight">
-                        Validación
-                        <br className="hidden sm:block" />
-                        Detallada
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => confirmImport("airway")}
-                      className="col-span-1 sm:col-span-2 flex flex-row items-center justify-center gap-3 p-4 md:p-6 border-2 border-slate-100 dark:border-slate-700 rounded-2xl md:rounded-[2rem] hover:border-orange-500 hover:bg-orange-50 transition-all group shadow-sm"
-                    >
-                      <Plane className="text-orange-500 group-hover:rotate-12 transition-transform w-6 h-6 shrink-0" />
-                      <span className="font-black text-[#16263F] dark:text-slate-100 uppercase text-[10px] md:text-xs tracking-widest leading-tight">
-                        Guía Aérea
-                      </span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1243,6 +1161,92 @@ function MiniStat({
         {label}
       </div>
       <p className="text-lg font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">{value}</p>
+    </div>
+  );
+}
+
+const CHIP_TONES: Record<string, string> = {
+  emerald: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900/60",
+  sky: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/50 dark:text-sky-300 dark:border-sky-900/60",
+  amber: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900/60",
+  violet: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/50 dark:text-violet-300 dark:border-violet-900/60",
+  slate: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800/70 dark:text-slate-300 dark:border-slate-700",
+};
+
+function ModuleFlowCard({
+  icon,
+  accent,
+  tint,
+  title,
+  headline,
+  headlineLabel,
+  chips,
+}: {
+  icon: React.ReactNode;
+  accent: string;
+  tint: string;
+  title: string;
+  headline: string;
+  headlineLabel: string;
+  chips: { label: string; value: number; tone: keyof typeof CHIP_TONES }[];
+}) {
+  return (
+    <div className="relative min-w-0 overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-md shadow-slate-200/25 sm:rounded-2xl sm:p-5 md:rounded-[2rem] dark:border-slate-600/70 dark:bg-slate-900 dark:shadow-black/25">
+      <span
+        className={`pointer-events-none absolute left-0 top-0 h-full w-1.5 bg-gradient-to-b ${accent}`}
+        aria-hidden
+      />
+      <div className="flex items-center gap-3">
+        <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${tint}`}>
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            {title}
+          </p>
+          <p className="mt-0.5 flex items-baseline gap-1.5">
+            <span className="text-2xl font-black tabular-nums leading-none text-[#16263F] dark:text-slate-100">
+              {headline}
+            </span>
+            <span className="truncate text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+              {headlineLabel}
+            </span>
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {chips.map((c) => (
+          <span
+            key={c.label}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${CHIP_TONES[c.tone]}`}
+          >
+            {c.label}
+            <span className="tabular-nums">{formatNumber(c.value)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FlowSummaryRow({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number;
+  hint: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/60">
+      <div className="min-w-0">
+        <p className="truncate text-[11px] font-bold text-[#16263F] dark:text-slate-200">{label}</p>
+        <p className="truncate text-[10px] font-semibold text-slate-400 dark:text-slate-500">{hint}</p>
+      </div>
+      <span className="shrink-0 text-lg font-black tabular-nums text-[#16263F] dark:text-slate-100">
+        {formatNumber(value)}
+      </span>
     </div>
   );
 }

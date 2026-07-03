@@ -670,7 +670,7 @@ export default function PanelPage() {
         {visibleView === "reference-catalog" && <ReferenceCatalogModule />}
 
         {visibleView === "reports" && (
-          <CompletedReportsModule tasks={tasks} />
+          <CompletedReportsModule tasks={tasks} onDeleteTask={handleDeleteTask} />
         )}
 
         {visibleView === "dispatch" && (

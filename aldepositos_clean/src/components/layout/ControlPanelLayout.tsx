@@ -275,7 +275,7 @@ export function ControlPanelLayout({
           )}
         </nav>
 
-        <div className="safe-area-bottom border-t border-white/5 bg-black/20 p-3 md:p-4 lg:p-6">
+        <div className="border-t border-white/5 bg-black/20 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-4 md:pb-[max(1rem,env(safe-area-inset-bottom))] lg:p-6 lg:pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <div
             ref={userMenuRef}
             className="relative flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/5 p-2.5 sm:gap-3 sm:p-3"

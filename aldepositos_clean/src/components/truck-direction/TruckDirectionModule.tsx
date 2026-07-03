@@ -11,7 +11,6 @@ import {
   GripVertical,
   Loader2,
   Monitor,
-  Search,
   Truck,
   FileSpreadsheet,
 } from "lucide-react";
@@ -49,27 +48,15 @@ function queueDensity(count: number): ReceptionCardDensity {
   return "normal";
 }
 
-function matchesSearch(truck: ReceptionTruck, q: string): boolean {
-  const s = q.trim().toLowerCase();
-  if (!s) return true;
-  return [truck.plate, truck.ra, truck.provider, truck.client, truck.driverName]
-    .filter(Boolean)
-    .some((v) => String(v).toLowerCase().includes(s));
-}
-
 export function TruckDirectionModule() {
   const { trucks, loading, reload } = useReceptionQueue();
   const { occupancy: rampOccupancy } = useRampOccupancy();
-  const [search, setSearch] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
   const dragTruckId = useRef<string | null>(null);
 
-  const filtered = useMemo(
-    () => trucks.filter((t) => matchesSearch(t, search)),
-    [trucks, search],
-  );
+  const filtered = trucks;
 
   const byStatus = useMemo(() => {
     const map: Record<ReceptionStatusId, ReceptionTruck[]> = {
@@ -159,16 +146,13 @@ export function TruckDirectionModule() {
       ) : null}
 
       <div className="flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4 md:p-6">
-      <header className="shrink-0 space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <header className="shrink-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="flex items-center gap-2 text-xl font-black text-[#16263F] dark:text-slate-100 md:text-2xl">
               <Truck className="h-6 w-6 text-amber-600" aria-hidden />
               {RECEPTION_COPY.operatorTitle}
             </h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {RECEPTION_COPY.operatorSubtitle}
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -193,18 +177,6 @@ export function TruckDirectionModule() {
               {RECEPTION_COPY.reportLabel}
             </button>
           </div>
-        </div>
-        <p className="text-[11px] text-slate-400">{RECEPTION_COPY.reportHint}</p>
-
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900">
-          <Search className="h-4 w-4 shrink-0 text-slate-400" />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={RECEPTION_COPY.searchPlaceholder}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none dark:text-slate-100"
-          />
         </div>
       </header>
 

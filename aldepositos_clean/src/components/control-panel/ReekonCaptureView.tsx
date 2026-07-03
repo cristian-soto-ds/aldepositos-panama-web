@@ -6,6 +6,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Layers,
   LayoutGrid,
   Loader2,
   Maximize2,
@@ -14,22 +15,28 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import type { QuickMeasureRow } from "@/lib/quickInventoryTypes";
+import type { QuickMeasureRow, ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
 import { isQuickRowComplete } from "@/lib/quickInventoryTypes";
 import { cubicajeM3FromDims, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
-
 type DimField = "l" | "w" | "h";
 
 type ReekonCaptureViewProps = {
   measureRows: QuickMeasureRow[];
-  referenceMode: "with" | "without";
+  referenceMode: ReferenceCaptureMode;
+  onSwitchReferenceMode: (mode: ReferenceCaptureMode) => void;
   activeRowId: string | null;
   onActiveRowChange: (id: string) => void;
   onUpdateRow: (id: string, field: keyof QuickMeasureRow, value: string | boolean | string[]) => void;
   onReferenceChange: (id: string, value: string) => void;
   onReferenceBlur: (id: string, value: string) => void;
   onAddRow: () => void;
+  /** Paletizado: crear una paleta nueva (siguiente número) y enfocar su primera fila. */
+  onAddPallet?: () => void;
+  /** Paletizado: añadir una fila a una paleta ya existente (la de la fila activa). */
+  onAddRowToPallet?: (palletNum: number) => void;
+  /** Paletizado: fijar el peso total de una paleta (se replica en todas sus filas). */
+  onSetPalletWeight?: (palletNum: number, value: string) => void;
   onDeleteRow: (id: string) => void;
   raLabel: string;
   declaredBultos: number;
@@ -48,6 +55,16 @@ type ReekonCaptureViewProps = {
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
 const DIM_LABELS: Record<DimField, string> = { l: "Largo", w: "Ancho", h: "Alto" };
 
+const REEKON_MODES: { id: ReferenceCaptureMode; label: string }[] = [
+  { id: "with", label: "Con refs" },
+  { id: "without", label: "Sin refs" },
+  { id: "palletized", label: "Paletizado" },
+];
+
+function palletOf(row: QuickMeasureRow): number {
+  return Math.max(1, Number(row.pallet) || 1);
+}
+
 function strVal(v: string | number | undefined): string {
   return String(v ?? "").trim();
 }
@@ -55,12 +72,16 @@ function strVal(v: string | number | undefined): string {
 export function ReekonCaptureView({
   measureRows,
   referenceMode,
+  onSwitchReferenceMode,
   activeRowId,
   onActiveRowChange,
   onUpdateRow,
   onReferenceChange,
   onReferenceBlur,
   onAddRow,
+  onAddPallet,
+  onAddRowToPallet,
+  onSetPalletWeight,
   onDeleteRow,
   raLabel,
   declaredBultos,
@@ -89,6 +110,7 @@ export function ReekonCaptureView({
   );
   const activeRow = activeIndex >= 0 ? measureRows[activeIndex] : measureRows[0] ?? null;
   const activeId = activeRow?.id ?? null;
+  const palletized = referenceMode === "palletized";
 
   const rowCbm = activeRow
     ? cubicajeM3FromDims(activeRow.l, activeRow.w, activeRow.h, activeRow.bultos, activeRow.reempaque)
@@ -183,6 +205,16 @@ export function ReekonCaptureView({
 
   const selectRow = useCallback((id: string) => onActiveRowChange(id), [onActiveRowChange]);
 
+  // En paletizado, "añadir fila" se agrega a la paleta de la fila activa (no siempre
+  // a la última). Así, aunque vayas por la paleta 3, puedes seguir sumando a la 1.
+  const addRowHere = useCallback(() => {
+    if (palletized && activeRow && onAddRowToPallet) {
+      onAddRowToPallet(palletOf(activeRow));
+      return;
+    }
+    onAddRow();
+  }, [palletized, activeRow, onAddRowToPallet, onAddRow]);
+
   const goPrev = () => {
     if (activeIndex > 0) selectRow(measureRows[activeIndex - 1].id);
   };
@@ -265,13 +297,44 @@ export function ReekonCaptureView({
         </div>
       </header>
 
+      {/* Selector de modo (no invasivo) */}
+      <div className="mx-auto flex w-full max-w-md shrink-0 items-center gap-2 px-3 pt-1.5">
+        <div className="inline-flex flex-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800">
+          {REEKON_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onSwitchReferenceMode(m.id)}
+              className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                referenceMode === m.id
+                  ? "bg-[#16263F] text-white shadow-sm"
+                  : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Selector de líneas */}
       <div className="reekon-ref-strip mx-auto w-full max-w-md shrink-0 border-b border-slate-100 dark:border-slate-800">
         {measureRows.map((row, i) => {
           const done = isQuickRowComplete(row);
           const isActive = row.id === activeId;
-          const label =
-            referenceMode === "with" && strVal(row.referencia) ? strVal(row.referencia) : `#${i + 1}`;
+          let label: string;
+          if (palletized) {
+            const pnum = palletOf(row);
+            const subIdx = measureRows
+              .slice(0, i + 1)
+              .filter((r) => palletOf(r) === pnum).length;
+            label = `P${pnum}·${subIdx}`;
+          } else {
+            label =
+              referenceMode === "with" && strVal(row.referencia)
+                ? strVal(row.referencia)
+                : `#${i + 1}`;
+          }
           return (
             <button
               key={row.id}
@@ -292,13 +355,28 @@ export function ReekonCaptureView({
         })}
         <button
           type="button"
-          onClick={onAddRow}
+          onClick={addRowHere}
           className="reekon-ref-chip border border-dashed border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300"
-          aria-label="Nueva línea"
+          aria-label={
+            palletized && activeRow
+              ? `Nueva fila en la paleta ${palletOf(activeRow)}`
+              : "Nueva línea"
+          }
         >
           <Plus className="h-3.5 w-3.5" />
-          Nueva
+          {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Nueva"}
         </button>
+        {palletized && onAddPallet ? (
+          <button
+            type="button"
+            onClick={onAddPallet}
+            className="reekon-ref-chip border border-dashed border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+            aria-label="Nueva paleta"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Paleta
+          </button>
+        ) : null}
       </div>
 
       {/* Navegación entre líneas */}
@@ -348,6 +426,11 @@ export function ReekonCaptureView({
                     onBlur={(e) => onReferenceBlur(activeId, e.target.value)}
                   />
                 </div>
+              ) : palletized ? (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-2 text-sm font-bold text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300">
+                  <Layers className="h-4 w-4" />
+                  Paleta {palletOf(activeRow)}
+                </div>
               ) : null}
 
               <div className="grid grid-cols-2 gap-3">
@@ -368,18 +451,38 @@ export function ReekonCaptureView({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Peso (kg)
+                    {palletized ? `Peso paleta ${palletOf(activeRow)} (kg)` : "Peso (kg)"}
                   </label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className="reekon-input reekon-input-immersive w-full text-center"
-                    value={String(activeRow.weight ?? "")}
-                    placeholder="0.00"
-                    onFocus={(e) => e.currentTarget.select()}
-                    onChange={(e) => onUpdateRow(activeId, "weight", e.target.value)}
-                    onBlur={handleWeightBlur}
-                  />
+                  {palletized && onSetPalletWeight ? (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="reekon-input reekon-input-immersive w-full text-center"
+                      value={String(activeRow.palletWeight ?? "")}
+                      placeholder="0.00"
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) =>
+                        onSetPalletWeight(palletOf(activeRow), e.target.value)
+                      }
+                      onBlur={(e) =>
+                        onSetPalletWeight(
+                          palletOf(activeRow),
+                          normalizeMeasureField(e.target.value),
+                        )
+                      }
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="reekon-input reekon-input-immersive w-full text-center"
+                      value={String(activeRow.weight ?? "")}
+                      placeholder="0.00"
+                      onFocus={(e) => e.currentTarget.select()}
+                      onChange={(e) => onUpdateRow(activeId, "weight", e.target.value)}
+                      onBlur={handleWeightBlur}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -469,11 +572,11 @@ export function ReekonCaptureView({
             </button>
             <button
               type="button"
-              onClick={onAddRow}
+              onClick={addRowHere}
               className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
             >
               <Plus className="h-5 w-5" />
-              Línea
+              {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Línea"}
             </button>
             <button
               type="button"

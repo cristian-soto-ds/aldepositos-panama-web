@@ -17,12 +17,15 @@ import {
   Loader2,
   Plane,
   Plus,
+  Recycle,
   Ruler,
   Smartphone,
   Trash2,
 } from "lucide-react";
 import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
+import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
+import { extractReferenciasBultosFromFile } from "@/lib/quickAiExtract";
 import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
 import { tableScrollHostClass } from "@/lib/responsiveUi";
 import {
@@ -31,10 +34,14 @@ import {
   buildSourceReferenceSnapshot,
   captureSourceReferencesFromRows,
   CAPTURE_LAYOUT_STORAGE_KEY,
+  ensurePalletNumbers,
   isAutoConsecutiveBlock,
   isCaptureLayout,
+  isReferenceCaptureMode,
+  maxPalletNumber,
   mergePreservingRealReferences,
   renumberConsecutiveReferences,
+  renumberPallets,
   restoreSourceReferences,
   taskHasImportedReferences,
   nextConsecutiveReference,
@@ -111,6 +118,8 @@ type MeasureRow = {
   referenciasContenedor?: string;
   reempaqueRefs?: string[];
   referenciaContenedora?: string;
+  pallet?: number;
+  palletWeight?: string | number;
 };
 
 type WeightMode = "no_weight" | "per_bundle" | "by_reference" | "excel_fixed";
@@ -191,6 +200,8 @@ function hasQuickRequiredData(rows: MeasureRow[]): boolean {
   if (rows.length === 0) return false;
   return rows.every((row) => {
     const referencia = String(row.referencia ?? "").trim();
+    // Reempaque: solo necesita referencia (no lleva bultos, peso ni medidas).
+    if (row.reempaque === true) return referencia.length > 0;
     const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
     const l = parseFloat(String(row.l ?? 0)) || 0;
     const w = parseFloat(String(row.w ?? 0)) || 0;
@@ -201,6 +212,8 @@ function hasQuickRequiredData(rows: MeasureRow[]): boolean {
 
 function isQuickRowComplete(row: MeasureRow): boolean {
   const referencia = String(row.referencia ?? "").trim();
+  // Reempaque: se considera completa con solo la referencia.
+  if (row.reempaque === true) return referencia.length > 0;
   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
   const l = parseFloat(String(row.l ?? 0)) || 0;
   const w = parseFloat(String(row.w ?? 0)) || 0;
@@ -210,6 +223,7 @@ function isQuickRowComplete(row: MeasureRow): boolean {
 
 function quickRowHasPartialData(row: MeasureRow): boolean {
   const referencia = String(row.referencia ?? "").trim();
+  if (row.reempaque === true) return referencia.length > 0;
   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
   const l = parseFloat(String(row.l ?? 0)) || 0;
   const w = parseFloat(String(row.w ?? 0)) || 0;
@@ -247,6 +261,225 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
     );
   });
 }
+
+type MeasureTableRowProps = {
+  row: MeasureRow;
+  displayNum: number;
+  referenceLabel: number;
+  showReferenceColumn: boolean;
+  showWeightColumn: boolean;
+  referenceMode: ReferenceCaptureMode;
+  onUpdateValue: (
+    id: string,
+    field: keyof MeasureRow | keyof QuickMeasureRow,
+    value: string | boolean | string[],
+  ) => void;
+  onCommitMeasure: (
+    id: string,
+    field: "l" | "w" | "h" | "weight",
+    value: string,
+  ) => void;
+  onToggleReempaque: (id: string) => void;
+  onDeleteRow: (id: string) => void;
+  onReferenceChange: (id: string, value: string) => void;
+  onReferenceBlur: (id: string, value: string) => void;
+};
+
+/**
+ * Fila de captura memoizada. Solo se re-renderiza cuando cambian sus propias
+ * props (la fila editada), evitando repintar toda la tabla en cada tecla.
+ */
+const MeasureTableRow = React.memo(function MeasureTableRow({
+  row,
+  displayNum,
+  referenceLabel,
+  showReferenceColumn,
+  showWeightColumn,
+  referenceMode,
+  onUpdateValue,
+  onCommitMeasure,
+  onToggleReempaque,
+  onDeleteRow,
+  onReferenceChange,
+  onReferenceBlur,
+}: MeasureTableRowProps) {
+  const b = parseFloat(String(row.bultos)) || 0;
+  const rowCbm = cubicajeM3FromDims(
+    row.l,
+    row.w,
+    row.h,
+    row.bultos,
+    row.reempaque === true,
+  );
+  const rowPesoTotal = roundUpMeasure(b * (parseFloat(String(row.weight)) || 0));
+  const rowComplete = isQuickRowComplete(row);
+  const rowPartial = !rowComplete && quickRowHasPartialData(row);
+  const isReempaque = row.reempaque === true;
+  // Paletizado: el peso se captura por paleta (en la cabecera), no por fila.
+  const palletized = referenceMode === "palletized";
+
+  return (
+    <tr
+      className={`group transition-colors hover:bg-sky-50/60 dark:hover:bg-sky-950/20 ${
+        isReempaque
+          ? "border-l-[3px] border-l-violet-400 bg-violet-50/40 dark:bg-violet-950/20"
+          : rowComplete
+          ? "border-l-[3px] border-l-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/10"
+          : rowPartial
+            ? "border-l-[3px] border-l-amber-400 bg-amber-50/20 dark:bg-amber-950/10"
+            : "border-l-[3px] border-l-transparent odd:bg-white even:bg-slate-50/40 dark:odd:bg-slate-900 dark:even:bg-slate-800/30"
+      }`}
+    >
+      <td className="px-2 py-1.5 text-center">
+        {isReempaque ? (
+          <Recycle className="mx-auto h-4 w-4 text-violet-500" aria-label="Reempaque" />
+        ) : rowComplete ? (
+          <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-500" aria-label="Línea completa" />
+        ) : rowPartial ? (
+          <Circle className="mx-auto h-4 w-4 text-amber-400 fill-amber-100 dark:fill-amber-950/50" aria-label="Línea incompleta" />
+        ) : (
+          <span className="text-sm font-bold tabular-nums text-slate-300 dark:text-slate-600">
+            {displayNum}
+          </span>
+        )}
+      </td>
+
+      {showReferenceColumn && (
+        <td className="px-2 py-1.5 align-top">
+          {referenceMode === "without" ? (
+            <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-2 text-sm font-bold tabular-nums text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              {referenceLabel}
+            </span>
+          ) : (
+            <input
+              type="text"
+              onChange={(e) => onReferenceChange(row.id, e.target.value)}
+              onBlur={(e) => onReferenceBlur(row.id, e.target.value)}
+              value={row.referencia || ""}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-sm font-semibold text-[#16263F] outline-none transition-all placeholder:text-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-600"
+              placeholder="Ej. WT-2524"
+            />
+          )}
+        </td>
+      )}
+
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          disabled={isReempaque}
+          onChange={(e) => onUpdateValue(row.id, "bultos", e.target.value)}
+          value={row.bultos ?? ""}
+          className="no-spinners w-full rounded-lg border border-blue-200 bg-blue-50/50 py-2 text-center text-sm font-bold tabular-nums text-blue-700 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-300 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+          placeholder={isReempaque ? "—" : "1"}
+        />
+      </td>
+
+      {showWeightColumn && (
+        <td className="px-2 py-1.5">
+          {palletized ? (
+            <span
+              className="flex w-full items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 py-2 text-xs font-medium text-slate-400 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-500"
+              title="El peso se captura por paleta"
+            >
+              —
+            </span>
+          ) : (
+            <input
+              type="number"
+              disabled={isReempaque}
+              onChange={(e) =>
+                onUpdateValue(row.id, "weight", sanitizeMeasureTyping(e.target.value))
+              }
+              onBlur={(e) => onCommitMeasure(row.id, "weight", e.target.value)}
+              value={row.weight ?? ""}
+              className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+              placeholder={isReempaque ? "—" : "kg"}
+              title="Peso por bulto (kg)"
+            />
+          )}
+        </td>
+      )}
+
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          disabled={isReempaque}
+          onChange={(e) =>
+            onUpdateValue(row.id, "l", sanitizeMeasureTyping(e.target.value))
+          }
+          onBlur={(e) => onCommitMeasure(row.id, "l", e.target.value)}
+          value={row.l ?? ""}
+          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+          placeholder={isReempaque ? "—" : "cm"}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          disabled={isReempaque}
+          onChange={(e) =>
+            onUpdateValue(row.id, "w", sanitizeMeasureTyping(e.target.value))
+          }
+          onBlur={(e) => onCommitMeasure(row.id, "w", e.target.value)}
+          value={row.w ?? ""}
+          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+          placeholder={isReempaque ? "—" : "cm"}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          disabled={isReempaque}
+          onChange={(e) =>
+            onUpdateValue(row.id, "h", sanitizeMeasureTyping(e.target.value))
+          }
+          onBlur={(e) => onCommitMeasure(row.id, "h", e.target.value)}
+          value={row.h ?? ""}
+          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800 dark:disabled:text-slate-600"
+          placeholder={isReempaque ? "—" : "cm"}
+        />
+      </td>
+
+      <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
+        {isReempaque ? "—" : formatMeasure2(rowCbm) || "0.00"}
+      </td>
+      {showWeightColumn && (
+        <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
+          {isReempaque || palletized ? "—" : formatMeasure2(rowPesoTotal) || "0.00"}
+        </td>
+      )}
+      <td className="px-2 py-1.5">
+        <div className="flex items-center justify-center gap-1">
+          <button
+            type="button"
+            onClick={() => onToggleReempaque(row.id)}
+            aria-pressed={isReempaque}
+            title={
+              isReempaque
+                ? "Quitar reempaque"
+                : "Marcar como reempaque (sin bultos, peso ni medidas)"
+            }
+            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${
+              isReempaque
+                ? "bg-violet-500 text-white shadow-sm hover:bg-violet-600"
+                : "text-slate-400 hover:bg-violet-50 hover:text-violet-500 dark:hover:bg-violet-950/40"
+            }`}
+          >
+            <Recycle size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteRow(row.id)}
+            title="Eliminar línea"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
+          >
+            <Trash2 size={15} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
 
 export function QuickInventoryEntry({
   moduleType = "quick",
@@ -312,6 +545,11 @@ export function QuickInventoryEntry({
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [palletModalOpen, setPalletModalOpen] = useState(false);
+  const [palletModalValue, setPalletModalValue] = useState("");
+  const [aiExtractBusy, setAiExtractBusy] = useState(false);
+  const [aiExtractError, setAiExtractError] = useState<string | null>(null);
+  const aiFileRef = useRef<HTMLInputElement>(null);
   const sourceReferencesRef = useRef<Record<string, string>>({});
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
@@ -335,6 +573,9 @@ export function QuickInventoryEntry({
           sourceReferencesRef.current,
           incomingSnapshot,
         );
+      }
+      if (referenceMode === "palletized") {
+        return ensurePalletNumbers(applyConsecutiveReferences(taskRows));
       }
       if (referenceMode === "without") {
         return applyConsecutiveReferences(taskRows);
@@ -498,25 +739,42 @@ export function QuickInventoryEntry({
       0,
     );
 
-    const weight = roundUpMeasure(
-      measureRows.reduce((acc, row) => {
-        const rowWeight = parseFloat(String(row.weight)) || 0;
-        const b = parseFloat(String(row.bultos)) || 0;
-        return acc + rowWeight * b;
-      }, 0),
-    );
+    // Paletizado: el peso se captura una vez por paleta (no por bulto).
+    const weight =
+      referenceMode === "palletized"
+        ? roundUpMeasure(
+            (() => {
+              const seen = new Set<number>();
+              let acc = 0;
+              for (const row of measureRows) {
+                const p = Math.max(1, Number(row.pallet) || 1);
+                if (seen.has(p)) continue;
+                seen.add(p);
+                acc += parseFloat(String(row.palletWeight)) || 0;
+              }
+              return acc;
+            })(),
+          )
+        : roundUpMeasure(
+            measureRows.reduce((acc, row) => {
+              const rowWeight = parseFloat(String(row.weight)) || 0;
+              const b = parseFloat(String(row.bultos)) || 0;
+              return acc + rowWeight * b;
+            }, 0),
+          );
 
     return { bultos, cbm: roundUpMeasure(cbmNumber), weight };
   };
 
-  const commitMeasureField = (
-    rowId: string,
-    field: "l" | "w" | "h" | "weight",
-    raw: string,
-  ) => {
-    const normalized = normalizeMeasureField(raw);
-    updateRowValue(rowId, field, normalized);
-  };
+  const commitMeasureField = useCallback(
+    (rowId: string, field: "l" | "w" | "h" | "weight", raw: string) => {
+      const normalized = normalizeMeasureField(raw);
+      setMeasureRows((prev) =>
+        prev.map((r) => (r.id === rowId ? { ...r, [field]: normalized } : r)),
+      );
+    },
+    [],
+  );
 
   const handleSelectTask = (task: Task) => {
     setSelectedTask(task);
@@ -531,9 +789,16 @@ export function QuickInventoryEntry({
     const serverRows = taskRows;
     const serverHasCapture = quickRowsHaveAnyCapture(taskRows);
     let rowsToUse = taskRows;
-    let refModeToUse: ReferenceCaptureMode = taskHasImportedReferences(taskRows)
-      ? "with"
-      : "without";
+    // Si las filas guardadas ya traen número de paleta, la tarea es paletizada:
+    // así se restaura la agrupación y el peso de paleta aunque no exista borrador local.
+    const serverIsPalletized = taskRows.some(
+      (r) => Number(r.pallet) >= 1,
+    );
+    let refModeToUse: ReferenceCaptureMode = serverIsPalletized
+      ? "palletized"
+      : taskHasImportedReferences(taskRows)
+        ? "with"
+        : "without";
     let layoutToUse: CaptureLayout =
       typeof window !== "undefined" && window.innerWidth < 768 ? "reekon" : "table";
 
@@ -558,7 +823,7 @@ export function QuickInventoryEntry({
               rowsToUse = stripQuickRowsForPersist(parsed.rows);
             }
           }
-          if (parsed.referenceMode === "with" || parsed.referenceMode === "without") {
+          if (isReferenceCaptureMode(parsed.referenceMode)) {
             refModeToUse = parsed.referenceMode;
           }
           if (isCaptureLayout(parsed.captureLayout)) {
@@ -587,7 +852,9 @@ export function QuickInventoryEntry({
       serverSnapshot,
     );
 
-    if (refModeToUse === "without") {
+    if (refModeToUse === "palletized") {
+      rowsToUse = ensurePalletNumbers(applyConsecutiveReferences(rowsToUse));
+    } else if (refModeToUse === "without") {
       rowsToUse = applyConsecutiveReferences(rowsToUse);
     } else {
       rowsToUse = restoreSourceReferences(rowsToUse, sourceReferencesRef.current);
@@ -632,6 +899,14 @@ export function QuickInventoryEntry({
       setMeasureRows((prev) =>
         restoreSourceReferences(prev, sourceReferencesRef.current),
       );
+    } else if (mode === "palletized") {
+      sourceReferencesRef.current = captureSourceReferencesFromRows(
+        measureRows,
+        sourceReferencesRef.current,
+      );
+      setMeasureRows((prev) =>
+        ensurePalletNumbers(applyConsecutiveReferences(prev)),
+      );
     } else {
       sourceReferencesRef.current = captureSourceReferencesFromRows(
         measureRows,
@@ -645,14 +920,19 @@ export function QuickInventoryEntry({
   const addRow = () => {
     const newId = generateId();
     setMeasureRows((prev) => {
-      const nextRef =
-        referenceMode === "without" ? nextConsecutiveReference(prev) : "";
+      const autoRef = referenceMode !== "with";
+      const nextRef = autoRef ? nextConsecutiveReference(prev) : "";
+      // Paletizado: la nueva fila se añade a la última paleta abierta.
+      const pallet =
+        referenceMode === "palletized"
+          ? Math.max(1, maxPalletNumber(prev))
+          : undefined;
       return [
         ...prev,
         {
           id: newId,
           referencia: nextRef,
-          bultos: referenceMode === "without" ? "1" : "",
+          bultos: autoRef ? "1" : "",
           l: "",
           w: "",
           h: "",
@@ -662,6 +942,7 @@ export function QuickInventoryEntry({
           referenciasContenedor: "",
           reempaqueRefs: [],
           referenciaContenedora: "",
+          ...(pallet ? { pallet } : {}),
         },
       ];
     });
@@ -670,30 +951,266 @@ export function QuickInventoryEntry({
     }
   };
 
-  const deleteRow = (idToRemove: string) => {
-    const t = catalogDebounceRef.current[idToRemove];
-    if (t) {
-      clearTimeout(t);
-      delete catalogDebounceRef.current[idToRemove];
+  /**
+   * Alde.IA: lee un documento y agrega SOLO referencias + bultos como filas nuevas.
+   * El resto (medidas, peso, etc.) lo captura el inventariador después.
+   */
+  const runAiRefExtract = async (file: File) => {
+    setAiExtractBusy(true);
+    setAiExtractError(null);
+    try {
+      const lines = await extractReferenciasBultosFromFile(file);
+      if (lines.length === 0) {
+        setAiExtractError("No se detectaron referencias en el documento.");
+        return;
+      }
+      let firstNewId: string | null = null;
+      setMeasureRows((prev) => {
+        // Conserva las filas con datos; descarta las vacías (p. ej. la fila inicial).
+        const kept = prev.filter((r) => quickRowHasPartialData(r));
+        const pallet =
+          referenceMode === "palletized" ? Math.max(1, maxPalletNumber(kept)) : undefined;
+        const additions: MeasureRow[] = lines.map((l) => {
+          const id = generateId();
+          if (!firstNewId) firstNewId = id;
+          return {
+            id,
+            referencia: l.referencia,
+            bultos: l.bultos,
+            l: "",
+            w: "",
+            h: "",
+            weight: "",
+            reempaque: false,
+            bultoContenedor: "",
+            referenciasContenedor: "",
+            reempaqueRefs: [],
+            referenciaContenedora: "",
+            ...(pallet ? { pallet } : {}),
+          };
+        });
+        return [...kept, ...additions];
+      });
+      if (firstNewId) setExpandedRowId(firstNewId);
+    } catch (err) {
+      setAiExtractError(
+        err instanceof Error ? err.message : "No se pudo leer el documento.",
+      );
+    } finally {
+      setAiExtractBusy(false);
     }
-    delete sourceReferencesRef.current[idToRemove];
+  };
+
+  /** Abre el selector de archivo para la lectura con Alde.IA. */
+  const openAiFilePicker = () => {
+    if (aiExtractBusy) return;
+    setAiExtractError(null);
+    aiFileRef.current?.click();
+  };
+
+  /**
+   * Paletizado: crea una paleta con un número concreto y su primera fila.
+   * El número lo elige el inventariador (con aviso de colisión en el modal).
+   */
+  const createPalletWithNumber = (palletNum: number) => {
+    const newId = generateId();
     setMeasureRows((prev) => {
-      if (prev.length <= 1) return prev;
-      const next = prev.filter((r) => r.id !== idToRemove);
-      return referenceMode === "without"
-        ? renumberConsecutiveReferences(next)
-        : next;
+      const next: MeasureRow[] = [
+        ...prev,
+        {
+          id: newId,
+          referencia: nextConsecutiveReference(prev),
+          bultos: "1",
+          l: "",
+          w: "",
+          h: "",
+          weight: "",
+          reempaque: false,
+          bultoContenedor: "",
+          referenciasContenedor: "",
+          reempaqueRefs: [],
+          referenciaContenedora: "",
+          pallet: palletNum,
+        },
+      ];
+      // Se añade al final sin renumerar: no se recrean las filas existentes.
+      return next;
+    });
+    if (captureLayout === "reekon") {
+      setExpandedRowId(newId);
+    }
+  };
+
+  /** Números de paleta actualmente presentes (propios y de otros inventariadores). */
+  const existingPalletNumbers = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of measureRows) set.add(Math.max(1, Number(r.pallet) || 1));
+    return set;
+  }, [measureRows]);
+
+  const openPalletModal = () => {
+    setPalletModalValue(String(maxPalletNumber(measureRows) + 1));
+    setPalletModalOpen(true);
+  };
+
+  const confirmPalletModal = () => {
+    const num = parseInt(palletModalValue, 10);
+    if (!Number.isFinite(num) || num < 1) return;
+    if (existingPalletNumbers.has(num)) return;
+    createPalletWithNumber(num);
+    setPalletModalOpen(false);
+  };
+
+  /** Paletizado: fija el peso total de una paleta (se replica en todas sus filas). */
+  const setPalletWeight = (palletNum: number, value: string) => {
+    setMeasureRows((prev) =>
+      prev.map((r) =>
+        Math.max(1, Number(r.pallet) || 1) === palletNum
+          ? { ...r, palletWeight: value }
+          : r,
+      ),
+    );
+  };
+
+  /** Paletizado: añade una fila dentro de una paleta concreta (la inserta al final de su grupo). */
+  const addRowToPallet = (palletNum: number) => {
+    const newId = generateId();
+    setMeasureRows((prev) => {
+      // Hereda el peso ya asignado a la paleta (se captura una sola vez por paleta).
+      const existingPalletWeight =
+        prev.find(
+          (r) =>
+            Math.max(1, Number(r.pallet) || 1) === palletNum &&
+            String(r.palletWeight ?? "").trim() !== "",
+        )?.palletWeight ?? "";
+      const newRow: MeasureRow = {
+        id: newId,
+        // Referencia única sin renumerar el resto (en paletizado no se muestra,
+        // pero debe ser no vacía para poder marcar la fila como completa).
+        referencia: nextConsecutiveReference(prev),
+        bultos: "1",
+        l: "",
+        w: "",
+        h: "",
+        weight: "",
+        reempaque: false,
+        bultoContenedor: "",
+        referenciasContenedor: "",
+        reempaqueRefs: [],
+        referenciaContenedora: "",
+        pallet: palletNum,
+        palletWeight: existingPalletWeight,
+      };
+      let lastIdx = -1;
+      prev.forEach((r, i) => {
+        if (Math.max(1, Number(r.pallet) || 1) === palletNum) lastIdx = i;
+      });
+      const next = [...prev];
+      if (lastIdx === -1) next.push(newRow);
+      else next.splice(lastIdx + 1, 0, newRow);
+      // Sin renumerar: se conserva la identidad de todas las filas existentes.
+      return next;
+    });
+    if (captureLayout === "reekon") {
+      setExpandedRowId(newId);
+    }
+  };
+
+  /** Paletizado: elimina una paleta completa (todas sus filas) y renumera el resto. */
+  const deletePallet = (palletNum: number) => {
+    const rowsInPallet = measureRows.filter(
+      (r) => Math.max(1, Number(r.pallet) || 1) === palletNum,
+    );
+    const hasData = rowsInPallet.some((r) => quickRowHasPartialData(r));
+    if (
+      hasData &&
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `¿Eliminar la Paleta ${palletNum} y sus ${rowsInPallet.length} fila(s)?`,
+      )
+    ) {
+      return;
+    }
+    for (const r of rowsInPallet) {
+      const t = catalogDebounceRef.current[r.id];
+      if (t) {
+        clearTimeout(t);
+        delete catalogDebounceRef.current[r.id];
+      }
+      delete sourceReferencesRef.current[r.id];
+    }
+    setMeasureRows((prev) => {
+      const remaining = prev.filter(
+        (r) => Math.max(1, Number(r.pallet) || 1) !== palletNum,
+      );
+      if (remaining.length === 0) {
+        return [
+          {
+            ...createEmptyMeasureRow(),
+            bultos: "1",
+            referencia: "1",
+            pallet: 1,
+          },
+        ];
+      }
+      return renumberConsecutiveReferences(renumberPallets(remaining));
     });
   };
 
-  const updateRowValue = (
-    id: string,
-    field: keyof MeasureRow | keyof QuickMeasureRow,
-    value: string | boolean | string[],
-  ) =>
+  const deleteRow = useCallback(
+    (idToRemove: string) => {
+      const t = catalogDebounceRef.current[idToRemove];
+      if (t) {
+        clearTimeout(t);
+        delete catalogDebounceRef.current[idToRemove];
+      }
+      delete sourceReferencesRef.current[idToRemove];
+      setMeasureRows((prev) => {
+        if (prev.length <= 1) return prev;
+        const next = prev.filter((r) => r.id !== idToRemove);
+        return referenceMode !== "with"
+          ? renumberConsecutiveReferences(next)
+          : next;
+      });
+    },
+    [referenceMode],
+  );
+
+  const updateRowValue = useCallback(
+    (
+      id: string,
+      field: keyof MeasureRow | keyof QuickMeasureRow,
+      value: string | boolean | string[],
+    ) =>
+      setMeasureRows((prev) =>
+        prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+      ),
+    [],
+  );
+
+  /** Marca/desmarca una fila como reempaque (sin bultos, peso ni medidas). */
+  const toggleReempaque = useCallback(
+    (id: string) =>
     setMeasureRows((prev) =>
-      prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
-    );
+      prev.map((row) => {
+        if (row.id !== id) return row;
+        const next = !row.reempaque;
+        if (next) {
+          return {
+            ...row,
+            reempaque: true,
+            bultos: "",
+            weight: "",
+            l: "",
+            w: "",
+            h: "",
+          };
+        }
+        return { ...row, reempaque: false };
+      }),
+    ),
+    [],
+  );
 
   const runCatalogLookup = useCallback(
     async (rowId: string, rawReferencia: string) => {
@@ -720,14 +1237,40 @@ export function QuickInventoryEntry({
     [moduleType],
   );
 
-  const scheduleCatalogLookup = (rowId: string, raw: string) => {
-    const prevT = catalogDebounceRef.current[rowId];
-    if (prevT) clearTimeout(prevT);
-    catalogDebounceRef.current[rowId] = setTimeout(() => {
-      delete catalogDebounceRef.current[rowId];
-      void runCatalogLookup(rowId, raw);
-    }, CATALOG_DEBOUNCE_MS);
-  };
+  const scheduleCatalogLookup = useCallback(
+    (rowId: string, raw: string) => {
+      const prevT = catalogDebounceRef.current[rowId];
+      if (prevT) clearTimeout(prevT);
+      catalogDebounceRef.current[rowId] = setTimeout(() => {
+        delete catalogDebounceRef.current[rowId];
+        void runCatalogLookup(rowId, raw);
+      }, CATALOG_DEBOUNCE_MS);
+    },
+    [runCatalogLookup],
+  );
+
+  const handleReferenceChange = useCallback(
+    (rowId: string, value: string) => {
+      updateRowValue(rowId, "referencia", value);
+      const trimmed = value.trim();
+      if (trimmed) sourceReferencesRef.current[rowId] = trimmed;
+      else delete sourceReferencesRef.current[rowId];
+      scheduleCatalogLookup(rowId, value);
+    },
+    [updateRowValue, scheduleCatalogLookup],
+  );
+
+  const handleReferenceBlur = useCallback(
+    (rowId: string, value: string) => {
+      const t = catalogDebounceRef.current[rowId];
+      if (t) {
+        clearTimeout(t);
+        delete catalogDebounceRef.current[rowId];
+      }
+      void runCatalogLookup(rowId, value);
+    },
+    [runCatalogLookup],
+  );
 
   const persistQuickDraft = (
     taskId: string,
@@ -921,9 +1464,6 @@ export function QuickInventoryEntry({
                     </>
                   )}
                 </h2>
-                <p className="text-fluid-subtitle mt-1 text-slate-500 dark:text-slate-400">
-                  Selecciona una orden para capturar medidas y bultos
-                </p>
               </div>
               <button
                 type="button"
@@ -1228,8 +1768,18 @@ export function QuickInventoryEntry({
   const faltantes = originalExpected - totals.bultos;
 
   const showWeightColumn = true;
-  // La referencia debe poder capturarse en ambos modos.
-  const showReferenceColumn = true;
+  const palletized = referenceMode === "palletized";
+  // La referencia se captura en «Con/Sin refs»; en Paletizado se oculta (agrupa por paleta).
+  const showReferenceColumn = !palletized;
+  const measureColumnCount =
+    1 +
+    (showReferenceColumn ? 1 : 0) +
+    1 +
+    (showWeightColumn ? 1 : 0) +
+    3 +
+    1 +
+    (showWeightColumn ? 1 : 0) +
+    1;
   const completedRows = measureRows.filter((row) => isQuickRowComplete(row)).length;
 
   if (captureLayout === "reekon") {
@@ -1240,9 +1790,21 @@ export function QuickInventoryEntry({
             <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
           </div>
         ) : null}
+        <input
+          ref={aiFileRef}
+          type="file"
+          accept=".pdf,.png,.jpg,.jpeg,.webp"
+          className="hidden"
+          onChange={(ev) => {
+            const file = ev.target.files?.[0];
+            ev.target.value = "";
+            if (file) void runAiRefExtract(file);
+          }}
+        />
         <ReekonCaptureView
           measureRows={measureRows}
           referenceMode={referenceMode}
+          onSwitchReferenceMode={switchReferenceMode}
           activeRowId={expandedRowId}
           onActiveRowChange={setExpandedRowId}
           onUpdateRow={(id, field, value) => updateRowValue(id, field, value)}
@@ -1265,6 +1827,11 @@ export function QuickInventoryEntry({
             void runCatalogLookup(id, value);
           }}
           onAddRow={addRow}
+          onAddPallet={() =>
+            createPalletWithNumber(maxPalletNumber(measureRows) + 1)
+          }
+          onAddRowToPallet={addRowToPallet}
+          onSetPalletWeight={setPalletWeight}
           onDeleteRow={deleteRow}
           raLabel={String(t.ra ?? "")}
           declaredBultos={originalExpected}
@@ -1438,14 +2005,41 @@ export function QuickInventoryEntry({
                   <p className="text-sm font-bold text-[#16263F] dark:text-slate-100">
                     Captura de medidas
                   </p>
-                  <p className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
-                    {referenceMode === "with"
-                      ? "Referencias del RA, bultos, peso y dimensiones en cm"
-                      : "Numeración consecutiva — solo bultos y dimensiones"}
-                  </p>
+                  {referenceMode !== "palletized" && (
+                    <p className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
+                      {referenceMode === "with"
+                        ? "Referencias del RA, bultos, peso y dimensiones en cm"
+                        : "Numeración consecutiva — solo bultos y dimensiones"}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
+                <input
+                  ref={aiFileRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp"
+                  className="hidden"
+                  onChange={(ev) => {
+                    const file = ev.target.files?.[0];
+                    ev.target.value = "";
+                    if (file) void runAiRefExtract(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={openAiFilePicker}
+                  disabled={aiExtractBusy}
+                  title="Leer un documento con Alde.IA y agregar solo referencias y bultos"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-60 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/50 sm:text-xs"
+                >
+                  {aiExtractBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <GeminiSparkIcon size={14} />
+                  )}
+                  {aiExtractBusy ? "Leyendo…" : "Leer documento"}
+                </button>
                 <div className="inline-flex w-full items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 py-1 dark:border-slate-600 dark:bg-slate-900 sm:w-auto">
                   <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800 sm:w-auto">
                     <button
@@ -1470,6 +2064,17 @@ export function QuickInventoryEntry({
                     >
                       Sin refs
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => switchReferenceMode("palletized")}
+                      className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-semibold transition sm:flex-none sm:px-3 sm:text-xs ${
+                        referenceMode === "palletized"
+                          ? "bg-[#16263F] text-white shadow-sm"
+                          : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
+                      }`}
+                    >
+                      Paletizado
+                    </button>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium text-slate-500 dark:text-slate-400 sm:text-[11px]">
@@ -1483,6 +2088,11 @@ export function QuickInventoryEntry({
               </div>
             </div>
 
+            {aiExtractError ? (
+              <div className="shrink-0 border-b border-red-200 bg-red-50 px-3 py-1.5 text-[11px] font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                {aiExtractError}
+              </div>
+            ) : null}
             <div className="inventory-table-scroll-host table-scroll-hint flex min-h-0 flex-1 basis-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
             <div className={`${tableScrollHostClass} inventory-measures-scroll`}>
             <table
@@ -1498,9 +2108,13 @@ export function QuickInventoryEntry({
                   {showWeightColumn && (
                     <th
                       className="w-24 px-2 py-2.5 text-center"
-                      title="Peso de un bulto en kilogramos"
+                      title={
+                        palletized
+                          ? "El peso se captura por paleta (arriba de cada grupo)"
+                          : "Peso de un bulto en kilogramos"
+                      }
                     >
-                      Peso/bulto (kg)
+                      {palletized ? "Peso (paleta)" : "Peso/bulto (kg)"}
                     </th>
                   )}
                   <th className="w-20 px-2 py-2.5 text-center" title="Largo en centímetros">Largo</th>
@@ -1514,176 +2128,101 @@ export function QuickInventoryEntry({
                       Peso total (kg)
                     </th>
                   )}
-                  <th className="w-12 px-2 py-2.5 text-center" />
+                  <th className="w-20 px-2 py-2.5 text-center" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {measureRows.map((row, idx) => {
-                  const b = parseFloat(String(row.bultos)) || 0;
-                  const rowCbm = cubicajeM3FromDims(
-                    row.l,
-                    row.w,
-                    row.h,
-                    row.bultos,
-                    row.reempaque === true,
-                  );
-                  const rowPesoTotal = roundUpMeasure(
-                    b * (parseFloat(String(row.weight)) || 0),
-                  );
-                  const rowComplete = isQuickRowComplete(row);
-                  const rowPartial = !rowComplete && quickRowHasPartialData(row);
+                {(() => {
+                  let lastPallet: number | null = null;
+                  let palletRowNum = 0;
+                  return measureRows.map((row, idx) => {
+                  const rowPallet = Math.max(1, Number(row.pallet) || 1);
+                  const isNewPallet = palletized && rowPallet !== lastPallet;
+                  if (isNewPallet) {
+                    lastPallet = rowPallet;
+                    palletRowNum = 0;
+                  }
+                  palletRowNum += 1;
+                  const displayNum = palletized ? palletRowNum : idx + 1;
 
                   return (
-                    <tr
-                      key={row.id}
-                      className={`group transition-colors hover:bg-sky-50/60 dark:hover:bg-sky-950/20 ${
-                        rowComplete
-                          ? "border-l-[3px] border-l-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/10"
-                          : rowPartial
-                            ? "border-l-[3px] border-l-amber-400 bg-amber-50/20 dark:bg-amber-950/10"
-                            : "border-l-[3px] border-l-transparent odd:bg-white even:bg-slate-50/40 dark:odd:bg-slate-900 dark:even:bg-slate-800/30"
-                      }`}
-                    >
-                      <td className="px-2 py-1.5 text-center">
-                        {rowComplete ? (
-                          <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-500" aria-label="Línea completa" />
-                        ) : rowPartial ? (
-                          <Circle className="mx-auto h-4 w-4 text-amber-400 fill-amber-100 dark:fill-amber-950/50" aria-label="Línea incompleta" />
-                        ) : (
-                          <span className="text-sm font-bold tabular-nums text-slate-300 dark:text-slate-600">
-                            {idx + 1}
-                          </span>
-                        )}
-                      </td>
-
-                      {showReferenceColumn && (
-                        <td className="px-2 py-1.5 align-top">
-                          {referenceMode === "without" ? (
-                            <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-2 text-sm font-bold tabular-nums text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                              {idx + 1}
+                    <React.Fragment key={row.id}>
+                    {isNewPallet && (
+                      <tr className="bg-indigo-50/80 dark:bg-indigo-950/30">
+                        <td colSpan={measureColumnCount} className="px-3 py-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
+                              Paleta {rowPallet}
                             </span>
-                          ) : (
-                          <input
-                            type="text"
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              updateRowValue(row.id, "referencia", v);
-                              const trimmed = v.trim();
-                              if (trimmed) {
-                                sourceReferencesRef.current[row.id] = trimmed;
-                              } else {
-                                delete sourceReferencesRef.current[row.id];
-                              }
-                              scheduleCatalogLookup(row.id, v);
-                            }}
-                            onBlur={(e) => {
-                              const t = catalogDebounceRef.current[row.id];
-                              if (t) {
-                                clearTimeout(t);
-                                delete catalogDebounceRef.current[row.id];
-                              }
-                              void runCatalogLookup(row.id, e.target.value);
-                            }}
-                            value={row.referencia || ""}
-                            className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-sm font-semibold text-[#16263F] outline-none transition-all placeholder:text-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-600"
-                            placeholder="Ej. WT-2524"
-                          />
-                          )}
+                            <div className="ml-auto flex items-center gap-1.5">
+                              <label className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
+                                Peso paleta
+                              </label>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                value={row.palletWeight ?? ""}
+                                onChange={(ev) =>
+                                  setPalletWeight(
+                                    rowPallet,
+                                    sanitizeMeasureTyping(ev.target.value),
+                                  )
+                                }
+                                onBlur={(ev) =>
+                                  setPalletWeight(
+                                    rowPallet,
+                                    normalizeMeasureField(ev.target.value),
+                                  )
+                                }
+                                className="no-spinners w-20 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-center text-xs font-bold tabular-nums text-indigo-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-200"
+                                placeholder="kg"
+                                title={`Peso total de la Paleta ${rowPallet} (kg)`}
+                              />
+                              <span className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400">
+                                kg
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => addRowToPallet(rowPallet)}
+                                title={`Añadir fila a la Paleta ${rowPallet}`}
+                                className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-indigo-600 transition hover:bg-indigo-50 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+                              >
+                                <Plus className="h-3 w-3" aria-hidden /> Fila
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deletePallet(rowPallet)}
+                                title={`Eliminar la Paleta ${rowPallet}`}
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-200 bg-white text-red-500 transition hover:bg-red-50 hover:text-red-600 dark:border-red-900/50 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/40"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                              </button>
+                            </div>
+                          </div>
                         </td>
-                      )}
-
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          onChange={(e) =>
-                            updateRowValue(row.id, "bultos", e.target.value)
-                          }
-                          value={row.bultos ?? ""}
-                          className="no-spinners w-full rounded-lg border border-blue-200 bg-blue-50/50 py-2 text-center text-sm font-bold tabular-nums text-blue-700 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300"
-                          placeholder="1"
-                        />
-                      </td>
-
-                      {showWeightColumn && (
-                        <td className="px-2 py-1.5">
-                          <input
-                            type="number"
-                            onChange={(e) =>
-                              updateRowValue(
-                                row.id,
-                                "weight",
-                                sanitizeMeasureTyping(e.target.value),
-                              )
-                            }
-                            onBlur={(e) =>
-                              commitMeasureField(row.id, "weight", e.target.value)
-                            }
-                            value={row.weight ?? ""}
-                            className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                            placeholder="kg"
-                            title="Peso por bulto (kg)"
-                          />
-                        </td>
-                      )}
-
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          onChange={(e) =>
-                            updateRowValue(row.id, "l", sanitizeMeasureTyping(e.target.value))
-                          }
-                          onBlur={(e) => commitMeasureField(row.id, "l", e.target.value)}
-                          value={row.l ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                          placeholder="cm"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          onChange={(e) =>
-                            updateRowValue(row.id, "w", sanitizeMeasureTyping(e.target.value))
-                          }
-                          onBlur={(e) => commitMeasureField(row.id, "w", e.target.value)}
-                          value={row.w ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                          placeholder="cm"
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="number"
-                          onChange={(e) =>
-                            updateRowValue(row.id, "h", sanitizeMeasureTyping(e.target.value))
-                          }
-                          onBlur={(e) => commitMeasureField(row.id, "h", e.target.value)}
-                          value={row.h ?? ""}
-                          className="no-spinners w-full rounded-lg border border-slate-200 bg-white py-2 text-center text-sm font-semibold tabular-nums text-[#16263F] outline-none transition-all focus:border-[#16263F] focus:ring-2 focus:ring-[#16263F]/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                          placeholder="cm"
-                        />
-                      </td>
-
-                      <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
-                        {formatMeasure2(rowCbm) || "0.00"}
-                      </td>
-                      {showWeightColumn && (
-                        <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
-                          {formatMeasure2(rowPesoTotal) || "0.00"}
-                        </td>
-                      )}
-                      <td className="px-2 py-1.5 text-center">
-                        <button
-                          type="button"
-                          onClick={() => deleteRow(row.id)}
-                          title="Eliminar línea"
-                          className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </td>
-                    </tr>
+                      </tr>
+                    )}
+                    <MeasureTableRow
+                      row={row}
+                      displayNum={displayNum}
+                      referenceLabel={showReferenceColumn ? idx + 1 : 0}
+                      showReferenceColumn={showReferenceColumn}
+                      showWeightColumn={showWeightColumn}
+                      referenceMode={referenceMode}
+                      onUpdateValue={updateRowValue}
+                      onCommitMeasure={commitMeasureField}
+                      onToggleReempaque={toggleReempaque}
+                      onDeleteRow={deleteRow}
+                      onReferenceChange={handleReferenceChange}
+                      onReferenceBlur={handleReferenceBlur}
+                    />
+                    </React.Fragment>
                   );
-                })}
+                  });
+                })()}
               </tbody>
             </table>
             </div>
@@ -1691,13 +2230,32 @@ export function QuickInventoryEntry({
           </div>
 
           <div className="isolate z-10 shrink-0 space-y-1.5 border-t border-slate-200 pt-2 dark:border-slate-600 sm:space-y-2 sm:pt-3">
-            <button
-              type="button"
-              onClick={addRow}
-              className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
-            >
-              <Plus className="icon-sm" /> Agregar
-            </button>
+            {palletized ? (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:gap-2">
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
+                >
+                  <Plus className="icon-sm" /> Agregar fila a la paleta
+                </button>
+                <button
+                  type="button"
+                  onClick={openPalletModal}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-300 bg-indigo-50 py-2 text-[11px] font-bold text-indigo-700 transition-all hover:border-indigo-400 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-950/60 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
+                >
+                  <LayoutGrid className="icon-sm" /> Agregar otra paleta
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={addRow}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 py-2 text-[11px] font-semibold text-slate-600 transition-all hover:border-slate-400 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 sm:rounded-xl sm:py-3 sm:text-xs md:text-sm"
+              >
+                <Plus className="icon-sm" /> Agregar
+              </button>
+            )}
             <button
               type="button"
               onClick={saveOrder}
@@ -1737,6 +2295,86 @@ export function QuickInventoryEntry({
         setCsvExportOpen(false);
       }}
     />
+    {palletModalOpen && (() => {
+      const parsed = parseInt(palletModalValue, 10);
+      const valid = Number.isFinite(parsed) && parsed >= 1;
+      const collides = valid && existingPalletNumbers.has(parsed);
+      const suggestedFree = maxPalletNumber(measureRows) + 1;
+      return (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          onClick={() => setPalletModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-300">
+                <LayoutGrid className="h-5 w-5" aria-hidden />
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-slate-800 dark:text-slate-100">
+                  Nueva paleta
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Elige el número de paleta a crear
+                </p>
+              </div>
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              value={palletModalValue}
+              onChange={(e) =>
+                setPalletModalValue(e.target.value.replace(/[^\d]/g, ""))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && valid && !collides) confirmPalletModal();
+              }}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-center text-lg font-black text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+              placeholder={String(suggestedFree)}
+            />
+            {collides && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-200">
+                <p className="font-bold">
+                  La Paleta {parsed} ya está creada y otro inventariador puede
+                  estar trabajando en ella.
+                </p>
+                <p className="mt-0.5">
+                  ¿Quieres crear otra paleta? Elige un número libre.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPalletModalValue(String(suggestedFree))}
+                  className="mt-2 inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-800 transition hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-100 dark:hover:bg-amber-900/60"
+                >
+                  Usar Paleta {suggestedFree}
+                </button>
+              </div>
+            )}
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPalletModalOpen(false)}
+                className="flex-1 rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmPalletModal}
+                disabled={!valid || collides}
+                className="flex-1 rounded-xl bg-indigo-600 py-2 text-xs font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Crear paleta
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
     </>
   );
 }

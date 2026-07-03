@@ -5,8 +5,8 @@ import { FileCode, Loader2, Upload, X } from "lucide-react";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { ParsedOrHtmRow } from "@/lib/parseCollectionOrdersHtm";
 import {
+  classifyHtmCollectionOrders,
   collectionOrdersFromHtmRows,
-  filterNewHtmCollectionOrders,
   normalizeOrNumero,
   parseCollectionOrdersFromHtm,
 } from "@/lib/parseCollectionOrdersHtm";
@@ -65,10 +65,20 @@ export function ImportCollectionOrdersHtmModal({
     [parsedRows, clienteGlobal],
   );
 
-  const { toCreate, skippedNumeros } = useMemo(
-    () => filterNewHtmCollectionOrders(previewOrders, existingOrders),
+  const { toCreate, toUpdate, unchangedNumeros } = useMemo(
+    () => classifyHtmCollectionOrders(previewOrders, existingOrders),
     [previewOrders, existingOrders],
   );
+
+  const createNumeros = useMemo(
+    () => new Set(toCreate.map((o) => normalizeOrNumero(o.numero))),
+    [toCreate],
+  );
+  const updateNumeros = useMemo(
+    () => new Set(toUpdate.map((o) => normalizeOrNumero(o.numero))),
+    [toUpdate],
+  );
+  const actionableCount = toCreate.length + toUpdate.length;
 
   const onPickFile: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const file = e.target.files?.[0];
@@ -194,8 +204,10 @@ export function ImportCollectionOrdersHtmModal({
               </p>
               <ul className="max-h-56 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
                 {previewOrders.map((o) => {
-                  const willImport = toCreate.some((t) => t.id === o.id);
-                  const dup = !willImport;
+                  const n = normalizeOrNumero(o.numero);
+                  const isNew = createNumeros.has(n);
+                  const isUpdate = updateNumeros.has(n);
+                  const isExisting = existingNumeros.has(n);
                   const line = o.lines[0];
                   const bultos = o.expectedBultos ?? line?.bultos ?? 0;
                   return (
@@ -204,13 +216,23 @@ export function ImportCollectionOrdersHtmModal({
                         <span className="font-black text-[#16263F] dark:text-slate-100">
                           OR #{o.numero}
                         </span>
-                        {dup ? (
-                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-                            {existingNumeros.has(normalizeOrNumero(o.numero))
-                              ? "Ya existe"
-                              : "Duplicada en archivo"}
+                        {isNew ? (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                            Nueva
                           </span>
-                        ) : null}
+                        ) : isUpdate ? (
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-black uppercase text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+                            Se actualizará
+                          </span>
+                        ) : isExisting ? (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            Sin cambios
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black uppercase text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                            Duplicada en archivo
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">
                         {o.proveedor || "—"} → {o.cliente || "—"}
@@ -222,13 +244,19 @@ export function ImportCollectionOrdersHtmModal({
                   );
                 })}
               </ul>
-              {skippedNumeros.length > 0 ? (
-                <p className="border-t border-slate-100 px-3 py-2 text-[11px] font-semibold text-amber-800 dark:border-slate-700 dark:text-amber-200">
-                  {skippedNumeros.length} orden(es) ya existen y no se crearán:{" "}
-                  {skippedNumeros.slice(0, 8).join(", ")}
-                  {skippedNumeros.length > 8 ? "…" : ""}
-                </p>
-              ) : null}
+              <div className="border-t border-slate-100 px-3 py-2 text-[11px] font-semibold dark:border-slate-700">
+                <span className="text-emerald-700 dark:text-emerald-300">
+                  {toCreate.length} nueva(s)
+                </span>
+                {" · "}
+                <span className="text-blue-700 dark:text-blue-300">
+                  {toUpdate.length} a actualizar
+                </span>
+                {" · "}
+                <span className="text-slate-500">
+                  {unchangedNumeros.length} sin cambios
+                </span>
+              </div>
             </div>
           ) : null}
         </div>
@@ -244,8 +272,8 @@ export function ImportCollectionOrdersHtmModal({
           </button>
           <button
             type="button"
-            disabled={busy || reading || toCreate.length === 0}
-            onClick={() => void onConfirm(toCreate)}
+            disabled={busy || reading || actionableCount === 0}
+            onClick={() => void onConfirm(previewOrders)}
             className="rounded-xl bg-emerald-700 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:brightness-110 disabled:opacity-50"
           >
             {busy ? (
@@ -253,8 +281,12 @@ export function ImportCollectionOrdersHtmModal({
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Guardando…
               </span>
-            ) : toCreate.length === 0 && previewOrders.length > 0 ? (
-              "Todas ya existen"
+            ) : actionableCount === 0 && previewOrders.length > 0 ? (
+              "Sin cambios que aplicar"
+            ) : toCreate.length > 0 && toUpdate.length > 0 ? (
+              `Aplicar (${toCreate.length} nuevas · ${toUpdate.length} cambios)`
+            ) : toUpdate.length > 0 ? (
+              `Actualizar ${toUpdate.length} orden(es)`
             ) : (
               `Crear ${toCreate.length} orden(es)`
             )}

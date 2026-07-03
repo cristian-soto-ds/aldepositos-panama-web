@@ -1,7 +1,12 @@
 import ExcelJS from "exceljs";
 import type { Task } from "@/lib/types/task";
 import logoMark from "@/assets/brand/logo-aldepositos.png";
-import { computeReportData, reportModuleLabel } from "@/lib/reportTotals";
+import {
+  computeReportData,
+  reportModuleLabel,
+  reportPalletWeight,
+  reportRowPallet,
+} from "@/lib/reportTotals";
 import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
 
 const BRAND = "FF16263F";
@@ -137,6 +142,31 @@ function buildQuickHeaders(
   if (showWeight) headers.push("Peso (kg)");
   headers.push("L", "W", "H", "Reempaque", "Bulto Cont.", "Total CBM");
   return headers;
+}
+
+function buildPalletizedHeaders(): string[] {
+  return ["#", "Bultos", "L", "W", "H", "Reempaque", "Total CBM"];
+}
+
+function buildPalletizedRow(
+  row: Record<string, unknown>,
+  lineNum: number,
+): (string | number)[] {
+  const l = parseFloat(String(row.l ?? 0)) || 0;
+  const w = parseFloat(String(row.w ?? 0)) || 0;
+  const h = parseFloat(String(row.h ?? 0)) || 0;
+  const b = parseFloat(String(row.bultos ?? 0)) || 0;
+  const isReempaque = row.reempaque === true;
+  const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+  return [
+    lineNum,
+    isReempaque ? "—" : b,
+    isReempaque ? "—" : l,
+    isReempaque ? "—" : w,
+    isReempaque ? "—" : h,
+    isReempaque ? "SI" : "-",
+    isReempaque ? "—" : Number(rowCbm.toFixed(2)),
+  ];
 }
 
 function buildDetailedHeaders(): string[] {
@@ -279,12 +309,20 @@ function addReportSheet(
   currentDate: string,
   logoId: number | null,
 ): void {
-  const { measureRows, isDetailed, showWeightColumn, showReferenceColumn, totals } =
-    computeReportData(task);
+  const {
+    measureRows,
+    isDetailed,
+    isPalletized,
+    showWeightColumn,
+    showReferenceColumn,
+    totals,
+  } = computeReportData(task);
 
   const headers = isDetailed
     ? buildDetailedHeaders()
-    : buildQuickHeaders(showReferenceColumn, showWeightColumn);
+    : isPalletized
+      ? buildPalletizedHeaders()
+      : buildQuickHeaders(showReferenceColumn, showWeightColumn);
   const colCount = headers.length;
 
   const ws = wb.addWorksheet(safeSheetName(task.ra), {
@@ -511,10 +549,59 @@ function addReportSheet(
   ws.getRow(row).height = 24;
   row += 1;
 
+  const PALLET_HEADER_BG = "FFEEF2FF";
+  const PALLET_HEADER_TEXT = "FF3730A3";
+  const REEMPAQUE_BG = "FFF5F3FF";
+
+  let lastPallet: number | null = null;
+  let palletLineNum = 0;
+
   measureRows.forEach((measureRow, idx) => {
+    if (isPalletized) {
+      const pnum = reportRowPallet(measureRow);
+      if (pnum !== lastPallet) {
+        lastPallet = pnum;
+        palletLineNum = 0;
+        const pWeight = reportPalletWeight(measureRows, pnum);
+        safeMergeCells(ws, row, 1, row, colCount);
+        const pCell = ws.getCell(row, 1);
+        pCell.value = {
+          richText: [
+            {
+              font: { name: FONT, size: 10, bold: true, color: { argb: PALLET_HEADER_TEXT } },
+              text: `PALETA ${pnum}`,
+            },
+            {
+              font: { name: FONT, size: 9, color: { argb: MUTED } },
+              text: `     ·     Peso paleta: `,
+            },
+            {
+              font: { name: FONT, size: 10, bold: true, color: { argb: PALLET_HEADER_TEXT } },
+              text: `${pWeight.toFixed(2)} kg`,
+            },
+          ],
+        };
+        pCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+        pCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: PALLET_HEADER_BG },
+        };
+        pCell.border = thinBorder();
+        ws.getRow(row).height = 22;
+        row += 1;
+      }
+      palletLineNum += 1;
+    }
+
+    const isReempaque = measureRow.reempaque === true;
     const values = isDetailed
       ? buildDetailedRow(measureRow, idx)
-      : buildQuickRow(measureRow, idx, showReferenceColumn, showWeightColumn);
+      : isPalletized
+        ? buildPalletizedRow(measureRow, palletLineNum)
+        : buildQuickRow(measureRow, idx, showReferenceColumn, showWeightColumn);
+
+    const rowBg = isReempaque ? REEMPAQUE_BG : idx % 2 === 0 ? WHITE : ROW_ALT;
 
     values.forEach((val, ci) => {
       const cell = ws.getCell(row, ci + 1);
@@ -536,7 +623,7 @@ function addReportSheet(
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: idx % 2 === 0 ? WHITE : ROW_ALT },
+        fgColor: { argb: rowBg },
       };
       cell.border = thinBorder();
     });

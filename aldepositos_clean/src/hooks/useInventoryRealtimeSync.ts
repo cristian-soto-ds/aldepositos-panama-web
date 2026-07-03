@@ -26,6 +26,10 @@ type InventoryRealtimeSyncOptions<TRow> = {
   getLiveTaskMeta: (rows: TRow[]) => { currentBultos: number; status: string };
   userKey?: string | null;
   onTaskRemoved?: () => void;
+  /** Modo de captura local a difundir en vivo (con/sin refs o paletizado). */
+  liveReferenceMode?: string;
+  /** Se invoca cuando llega un modo de captura remoto distinto (otra vista/dispositivo). */
+  onRemoteReferenceMode?: (mode: string) => void;
 };
 
 /**
@@ -48,6 +52,8 @@ export function useInventoryRealtimeSync<TRow>({
   getLiveTaskMeta,
   userKey,
   onTaskRemoved,
+  liveReferenceMode,
+  onRemoteReferenceMode,
 }: InventoryRealtimeSyncOptions<TRow>) {
   const [remoteUpdatePending, setRemoteUpdatePending] = useState(false);
   const lastRemoteMeasureHashRef = useRef("");
@@ -136,6 +142,16 @@ export function useInventoryRealtimeSync<TRow>({
         return;
       }
 
+      // Sincroniza el modo de captura (con/sin refs o paletizado) ANTES de aplicar
+      // las filas, para que la transformación remota use el modo correcto.
+      if (
+        typeof update.referenceMode === "string" &&
+        update.referenceMode &&
+        onRemoteReferenceMode
+      ) {
+        onRemoteReferenceMode(update.referenceMode);
+      }
+
       applyRemote(remote, true);
     },
     [
@@ -145,6 +161,7 @@ export function useInventoryRealtimeSync<TRow>({
       lastSavedHashRef,
       latestRowsRef,
       latestTaskRef,
+      onRemoteReferenceMode,
       selectedTask,
     ],
   );
@@ -243,8 +260,17 @@ export function useInventoryRealtimeSync<TRow>({
       measureData: measureRows as unknown[],
       currentBultos: meta.currentBultos,
       status: meta.status,
+      referenceMode: liveReferenceMode,
     });
-  }, [measureRows, selectedId, userKey, buildHash, getLiveTaskMeta, lastSavedHashRef]);
+  }, [
+    measureRows,
+    selectedId,
+    userKey,
+    buildHash,
+    getLiveTaskMeta,
+    lastSavedHashRef,
+    liveReferenceMode,
+  ]);
 
   return {
     remoteUpdatePending,

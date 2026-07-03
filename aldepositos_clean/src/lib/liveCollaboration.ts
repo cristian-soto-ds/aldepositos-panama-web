@@ -19,6 +19,8 @@ export type TaskLiveUpdate = {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  /** Modo de captura activo (con/sin refs o paletizado) para sincronizarlo entre vistas/dispositivos. */
+  referenceMode?: string;
   seq: number;
   at: number;
 };
@@ -93,6 +95,7 @@ export function scheduleTaskLivePublish(params: {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  referenceMode?: string;
 }) {
   const key = `task:${params.taskId}`;
   schedulePublish(key, () => {
@@ -106,6 +109,7 @@ async function publishTaskLiveUpdate(params: {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  referenceMode?: string;
 }) {
   await ensureChannel();
   if (!channel) return;
@@ -118,6 +122,7 @@ async function publishTaskLiveUpdate(params: {
     measureData: JSON.parse(JSON.stringify(params.measureData)),
     currentBultos: params.currentBultos,
     status: params.status,
+    referenceMode: params.referenceMode,
     seq: nextSeq(`${tabId}:task:${params.taskId}`),
     at: Date.now(),
   };

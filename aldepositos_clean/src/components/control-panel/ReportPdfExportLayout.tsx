@@ -5,11 +5,15 @@
  * Estilos inline (hex/rgb) para html2canvas estable — sin Tailwind.
  */
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { Task } from "@/lib/types/task";
 import logoMark from "@/assets/brand/logo-aldepositos.png";
 import { PDF_EXPORT_WIDTH_PX } from "./reportsPdfExport";
-import { computeReportData } from "@/lib/reportTotals";
+import {
+  computeReportData,
+  reportPalletWeight,
+  reportRowPallet,
+} from "@/lib/reportTotals";
 
 const BRAND = "#16263F";
 const TEXT = "#1e293b";
@@ -50,8 +54,16 @@ export function ReportPdfExportLayout({
   currentDate,
   compact = false,
 }: Props) {
-  const { measureRows, isDetailed, showWeightColumn, showReferenceColumn, totals } =
-    computeTotals(task);
+  const {
+    measureRows,
+    isDetailed,
+    isPalletized,
+    showWeightColumn,
+    showReferenceColumn,
+    totals,
+  } = computeTotals(task);
+  // En paletizado la referencia es consecutiva; se muestra el # de línea por paleta.
+  const showRefCol = showReferenceColumn && !isPalletized;
 
   const padX = compact ? 14 : 44;
   const padY = compact ? 12 : 40;
@@ -201,7 +213,7 @@ export function ReportPdfExportLayout({
           >
             Reporte de ingreso
             <br />
-            {isDetailed ? "detallado" : "rápido"}
+            {isDetailed ? "detallado" : isPalletized ? "rápido · paletizado" : "rápido"}
             {rowPages.length > 1 ? ` · pág ${pageIndex + 1}/${rowPages.length}` : ""}
           </div>
           <div
@@ -617,6 +629,158 @@ export function ReportPdfExportLayout({
             })}
           </tbody>
         </table>
+      ) : isPalletized ? (
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: compact ? 9 : 10,
+            marginBottom: 18,
+            border: `1px solid ${BORDER}`,
+          }}
+        >
+          <thead>
+            <tr>
+              <th style={thBase}>#</th>
+              <th style={thBase}>Bultos</th>
+              <th style={thBase}>L</th>
+              <th style={thBase}>W</th>
+              <th style={thBase}>H</th>
+              <th style={thBase}>Reempaque</th>
+              <th style={{ ...thBase, backgroundColor: ACCENT }}>Total CBM</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(() => {
+              const cells: ReactNode[] = [];
+              let lastPallet: number | null = null;
+              let palletRowNum = 0;
+              pageRows.forEach((row, idx) => {
+                const pnum = reportRowPallet(row);
+                if (pnum !== lastPallet) {
+                  lastPallet = pnum;
+                  palletRowNum = 0;
+                  const pWeight = reportPalletWeight(measureRows, pnum);
+                  cells.push(
+                    <tr key={`pallet-${pnum}-${idx}`}>
+                      <td
+                        colSpan={7}
+                        style={{
+                          border: `1px solid ${BORDER}`,
+                          padding: compact ? "5px 8px" : "7px 10px",
+                          backgroundColor: "#eef2ff",
+                          color: "#3730a3",
+                          fontWeight: 900,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          fontSize: compact ? 9 : 10,
+                        }}
+                      >
+                        Paleta {pnum}
+                        <span style={{ fontWeight: 700, color: MUTED }}>
+                          {"   ·   Peso paleta: "}
+                        </span>
+                        <span style={{ fontWeight: 900, color: "#3730a3" }}>
+                          {pWeight.toFixed(2)} kg
+                        </span>
+                      </td>
+                    </tr>,
+                  );
+                }
+                palletRowNum += 1;
+                const l = parseFloat(String(row.l ?? 0)) || 0;
+                const w = parseFloat(String(row.w ?? 0)) || 0;
+                const h = parseFloat(String(row.h ?? 0)) || 0;
+                const b = parseFloat(String(row.bultos ?? 0)) || 0;
+                const isReempaque = row.reempaque === true;
+                const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+                const bg = isReempaque
+                  ? "#f5f3ff"
+                  : palletRowNum % 2 === 0
+                    ? CELL_BG
+                    : "#ffffff";
+                const dash = (v: number) => (isReempaque ? "—" : String(v));
+                cells.push(
+                  <tr key={`row-${idx}`} style={{ backgroundColor: bg }}>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {palletRowNum}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isReempaque ? "—" : String(row.bultos ?? "")}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        color: MUTED,
+                      }}
+                    >
+                      {dash(l)}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        color: MUTED,
+                      }}
+                    >
+                      {dash(w)}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        color: MUTED,
+                      }}
+                    >
+                      {dash(h)}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        fontWeight: 800,
+                        color: isReempaque ? "#7c3aed" : MUTED,
+                      }}
+                    >
+                      {isReempaque ? "SÍ" : "—"}
+                    </td>
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        fontWeight: 800,
+                        color: "#1e40af",
+                      }}
+                    >
+                      {isReempaque ? "—" : rowCbm.toFixed(2)}
+                    </td>
+                  </tr>,
+                );
+              });
+              return cells;
+            })()}
+          </tbody>
+        </table>
       ) : (
         <table
           style={{
@@ -630,7 +794,7 @@ export function ReportPdfExportLayout({
           <thead>
             <tr>
               <th style={thBase}>#</th>
-              {showReferenceColumn && <th style={thBase}>Referencia</th>}
+              {showRefCol && <th style={thBase}>Referencia</th>}
               <th style={thBase}>Bultos</th>
               {showWeightColumn && <th style={thBase}>Peso (kg)</th>}
               <th style={thBase}>L</th>
@@ -649,7 +813,11 @@ export function ReportPdfExportLayout({
               const b = parseFloat(String(row.bultos ?? 0)) || 0;
               const isReempaque = row.reempaque === true;
               const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
-              const bg = idx % 2 === 0 ? "#ffffff" : CELL_BG;
+              const bg = isReempaque
+                ? "#f5f3ff"
+                : idx % 2 === 0
+                  ? "#ffffff"
+                  : CELL_BG;
               return (
                 <tr key={idx} style={{ backgroundColor: bg }}>
                   <td
@@ -662,7 +830,7 @@ export function ReportPdfExportLayout({
                   >
                     {pageIndex * rowsPerPage + idx + 1}
                   </td>
-                  {showReferenceColumn && (
+                  {showRefCol && (
                     <td style={{ border: `1px solid ${BORDER}`, padding: compact ? 6 : 8 }}>
                       {String(row.referencia || "-")}
                     </td>
@@ -685,7 +853,7 @@ export function ReportPdfExportLayout({
                         textAlign: "center",
                       }}
                     >
-                      {row.weight != null ? String(row.weight) : "-"}
+                      {isReempaque ? "—" : row.weight != null ? String(row.weight) : "-"}
                     </td>
                   )}
                   <td
@@ -696,7 +864,7 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {String(row.l ?? 0)}
+                    {isReempaque ? "—" : String(row.l ?? 0)}
                   </td>
                   <td
                     style={{
@@ -706,7 +874,7 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {String(row.w ?? 0)}
+                    {isReempaque ? "—" : String(row.w ?? 0)}
                   </td>
                   <td
                     style={{
@@ -716,16 +884,18 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {String(row.h ?? 0)}
+                    {isReempaque ? "—" : String(row.h ?? 0)}
                   </td>
                   <td
                     style={{
                       border: `1px solid ${BORDER}`,
                       padding: compact ? 6 : 8,
                       textAlign: "center",
+                      fontWeight: isReempaque ? 800 : 400,
+                      color: isReempaque ? "#7c3aed" : MUTED,
                     }}
                   >
-                    {row.reempaque ? "SI" : "-"}
+                    {isReempaque ? "SÍ" : "—"}
                   </td>
                   <td
                     style={{

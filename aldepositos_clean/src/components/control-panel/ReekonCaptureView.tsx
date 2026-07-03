@@ -101,6 +101,11 @@ export function ReekonCaptureView({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Peso de paleta con borrador local: escribir es instantáneo y solo se confirma
+  // al salir del campo (evita el bloqueo al replicar el peso en todas las filas).
+  const [palletWeightDraft, setPalletWeightDraft] = useState("");
+  const palletWeightFocused = useRef(false);
+
   // Cuando saltamos de línea con la cinta, enfocamos el Largo de la nueva línea.
   const focusLargoOnNext = useRef(false);
 
@@ -116,6 +121,11 @@ export function ReekonCaptureView({
     ? cubicajeM3FromDims(activeRow.l, activeRow.w, activeRow.h, activeRow.bultos, activeRow.reempaque)
     : 0;
   const rowComplete = activeRow ? isQuickRowComplete(activeRow) : false;
+
+  const activePalletWeight = String(activeRow?.palletWeight ?? "");
+  useEffect(() => {
+    if (!palletWeightFocused.current) setPalletWeightDraft(activePalletWeight);
+  }, [activePalletWeight, activeId]);
 
   useEffect(() => {
     document.documentElement.classList.add("reekon-immersive-active");
@@ -458,18 +468,19 @@ export function ReekonCaptureView({
                       type="text"
                       inputMode="decimal"
                       className="reekon-input reekon-input-immersive w-full text-center"
-                      value={String(activeRow.palletWeight ?? "")}
+                      value={palletWeightDraft}
                       placeholder="0.00"
-                      onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) =>
-                        onSetPalletWeight(palletOf(activeRow), e.target.value)
-                      }
-                      onBlur={(e) =>
-                        onSetPalletWeight(
-                          palletOf(activeRow),
-                          normalizeMeasureField(e.target.value),
-                        )
-                      }
+                      onFocus={(e) => {
+                        palletWeightFocused.current = true;
+                        e.currentTarget.select();
+                      }}
+                      onChange={(e) => setPalletWeightDraft(e.target.value)}
+                      onBlur={() => {
+                        palletWeightFocused.current = false;
+                        const norm = normalizeMeasureField(palletWeightDraft);
+                        setPalletWeightDraft(norm);
+                        onSetPalletWeight(palletOf(activeRow), norm);
+                      }}
                     />
                   ) : (
                     <input

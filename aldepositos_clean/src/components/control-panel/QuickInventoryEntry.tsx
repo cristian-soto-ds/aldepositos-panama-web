@@ -122,6 +122,62 @@ type MeasureRow = {
   palletWeight?: string | number;
 };
 
+/**
+ * Quita los campos propios del modo paletizado (pallet / palletWeight) al salir de
+ * ese modo, de forma que el contenido de las filas refleje siempre el modo activo.
+ * Conserva la identidad del objeto si la fila no tenía datos de paleta.
+ */
+function stripPalletFields<T extends MeasureRow>(rows: T[]): T[] {
+  return rows.map((r) => {
+    if (r.pallet === undefined && r.palletWeight === undefined) return r;
+    const { pallet: _pallet, palletWeight: _palletWeight, ...rest } = r;
+    return rest as T;
+  });
+}
+
+/**
+ * Campo de peso de paleta con borrador local: escribir es instantáneo (sin tocar
+ * el estado global por tecla) y solo se confirma al salir del campo. Evita el
+ * "se borra y reescribe" y el bloqueo al replicar el peso en todas las filas.
+ */
+const PalletWeightInput = React.memo(function PalletWeightInput({
+  palletNum,
+  value,
+  onCommit,
+}: {
+  palletNum: number;
+  value: string;
+  onCommit: (palletNum: number, value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
+      onChange={(ev) => setDraft(sanitizeMeasureTyping(ev.target.value))}
+      onBlur={() => {
+        focusedRef.current = false;
+        const norm = normalizeMeasureField(draft);
+        setDraft(norm);
+        onCommit(palletNum, norm);
+      }}
+      className="no-spinners w-20 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-center text-xs font-bold tabular-nums text-indigo-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-200"
+      placeholder="kg"
+      title={`Peso total de la Paleta ${palletNum} (kg)`}
+    />
+  );
+});
+
 type WeightMode = "no_weight" | "per_bundle" | "by_reference" | "excel_fixed";
 type AutosaveState = "idle" | "saving" | "saved" | "error";
 
@@ -551,20 +607,42 @@ export function QuickInventoryEntry({
   const [aiExtractError, setAiExtractError] = useState<string | null>(null);
   const aiFileRef = useRef<HTMLInputElement>(null);
   const sourceReferencesRef = useRef<Record<string, string>>({});
+  // Espejo del modo de captura para leerlo de forma síncrona (p. ej. al aplicar
+  // un modo que acaba de llegar por el canal en vivo, antes del re-render).
+  const referenceModeRef = useRef<ReferenceCaptureMode>(referenceMode);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
   const catalogSeqRef = useRef<Record<string, number>>({});
   const onLocalSaveCompletedRef = useRef<() => void>(() => {});
+  // IDs de filas eliminadas localmente que aún podrían venir en un eco atrasado
+  // de la BD/en vivo. Se filtran de cualquier estado remoto entrante hasta que la
+  // BD confirme la eliminación (deja de traerlas). Evita que una fila borrada
+  // "reaparezca" y entre en bucle de borrado.
+  const pendingDeletionIdsRef = useRef<Set<string>>(new Set());
 
   const prepareRowsFromRemote = useCallback(
     (remote: Task): MeasureRow[] => {
-      const taskRows =
+      let taskRows =
         remote.measureData && remote.measureData.length > 0
           ? stripQuickRowsForPersist(
               JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[],
             )
           : [createEmptyMeasureRow()];
+      // Autoridad local sobre eliminaciones: si el estado remoto todavía trae una
+      // fila que acabamos de borrar (eco atrasado), la quitamos. Cuando la BD ya no
+      // la incluye, damos la eliminación por confirmada y limpiamos el guard.
+      const pendingDel = pendingDeletionIdsRef.current;
+      if (pendingDel.size > 0) {
+        const remoteIds = new Set(taskRows.map((r) => r.id));
+        for (const id of Array.from(pendingDel)) {
+          if (!remoteIds.has(id)) pendingDel.delete(id);
+        }
+        if (pendingDel.size > 0) {
+          taskRows = taskRows.filter((r) => !pendingDel.has(r.id));
+          if (taskRows.length === 0) taskRows = [createEmptyMeasureRow()];
+        }
+      }
       const incomingSnapshot = taskHasImportedReferences(taskRows)
         ? buildSourceReferenceSnapshot(taskRows, taskRows)
         : buildReferenceSnapshot(taskRows);
@@ -574,18 +652,34 @@ export function QuickInventoryEntry({
           incomingSnapshot,
         );
       }
-      if (referenceMode === "palletized") {
+      // Usa el modo más reciente (ref) para que un cambio de modo recién recibido
+      // por el canal en vivo transforme correctamente las filas entrantes.
+      let mode = referenceModeRef.current;
+      // Señal inequívoca: si las filas remotas ya traen paleta, el pedido es
+      // paletizado. Autocorrige el modo aunque no llegue el aviso en vivo (BD).
+      const rawIsPalletized = taskRows.some((r) => Number(r.pallet) >= 1);
+      if (rawIsPalletized && mode !== "palletized") {
+        mode = "palletized";
+        referenceModeRef.current = "palletized";
+        setReferenceMode("palletized");
+      }
+      if (mode === "palletized") {
         return ensurePalletNumbers(applyConsecutiveReferences(taskRows));
       }
-      if (referenceMode === "without") {
-        return applyConsecutiveReferences(taskRows);
+      if (mode === "without") {
+        return applyConsecutiveReferences(stripPalletFields(taskRows));
       }
-      return restoreSourceReferences(taskRows, sourceReferencesRef.current);
+      return restoreSourceReferences(
+        stripPalletFields(taskRows),
+        sourceReferencesRef.current,
+      );
     },
-    [referenceMode],
+    [],
   );
 
   useEffect(() => {
+    // Al cambiar de RA, descarta eliminaciones pendientes de la tarea anterior.
+    pendingDeletionIdsRef.current.clear();
     if (!selectedTask) return;
     setMeasureRows((prev) => {
       const next = stripQuickRowsForPersist(prev);
@@ -644,6 +738,13 @@ export function QuickInventoryEntry({
     prepareRowsFromRemote,
     getLiveTaskMeta,
     userKey: presenceUserKey,
+    liveReferenceMode: referenceMode,
+    onRemoteReferenceMode: (mode) => {
+      if (isReferenceCaptureMode(mode) && mode !== referenceModeRef.current) {
+        referenceModeRef.current = mode;
+        setReferenceMode(mode);
+      }
+    },
     onTaskRemoved: () => {
       setSelectedTask(null);
       activeTaskIdRef.current = null;
@@ -655,6 +756,10 @@ export function QuickInventoryEntry({
   });
 
   onLocalSaveCompletedRef.current = onLocalSaveCompleted;
+
+  useEffect(() => {
+    referenceModeRef.current = referenceMode;
+  }, [referenceMode]);
 
   useEffect(() => {
     const debRef = catalogDebounceRef;
@@ -897,7 +1002,10 @@ export function QuickInventoryEntry({
     if (mode === referenceMode) return;
     if (mode === "with") {
       setMeasureRows((prev) =>
-        restoreSourceReferences(prev, sourceReferencesRef.current),
+        restoreSourceReferences(
+          stripPalletFields(prev),
+          sourceReferencesRef.current,
+        ),
       );
     } else if (mode === "palletized") {
       sourceReferencesRef.current = captureSourceReferencesFromRows(
@@ -912,8 +1020,10 @@ export function QuickInventoryEntry({
         measureRows,
         sourceReferencesRef.current,
       );
-      setMeasureRows((prev) => applyConsecutiveReferences(prev));
+      setMeasureRows((prev) => applyConsecutiveReferences(stripPalletFields(prev)));
     }
+    // Espejo síncrono para prepareRowsFromRemote y la difusión en vivo.
+    referenceModeRef.current = mode;
     setReferenceMode(mode);
   };
 
@@ -1062,15 +1172,17 @@ export function QuickInventoryEntry({
   };
 
   /** Paletizado: fija el peso total de una paleta (se replica en todas sus filas). */
-  const setPalletWeight = (palletNum: number, value: string) => {
+  const setPalletWeight = useCallback((palletNum: number, value: string) => {
     setMeasureRows((prev) =>
-      prev.map((r) =>
-        Math.max(1, Number(r.pallet) || 1) === palletNum
-          ? { ...r, palletWeight: value }
-          : r,
-      ),
+      prev.map((r) => {
+        if (Math.max(1, Number(r.pallet) || 1) !== palletNum) return r;
+        // Conserva la identidad si el valor no cambia (evita repintar la fila).
+        return String(r.palletWeight ?? "") === value
+          ? r
+          : { ...r, palletWeight: value };
+      }),
     );
-  };
+  }, []);
 
   /** Paletizado: añade una fila dentro de una paleta concreta (la inserta al final de su grupo). */
   const addRowToPallet = (palletNum: number) => {
@@ -1138,6 +1250,8 @@ export function QuickInventoryEntry({
         delete catalogDebounceRef.current[r.id];
       }
       delete sourceReferencesRef.current[r.id];
+      // Marca cada fila de la paleta como eliminada (guard anti-reaparición).
+      pendingDeletionIdsRef.current.add(r.id);
     }
     setMeasureRows((prev) => {
       const remaining = prev.filter(
@@ -1167,6 +1281,8 @@ export function QuickInventoryEntry({
       delete sourceReferencesRef.current[idToRemove];
       setMeasureRows((prev) => {
         if (prev.length <= 1) return prev;
+        // Marca la fila como eliminada para que un eco remoto no la reinserte.
+        pendingDeletionIdsRef.current.add(idToRemove);
         const next = prev.filter((r) => r.id !== idToRemove);
         return referenceMode !== "with"
           ? renumberConsecutiveReferences(next)
@@ -2159,25 +2275,10 @@ export function QuickInventoryEntry({
                               <label className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
                                 Peso paleta
                               </label>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                value={row.palletWeight ?? ""}
-                                onChange={(ev) =>
-                                  setPalletWeight(
-                                    rowPallet,
-                                    sanitizeMeasureTyping(ev.target.value),
-                                  )
-                                }
-                                onBlur={(ev) =>
-                                  setPalletWeight(
-                                    rowPallet,
-                                    normalizeMeasureField(ev.target.value),
-                                  )
-                                }
-                                className="no-spinners w-20 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-center text-xs font-bold tabular-nums text-indigo-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-200"
-                                placeholder="kg"
-                                title={`Peso total de la Paleta ${rowPallet} (kg)`}
+                              <PalletWeightInput
+                                palletNum={rowPallet}
+                                value={String(row.palletWeight ?? "")}
+                                onCommit={setPalletWeight}
                               />
                               <span className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400">
                                 kg

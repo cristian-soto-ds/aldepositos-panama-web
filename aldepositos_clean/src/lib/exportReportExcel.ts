@@ -8,7 +8,7 @@ import {
   reportRowPallet,
 } from "@/lib/reportTotals";
 import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
-import { cubicajeM3FromDims } from "@/lib/measureDecimals";
+import { cubicajeM3FromDims, roundUpMeasure } from "@/lib/measureDecimals";
 
 const BRAND = "FF16263F";
 const BRAND_LIGHT = "FF1E3A5F";
@@ -140,8 +140,8 @@ function buildQuickHeaders(
   const headers = ["#"];
   if (showReference) headers.push("Referencia");
   headers.push("Bultos");
-  if (showWeight) headers.push("Peso (kg)");
-  headers.push("L", "W", "H", "Reempaque", "Bulto Cont.", "Total CBM");
+  if (showWeight) headers.push("Peso/B (kg)", "P. Total (kg)");
+  headers.push("L", "W", "H", "Reempaque", "CBM/B", "Total CBM");
   return headers;
 }
 
@@ -181,7 +181,6 @@ function buildDetailedHeaders(): string[] {
     "P/B (kg)",
     "P. Total (kg)",
     "Reemp.",
-    "Bulto Cont.",
     "L",
     "W",
     "H",
@@ -202,6 +201,9 @@ function buildQuickRow(
   const b = parseFloat(String(row.bultos ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
   const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+  const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
+  const rowWeight = parseFloat(String(row.weight ?? 0)) || 0;
+  const pesoTotal = roundUpMeasure(b * rowWeight);
 
   const values: (string | number)[] = [idx + 1];
   if (showReference) values.push(String(row.referencia || "-"));
@@ -210,8 +212,9 @@ function buildQuickRow(
     values.push(
       row.weight != null ? parseFloat(String(row.weight)) || 0 : "-",
     );
+    values.push(isReempaque || pesoTotal <= 0 ? "-" : pesoTotal);
   }
-  values.push(l, w, h, row.reempaque ? "SI" : "-", String(row.bultoContenedor || "-"));
+  values.push(l, w, h, row.reempaque ? "SI" : "-", isReempaque ? "-" : cbmPorBulto);
   values.push(rowCbm);
   return values;
 }
@@ -240,7 +243,6 @@ function buildDetailedRow(
     Number(pesoPorBulto.toFixed(2)),
     Number((bultos * pesoPorBulto).toFixed(2)),
     row.reempaque ? "SI" : "-",
-    String(row.bultoContenedor || "-"),
     l,
     w,
     h,

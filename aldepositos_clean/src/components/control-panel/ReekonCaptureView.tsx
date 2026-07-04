@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -23,7 +23,13 @@ import {
   type AutosaveState,
   type SyncStatus,
 } from "@/components/control-panel/SyncStatusBadge";
-import { cubicajeM3FromDims, formatCubicaje2, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
+import {
+  cubicajeM3FromDims,
+  formatCubicaje2,
+  formatMeasure2,
+  normalizeMeasureField,
+  sanitizeMeasureTyping,
+} from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
 type DimField = "l" | "w" | "h";
 
@@ -76,6 +82,80 @@ function palletOf(row: QuickMeasureRow): number {
 function strVal(v: string | number | undefined): string {
   return String(v ?? "").trim();
 }
+
+/**
+ * Campo numérico (peso o dimensión) con BORRADOR LOCAL: lo tecleado vive en un
+ * estado propio y no se escribe al estado global en cada tecla. Solo se sincroniza
+ * desde `value` cuando el campo NO tiene foco, y se confirma (normalizado) al salir
+ * del campo. Así el guardado/normalización que da la vuelta por la sincronización
+ * no pisa lo que el inventariador está escribiendo (ej. "21.32" ya no se auto-
+ * completa a "21.00" al hacer una pausa buscando el punto).
+ *
+ * Para dimensiones (cinta REEKON): al pulsar Enter se confirma el borrador ANTES
+ * de avanzar de campo/línea, para no perder la última medida (el Alto).
+ */
+const ReekonMeasureInput = memo(function ReekonMeasureInput({
+  rowId,
+  field,
+  value,
+  onCommit,
+  isDimension = false,
+  onTapeKeyDown,
+}: {
+  rowId: string;
+  field: "weight" | DimField;
+  value: string;
+  onCommit: (rowId: string, field: "weight" | DimField, value: string) => void;
+  isDimension?: boolean;
+  onTapeKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+
+  const commit = (raw: string) => {
+    const norm = normalizeMeasureField(raw);
+    setDraft(norm);
+    onCommit(rowId, field, norm);
+  };
+
+  const filled = Boolean(draft.trim());
+
+  return (
+    <input
+      type="text"
+      inputMode={isDimension ? "none" : "decimal"}
+      {...(isDimension ? { "data-reekon-field": field } : {})}
+      className={`reekon-input reekon-input-immersive w-full text-center ${
+        isDimension && filled ? "reekon-input-filled" : ""
+      }`}
+      value={draft}
+      placeholder="0.00"
+      onFocus={(e) => {
+        focusedRef.current = true;
+        e.currentTarget.select();
+      }}
+      onChange={(e) => setDraft(sanitizeMeasureTyping(e.target.value))}
+      onBlur={() => {
+        focusedRef.current = false;
+        commit(draft);
+      }}
+      onKeyDown={
+        isDimension && onTapeKeyDown
+          ? (e) => {
+              // La cinta confirma con Enter: guarda el borrador ANTES de avanzar
+              // (así el Alto se confirma aunque el input se desmonte al saltar línea).
+              if (e.key === "Enter") commit(draft);
+              onTapeKeyDown(e);
+            }
+          : undefined
+      }
+    />
+  );
+});
 
 export function ReekonCaptureView({
   measureRows,
@@ -261,18 +341,6 @@ export function ReekonCaptureView({
     const nextId = measureRows[idx + 1]?.id ?? measureRows[idx - 1]?.id;
     onDeleteRow(activeId);
     if (nextId) onActiveRowChange(nextId);
-  };
-
-  const handleMeasureBlur = (field: DimField) => {
-    if (!activeId || !activeRow) return;
-    const normalized = normalizeMeasureField(activeRow[field]);
-    if (normalized !== activeRow[field]) onUpdateRow(activeId, field, normalized);
-  };
-
-  const handleWeightBlur = () => {
-    if (!activeId || !activeRow) return;
-    const normalized = normalizeMeasureField(activeRow.weight);
-    if (normalized !== activeRow.weight) onUpdateRow(activeId, "weight", normalized);
   };
 
   // Al terminar el Alto con la cinta: salta a la siguiente línea y enfoca su Largo.
@@ -532,15 +600,11 @@ export function ReekonCaptureView({
                       }}
                     />
                   ) : (
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="reekon-input reekon-input-immersive w-full text-center"
+                    <ReekonMeasureInput
+                      rowId={activeId}
+                      field="weight"
                       value={String(activeRow.weight ?? "")}
-                      placeholder="0.00"
-                      onFocus={(e) => e.currentTarget.select()}
-                      onChange={(e) => onUpdateRow(activeId, "weight", e.target.value)}
-                      onBlur={handleWeightBlur}
+                      onCommit={onUpdateRow}
                     />
                   )}
                 </div>
@@ -551,30 +615,23 @@ export function ReekonCaptureView({
                   Medidas con la cinta (Largo → Ancho → Alto)
                 </label>
                 <div className="reekon-measure-grid">
-                  {DIM_ORDER.map((dim) => {
-                    const filled = Boolean(strVal(activeRow[dim]));
-                    return (
-                      <div key={dim} className="reekon-measure-cell">
-                        <span className="mb-1 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          {DIM_LABELS[dim]}
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="none"
-                          data-reekon-field={dim}
-                          className={`reekon-input reekon-input-immersive w-full text-center ${filled ? "reekon-input-filled" : ""}`}
-                          value={String(activeRow[dim] ?? "")}
-                          placeholder="0.00"
-                          onFocus={(e) => e.currentTarget.select()}
-                          onChange={(e) => onUpdateRow(activeId, dim, e.target.value)}
-                          onBlur={() => handleMeasureBlur(dim)}
-                          onKeyDown={(e) =>
-                            handleDimensionKeyDown(e, dim, formRef.current, finishMeasuresAndAdvance)
-                          }
-                        />
-                      </div>
-                    );
-                  })}
+                  {DIM_ORDER.map((dim) => (
+                    <div key={dim} className="reekon-measure-cell">
+                      <span className="mb-1 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {DIM_LABELS[dim]}
+                      </span>
+                      <ReekonMeasureInput
+                        rowId={activeId}
+                        field={dim}
+                        value={String(activeRow[dim] ?? "")}
+                        onCommit={onUpdateRow}
+                        isDimension
+                        onTapeKeyDown={(e) =>
+                          handleDimensionKeyDown(e, dim, formRef.current, finishMeasuresAndAdvance)
+                        }
+                      />
+                    </div>
+                  ))}
                 </div>
                 <p className="mt-1.5 text-center text-[11px] text-slate-400">
                   Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea.

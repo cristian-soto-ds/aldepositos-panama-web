@@ -373,16 +373,17 @@ export default function PanelPage() {
   };
 
   const handleUpdateTask = async (updatedTask: Task) => {
+    // Actualización optimista: no se revierte ante un fallo puntual de red.
     setTasks((prev) =>
       prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
     );
     try {
       await updateTask(updatedTask);
     } catch (e) {
+      // No recargamos (evita pisar lo capturado con datos viejos del servidor).
+      // Propagamos el error para que el autoguardado programe un reintento.
       console.error(e);
-      // eslint-disable-next-line no-alert
-      alert("No se pudo guardar el cambio en Supabase.");
-      void reloadTasks();
+      throw e;
     }
   };
 
@@ -429,7 +430,13 @@ export default function PanelPage() {
       type: newType,
       measureData: adaptedMeasureData as unknown[],
     };
-    await handleUpdateTask(updated);
+    try {
+      await handleUpdateTask(updated);
+    } catch (e) {
+      console.error(e);
+      // eslint-disable-next-line no-alert
+      alert("No se pudo transferir la orden en Supabase.");
+    }
   };
 
   const openManualModal = useCallback(

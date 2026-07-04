@@ -328,9 +328,15 @@ export function DispatchEntry({
     const taskObj = availableTasks.find((t) => t.id === id);
     if (taskObj) {
       const isNowLoaded = !loadedIds.includes(id);
-      onUpdateTask({
-        ...taskObj,
-        containerDraft: isNowLoaded,
+      void Promise.resolve(
+        onUpdateTask({
+          ...taskObj,
+          containerDraft: isNowLoaded,
+        }),
+      ).catch((e) => {
+        console.error(e);
+        // eslint-disable-next-line no-alert
+        alert("No se pudo guardar el cambio en Supabase.");
       });
     }
   };
@@ -368,12 +374,18 @@ export function DispatchEntry({
     const today = new Date().toISOString().split("T")[0]!;
 
     loadedTasks.forEach((t) => {
-      onUpdateTask({
-        ...t,
-        dispatched: true,
-        containerDraft: false,
-        dispatchInfo: finalInfo,
-        date: t.date || today,
+      void Promise.resolve(
+        onUpdateTask({
+          ...t,
+          dispatched: true,
+          containerDraft: false,
+          dispatchInfo: finalInfo,
+          date: t.date || today,
+        }),
+      ).catch((e) => {
+        console.error(e);
+        // eslint-disable-next-line no-alert
+        alert("No se pudo guardar el despacho en Supabase.");
       });
     });
 

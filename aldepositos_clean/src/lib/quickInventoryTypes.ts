@@ -218,6 +218,8 @@ export function renumberPallets<T extends QuickMeasureRow>(rows: T[]): T[] {
 
 export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   const referencia = String(row.referencia ?? "").trim();
+  // Reempaque: no lleva bulto/peso/medidas → se considera LISTA con solo la referencia.
+  if (row.reempaque === true) return referencia.length > 0;
   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
   const l = parseFloat(String(row.l ?? 0)) || 0;
   const w = parseFloat(String(row.w ?? 0)) || 0;

@@ -12,11 +12,17 @@ import {
   Maximize2,
   Minimize2,
   Plus,
+  Recycle,
   Save,
   Trash2,
 } from "lucide-react";
 import type { QuickMeasureRow, ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
 import { isQuickRowComplete } from "@/lib/quickInventoryTypes";
+import {
+  SyncStatusBadge,
+  type AutosaveState,
+  type SyncStatus,
+} from "@/components/control-panel/SyncStatusBadge";
 import { cubicajeM3FromDims, formatCubicaje2, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
 type DimField = "l" | "w" | "h";
@@ -48,8 +54,10 @@ type ReekonCaptureViewProps = {
   onBack: () => void;
   onSwitchToTable: () => void;
   onSave: () => void;
-  autosaveState: "idle" | "saving" | "saved" | "error";
+  autosaveState: AutosaveState;
   isSaving: boolean;
+  /** Estado de sincronización enriquecido (última sync, conexión, cola). */
+  syncStatus?: SyncStatus;
 };
 
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
@@ -95,6 +103,7 @@ export function ReekonCaptureView({
   onSave,
   autosaveState,
   isSaving,
+  syncStatus,
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
@@ -121,11 +130,25 @@ export function ReekonCaptureView({
     ? cubicajeM3FromDims(activeRow.l, activeRow.w, activeRow.h, activeRow.bultos, activeRow.reempaque)
     : 0;
   const rowComplete = activeRow ? isQuickRowComplete(activeRow) : false;
+  // Reempaque: referencia que no se mide (no lleva bultos/peso/medidas).
+  const isReempaque = activeRow?.reempaque === true;
 
   const activePalletWeight = String(activeRow?.palletWeight ?? "");
   useEffect(() => {
     if (!palletWeightFocused.current) setPalletWeightDraft(activePalletWeight);
   }, [activePalletWeight, activeId]);
+
+  // Mantiene la referencia activa siempre visible en el carrusel (orden de la tabla).
+  const refStripRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    const chips = refStripRef.current?.querySelectorAll<HTMLElement>("[data-ref-chip]");
+    chips?.[activeIndex]?.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest",
+    });
+  }, [activeIndex, activeId]);
 
   useEffect(() => {
     document.documentElement.classList.add("reekon-immersive-active");
@@ -327,10 +350,14 @@ export function ReekonCaptureView({
         </div>
       </div>
 
-      {/* Selector de líneas */}
-      <div className="reekon-ref-strip mx-auto w-full max-w-md shrink-0 border-b border-slate-100 dark:border-slate-800">
+      {/* Selector de líneas (en el mismo orden de la tabla) */}
+      <div
+        ref={refStripRef}
+        className="reekon-ref-strip mx-auto w-full max-w-md shrink-0 border-b border-slate-100 dark:border-slate-800"
+      >
         {measureRows.map((row, i) => {
           const done = isQuickRowComplete(row);
+          const reemp = row.reempaque === true;
           const isActive = row.id === activeId;
           let label: string;
           if (palletized) {
@@ -349,16 +376,26 @@ export function ReekonCaptureView({
             <button
               key={row.id}
               type="button"
+              data-ref-chip
               onClick={() => selectRow(row.id)}
               className={`reekon-ref-chip border ${
                 isActive
-                  ? "border-blue-500 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
-                  : done
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-                    : "border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  ? reemp
+                    ? "border-violet-500 bg-violet-100 text-violet-800 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-200"
+                    : "border-blue-500 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
+                  : reemp
+                    ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                    : done
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                      : "border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
               }`}
+              title={reemp ? "Reempaque (no se mide)" : undefined}
             >
-              {done ? <Check className="h-3 w-3 shrink-0" /> : null}
+              {reemp ? (
+                <Recycle className="h-3 w-3 shrink-0" />
+              ) : done ? (
+                <Check className="h-3 w-3 shrink-0" />
+              ) : null}
               <span className="max-w-[7rem] truncate">{label}</span>
             </button>
           );
@@ -443,6 +480,18 @@ export function ReekonCaptureView({
                 </div>
               ) : null}
 
+              {isReempaque ? (
+                <div className="flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-4 text-violet-800 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-200">
+                  <Recycle className="h-7 w-7 shrink-0" />
+                  <div>
+                    <p className="text-sm font-bold">Reempaque</p>
+                    <p className="text-xs text-violet-600 dark:text-violet-300">
+                      Esta referencia es un reempaque: no se captura bulto, peso ni medidas.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -545,6 +594,8 @@ export function ReekonCaptureView({
                   </span>
                 ) : null}
               </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -556,20 +607,27 @@ export function ReekonCaptureView({
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
             <span>Total {formatCubicaje2(totalCbm)} m³</span>
             <span>{formatMeasure2(totalWeight)} kg</span>
-            <span>
-              {autosaveState === "saving" ? (
-                <span className="inline-flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Guardando…
-                </span>
-              ) : autosaveState === "saved" ? (
-                "Guardado"
-              ) : autosaveState === "error" ? (
-                "Error al guardar"
-              ) : (
-                "Borrador"
-              )}
-            </span>
+            {syncStatus ? (
+              <SyncStatusBadge
+                status={syncStatus}
+                className="!px-2 !py-1 !text-[11px]"
+              />
+            ) : (
+              <span>
+                {autosaveState === "saving" ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Guardando…
+                  </span>
+                ) : autosaveState === "saved" ? (
+                  "Guardado"
+                ) : autosaveState === "error" ? (
+                  "Error al guardar"
+                ) : (
+                  "Borrador"
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-stretch gap-2.5">
             <button

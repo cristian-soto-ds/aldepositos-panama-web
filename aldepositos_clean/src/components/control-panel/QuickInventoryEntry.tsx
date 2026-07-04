@@ -9,8 +9,7 @@ import {
   Check,
   CheckCircle2,
   Circle,
-  Cloud,
-  CloudOff,
+  Clock,
   Edit,
   Download,
   LayoutGrid,
@@ -23,6 +22,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
+import {
+  SyncStatusBadge,
+  type AutosaveState,
+} from "@/components/control-panel/SyncStatusBadge";
 import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import { extractReferenciasBultosFromFile } from "@/lib/quickAiExtract";
@@ -86,6 +89,7 @@ import {
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
 import { formatRaFieldLabel, raClientGroupLabel } from "@/lib/collectionOrderToTask";
+import { formatRelativeTime } from "@/lib/relativeTime";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -181,7 +185,6 @@ const PalletWeightInput = React.memo(function PalletWeightInput({
 });
 
 type WeightMode = "no_weight" | "per_bundle" | "by_reference" | "excel_fixed";
-type AutosaveState = "idle" | "saving" | "saved" | "error";
 
 type QuickDraft = {
   updatedAt: number;
@@ -215,6 +218,8 @@ function createEmptyMeasureRow(): MeasureRow {
 }
 const CATALOG_DEBOUNCE_MS = 500;
 const QUICK_AUTOSAVE_MS = 200;
+// Reintentos con backoff cuando el guardado en el servidor falla (red caída, etc.).
+const AUTOSAVE_RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000];
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
 
 function CaptureLayoutToggle({
@@ -251,6 +256,27 @@ function CaptureLayoutToggle({
         Reekon
       </button>
     </div>
+  );
+}
+
+/** Etiqueta "hace X" con la última actualización de la RA (se refresca sola). */
+function LastUpdatedLabel({ at }: { at?: string }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!at) return;
+    const id = setInterval(() => tick((v) => v + 1), 30000);
+    return () => clearInterval(id);
+  }, [at]);
+  const rel = formatRelativeTime(at);
+  if (!rel) return null;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400 dark:text-slate-500"
+      title={`Última actualización ${rel}`}
+    >
+      <Clock className="h-3 w-3" />
+      {rel}
+    </span>
   );
 }
 
@@ -590,12 +616,26 @@ export function QuickInventoryEntry({
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [autosaveTick, setAutosaveTick] = useState(0);
+  // Momento del último guardado confirmado por el servidor (ms epoch).
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  // Cambios locales aún no confirmados en el servidor (para el indicador).
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryAttemptsRef = useRef(0);
   const isSavingRef = useRef(false);
   const queuedRef = useRef(false);
   const queuedHashRef = useRef<string>("");
   const lastSavedHashRef = useRef<string>("");
+  // Hash del último cambio pendiente de guardar (para poder hacer flush al salir).
+  const pendingAutosaveHashRef = useRef<string>("");
+  // Espejo de flushAutosave para poder invocarlo desde funciones/efectos definidos
+  // antes que él (p. ej. clearTask) sin problemas de orden de declaración.
+  const flushAutosaveRef = useRef<() => void>(() => {});
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
@@ -868,6 +908,11 @@ export function QuickInventoryEntry({
       setMeasureRows((prev) =>
         prev.map((r) => (r.id === rowId ? { ...r, [field]: normalized } : r)),
       );
+      // Al salir del campo, persiste de inmediato (tras aplicar el estado) en vez
+      // de esperar el debounce completo: reduce la ventana de pérdida de datos.
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => flushAutosaveRef.current(), 0);
+      }
     },
     [],
   );
@@ -974,6 +1019,9 @@ export function QuickInventoryEntry({
   };
 
   const clearTask = () => {
+    // Persiste de inmediato cualquier cambio pendiente antes de abandonar la RA,
+    // en vez de descartar el guardado debounced (evita perder la última medida).
+    flushAutosaveRef.current();
     setSelectedTask(null);
     activeTaskIdRef.current = null;
     if (autosaveTimerRef.current) {
@@ -1173,6 +1221,10 @@ export function QuickInventoryEntry({
           : { ...r, palletWeight: value };
       }),
     );
+    // El peso de paleta se confirma al salir del campo: persiste de inmediato.
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => flushAutosaveRef.current(), 0);
+    }
   }, []);
 
   /** Paletizado: añade una fila dentro de una paleta concreta (la inserta al final de su grupo). */
@@ -1400,6 +1452,34 @@ export function QuickInventoryEntry({
     );
   };
 
+  // Reintenta el guardado con backoff usando SIEMPRE el estado más reciente
+  // (evita sobrescribir datos nuevos con una versión vieja que había fallado).
+  const scheduleAutosaveRetry = () => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    const attempt = retryAttemptsRef.current;
+    const delay =
+      AUTOSAVE_RETRY_BACKOFF_MS[
+        Math.min(attempt, AUTOSAVE_RETRY_BACKOFF_MS.length - 1)
+      ];
+    retryAttemptsRef.current = attempt + 1;
+    setAutosaveState(
+      typeof navigator !== "undefined" && !navigator.onLine
+        ? "offline"
+        : "retrying",
+    );
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      const task = latestTaskRef.current;
+      const hash = pendingAutosaveHashRef.current;
+      if (task && hash && hash !== lastSavedHashRef.current) {
+        void runAutosave(task, latestRowsRef.current, hash);
+      } else {
+        retryAttemptsRef.current = 0;
+        setAutosaveState("saved");
+      }
+    }, delay);
+  };
+
   const runAutosave = async (task: Task, rows: MeasureRow[], hash: string) => {
     if (isSavingRef.current) {
       queuedRef.current = true;
@@ -1435,6 +1515,7 @@ export function QuickInventoryEntry({
         originalExpectedBultos: originalExpected,
         manualTotalWeight:
           task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+        updatedAt: new Date().toISOString(),
       },
       {
         userKey: presenceUserKey,
@@ -1444,20 +1525,28 @@ export function QuickInventoryEntry({
       },
     );
 
+    let failed = false;
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
       if (activeTaskIdRef.current === task.id) {
         setSelectedTask(updatedTask);
       }
       lastSavedHashRef.current = hash;
+      retryAttemptsRef.current = 0;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      setLastSavedAt(Date.now());
       setAutosaveState("saved");
       setAutosaveTick((v) => v + 1);
     } catch {
-      setAutosaveState("error");
+      failed = true;
     } finally {
       isSavingRef.current = false;
       onLocalSaveCompletedRef.current();
       if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
+        // Hay un cambio más nuevo en cola: guárdalo (tiene prioridad sobre un reintento).
         queuedRef.current = false;
         const latestHash =
           queuedHashRef.current ||
@@ -1472,17 +1561,37 @@ export function QuickInventoryEntry({
             latestHash,
           );
         }
+      } else if (failed) {
+        scheduleAutosaveRetry();
       }
     }
   };
+
+  // Guarda de inmediato cualquier cambio pendiente (sin esperar al debounce).
+  // Se usa al salir de la RA, al desmontar y al ocultar/cerrar la pestaña.
+  const flushAutosave = () => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    const task = latestTaskRef.current;
+    const hash = pendingAutosaveHashRef.current;
+    if (task && hash && hash !== lastSavedHashRef.current) {
+      void runAutosave(task, latestRowsRef.current, hash);
+    }
+  };
+  flushAutosaveRef.current = flushAutosave;
 
   useEffect(() => {
     if (!selectedTask) return;
     latestRowsRef.current = measureRows;
     latestTaskRef.current = selectedTask;
     const hash = JSON.stringify({ rows: measureRows, referenceMode, captureLayout });
+    pendingAutosaveHashRef.current = hash;
     persistQuickDraft(selectedTask.id, measureRows, referenceMode, captureLayout);
-    if (hash === lastSavedHashRef.current) return;
+    const dirty = hash !== lastSavedHashRef.current;
+    setPendingCount(dirty ? 1 : 0);
+    if (!dirty) return;
 
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
@@ -1499,7 +1608,59 @@ export function QuickInventoryEntry({
     };
   }, [measureRows, selectedTask, moduleType, referenceMode, captureLayout]);
 
-  const saveOrder = () => {
+  // Refleja en pendingCount cuando un guardado confirma (hash guardado == pendiente).
+  useEffect(() => {
+    if (autosaveState === "saved" || autosaveState === "idle") {
+      const hash = pendingAutosaveHashRef.current;
+      if (!hash || hash === lastSavedHashRef.current) setPendingCount(0);
+    }
+  }, [autosaveState, autosaveTick]);
+
+  // Flush al desmontar y cuando la pestaña se oculta/cierra (PWA móvil incluida).
+  useEffect(() => {
+    const flush = () => flushAutosaveRef.current();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Estado de conexión + reintento inmediato al recuperar la red.
+  useEffect(() => {
+    const goOnline = () => {
+      setIsOnline(true);
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+      const task = latestTaskRef.current;
+      const hash = pendingAutosaveHashRef.current;
+      if (task && hash && hash !== lastSavedHashRef.current) {
+        void runAutosave(task, latestRowsRef.current, hash);
+      }
+    };
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+    };
+  }, []);
+
+  const saveOrder = async () => {
     if (!selectedTask) return;
     const totals = calculateTotals();
     const hasCapture = quickRowsHaveAnyCapture(measureRows);
@@ -1529,6 +1690,7 @@ export function QuickInventoryEntry({
           selectedTask.manualTotalWeight !== undefined
             ? selectedTask.manualTotalWeight
             : 0,
+        updatedAt: new Date().toISOString(),
       },
       {
         userKey: presenceUserKey,
@@ -1538,14 +1700,33 @@ export function QuickInventoryEntry({
       },
     );
 
-    onUpdateTask(updatedTask);
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(
-        inventoryDraftKey(selectedTask.id, moduleType),
-      );
+    const currentHash = JSON.stringify({
+      rows: measureRows,
+      referenceMode,
+      captureLayout,
+    });
+    pendingAutosaveHashRef.current = currentHash;
+    setAutosaveState("saving");
+    try {
+      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+      // Marca el estado como guardado para que el flush de clearTask no dispare
+      // un segundo guardado redundante del mismo contenido.
+      lastSavedHashRef.current = currentHash;
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(
+          inventoryDraftKey(selectedTask.id, moduleType),
+        );
+      }
+      retryAttemptsRef.current = 0;
+      setLastSavedAt(Date.now());
+      setPendingCount(0);
+      setAutosaveState("saved");
+      clearTask();
+    } catch {
+      // No limpiamos la RA: mantenemos lo capturado y reintentamos en segundo plano.
+      setAutosaveState("error");
+      scheduleAutosaveRetry();
     }
-    setAutosaveState("saved");
-    clearTask();
   };
 
   const tableMinWidthClass = "min-w-[1180px]";
@@ -1717,6 +1898,7 @@ export function QuickInventoryEntry({
                         Por {completedBy}
                       </span>
                     ) : null}
+                    <LastUpdatedLabel at={t.updatedAt} />
                   </div>
                   <div
                     className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-1 text-center ${
@@ -1952,6 +2134,12 @@ export function QuickInventoryEntry({
           onSave={saveOrder}
           autosaveState={autosaveState}
           isSaving={autosaveState === "saving"}
+          syncStatus={{
+            state: autosaveState,
+            lastSavedAt,
+            pendingCount,
+            isOnline,
+          }}
         />
         <InventoryCsvExportModal
           open={csvExportOpen}
@@ -2022,46 +2210,14 @@ export function QuickInventoryEntry({
                 )}
                 RA-{t.ra}
               </span>
-              <span
-                key={autosaveTick}
-                className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-2.5 py-2 text-[11px] font-semibold sm:gap-1.5 sm:px-3 sm:text-xs ${
-                  autosaveState === "saving"
-                    ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-                    : autosaveState === "saved"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
-                      : autosaveState === "error"
-                        ? "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
-                        : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-300"
-                }`}
-                title={
-                  autosaveState === "saving"
-                    ? "Guardando…"
-                    : autosaveState === "saved"
-                      ? "Guardado"
-                      : autosaveState === "error"
-                        ? "Error al guardar"
-                        : "Listo"
-                }
-              >
-                {autosaveState === "saving" ? (
-                  <Loader2 className="icon-sm animate-spin" />
-                ) : autosaveState === "saved" ? (
-                  <Cloud className="icon-sm" />
-                ) : autosaveState === "error" ? (
-                  <CloudOff className="icon-sm" />
-                ) : (
-                  <CheckCircle2 className="icon-sm" />
-                )}
-                <span className="hidden sm:inline">
-                  {autosaveState === "saving"
-                    ? "Guardando…"
-                    : autosaveState === "saved"
-                      ? "Guardado"
-                      : autosaveState === "error"
-                        ? "Error"
-                        : "Listo"}
-                </span>
-              </span>
+              <SyncStatusBadge
+                status={{
+                  state: autosaveState,
+                  lastSavedAt,
+                  pendingCount,
+                  isOnline,
+                }}
+              />
             </div>
           )}
 

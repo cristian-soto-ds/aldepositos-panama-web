@@ -34,6 +34,8 @@ export type Task = {
     date: string;
   };
   date?: string;
+  /** ISO de la última vez que se guardó el inventario de este RA (para "última actualización"). */
+  updatedAt?: string;
   /** Email (minúsculas) del operador que creó/importó el RA por primera vez. */
   createdByEmail?: string;
   createdByName?: string;

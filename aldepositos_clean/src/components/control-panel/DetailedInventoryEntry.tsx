@@ -791,7 +791,13 @@ export function DetailedInventoryEntry({
       originalExpectedBultos: originalExpected,
     };
 
-    onUpdateTask(updatedTask);
+    void Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask)).catch(
+      (e) => {
+        console.error(e);
+        // eslint-disable-next-line no-alert
+        alert("No se pudo guardar el cambio en Supabase.");
+      },
+    );
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
     }

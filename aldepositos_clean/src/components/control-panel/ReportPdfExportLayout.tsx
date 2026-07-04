@@ -14,7 +14,7 @@ import {
   reportPalletWeight,
   reportRowPallet,
 } from "@/lib/reportTotals";
-import { cubicajeM3FromDims, formatCubicaje2 } from "@/lib/measureDecimals";
+import { cubicajeM3FromDims, formatCubicaje2, roundUpMeasure } from "@/lib/measureDecimals";
 
 const BRAND = "#16263F";
 const TEXT = "#1e293b";
@@ -793,11 +793,13 @@ export function ReportPdfExportLayout({
               <th style={thBase}>#</th>
               {showRefCol && <th style={thBase}>Referencia</th>}
               <th style={thBase}>Bultos</th>
-              {showWeightColumn && <th style={thBase}>Peso (kg)</th>}
+              {showWeightColumn && <th style={thBase}>Peso/B (kg)</th>}
+              {showWeightColumn && <th style={thBase}>P. Total (kg)</th>}
               <th style={thBase}>L</th>
               <th style={thBase}>W</th>
               <th style={thBase}>H</th>
               <th style={thBase}>Reempaque</th>
+              <th style={thBase}>CBM/B</th>
               <th style={{ ...thBase, backgroundColor: ACCENT }}>Total CBM</th>
             </tr>
           </thead>
@@ -809,6 +811,9 @@ export function ReportPdfExportLayout({
               const b = parseFloat(String(row.bultos ?? 0)) || 0;
               const isReempaque = row.reempaque === true;
               const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+              const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
+              const rowWeight = parseFloat(String(row.weight ?? 0)) || 0;
+              const pesoTotal = roundUpMeasure(b * rowWeight);
               const bg = isReempaque
                 ? "#f5f3ff"
                 : idx % 2 === 0
@@ -852,6 +857,18 @@ export function ReportPdfExportLayout({
                       {isReempaque ? "—" : row.weight != null ? String(row.weight) : "-"}
                     </td>
                   )}
+                  {showWeightColumn && (
+                    <td
+                      style={{
+                        border: `1px solid ${BORDER}`,
+                        padding: compact ? 6 : 8,
+                        textAlign: "center",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isReempaque || pesoTotal <= 0 ? "—" : pesoTotal.toFixed(2)}
+                    </td>
+                  )}
                   <td
                     style={{
                       border: `1px solid ${BORDER}`,
@@ -892,6 +909,16 @@ export function ReportPdfExportLayout({
                     }}
                   >
                     {isReempaque ? "SÍ" : "—"}
+                  </td>
+                  <td
+                    style={{
+                      border: `1px solid ${BORDER}`,
+                      padding: compact ? 6 : 8,
+                      textAlign: "center",
+                      color: MUTED,
+                    }}
+                  >
+                    {isReempaque ? "—" : formatCubicaje2(cbmPorBulto)}
                   </td>
                   <td
                     style={{

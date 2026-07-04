@@ -73,6 +73,9 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
                 measureData: update.measureData,
                 currentBultos: update.currentBultos,
                 status: update.status,
+                // Refleja "actualizado hace unos segundos" al instante, aunque el
+                // guardado en BD (que trae su propio updatedAt) llegue después.
+                updatedAt: new Date().toISOString(),
               }
             : t,
         ),

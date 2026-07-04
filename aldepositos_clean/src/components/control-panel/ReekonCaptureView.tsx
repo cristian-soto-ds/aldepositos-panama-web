@@ -157,6 +157,61 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
   );
 });
 
+/**
+ * Campo de texto (Bultos o Referencia) con el MISMO borrador local que
+ * `ReekonMeasureInput`: lo tecleado vive en estado local y solo se sincroniza
+ * desde `value` cuando no tiene foco; se confirma al salir del campo (`onBlur`).
+ * Evita que el guardado/sincronización pise lo que el usuario está escribiendo
+ * (ej. "324" o "REFERENCIA 1" con pausas).
+ *
+ * `sanitize` limpia lo tecleado en vivo (p.ej. solo dígitos para bultos). Para
+ * texto libre, pásalo como identidad.
+ */
+const ReekonDraftInput = memo(function ReekonDraftInput({
+  rowId,
+  value,
+  onCommit,
+  sanitize,
+  className,
+  placeholder,
+  inputMode = "text",
+}: {
+  rowId: string;
+  value: string;
+  onCommit: (rowId: string, value: string) => void;
+  sanitize?: (raw: string) => string;
+  className: string;
+  placeholder?: string;
+  inputMode?: "text" | "numeric" | "decimal";
+}) {
+  const [draft, setDraft] = useState(value);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(value);
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode={inputMode}
+      autoComplete="off"
+      className={className}
+      value={draft}
+      placeholder={placeholder}
+      onFocus={(e) => {
+        focusedRef.current = true;
+        e.currentTarget.select();
+      }}
+      onChange={(e) => setDraft(sanitize ? sanitize(e.target.value) : e.target.value)}
+      onBlur={() => {
+        focusedRef.current = false;
+        onCommit(rowId, draft);
+      }}
+    />
+  );
+});
+
 export function ReekonCaptureView({
   measureRows,
   referenceMode,
@@ -531,14 +586,16 @@ export function ReekonCaptureView({
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Referencia
                   </label>
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    className="reekon-input reekon-input-immersive w-full"
+                  <ReekonDraftInput
+                    rowId={activeId}
                     value={String(activeRow.referencia ?? "")}
+                    onCommit={(id, v) => {
+                      onReferenceChange(id, v);
+                      onReferenceBlur(id, v);
+                    }}
+                    className="reekon-input reekon-input-immersive w-full"
                     placeholder="Referencia"
-                    onChange={(e) => onReferenceChange(activeId, e.target.value)}
-                    onBlur={(e) => onReferenceBlur(activeId, e.target.value)}
+                    inputMode="text"
                   />
                 </div>
               ) : palletized ? (
@@ -565,15 +622,14 @@ export function ReekonCaptureView({
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Bultos
                   </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    className="reekon-input reekon-input-immersive w-full text-center"
+                  <ReekonDraftInput
+                    rowId={activeId}
                     value={String(activeRow.bultos ?? "")}
+                    onCommit={(id, v) => onUpdateRow(id, "bultos", v)}
+                    sanitize={(raw) => raw.replace(/\D/g, "")}
+                    className="reekon-input reekon-input-immersive w-full text-center"
                     placeholder="0"
-                    onFocus={(e) => e.currentTarget.select()}
-                    onChange={(e) => onUpdateRow(activeId, "bultos", e.target.value.replace(/\D/g, ""))}
+                    inputMode="numeric"
                   />
                 </div>
                 <div>

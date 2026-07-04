@@ -1,6 +1,7 @@
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
   cubicajeM3FromDims,
+  formatCubicaje2,
   formatMeasure2,
   normalizeMeasureFieldsOnRow,
 } from "@/lib/measureDecimals";
@@ -91,7 +92,7 @@ export function lineHasData(line: CollectionOrderLine): boolean {
  */
 function cubicajeTotalM3FromLine(line: CollectionOrderLine): string {
   const tot = cubicajeM3FromDims(line.l, line.w, line.h, line.bultos, false);
-  return tot > 0 ? formatMeasure2(tot) : "";
+  return tot > 0 ? formatCubicaje2(tot) : "";
 }
 
 export function collectionLinesToDetailedMeasureData(

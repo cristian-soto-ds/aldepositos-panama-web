@@ -1,5 +1,6 @@
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import { pesoTotalFromLine } from "@/lib/collectionLineUtils";
+import { cubicajeM3FromRow, roundMeasureNearest } from "@/lib/measureDecimals";
 
 function parseN(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -7,17 +8,12 @@ function parseN(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * CUBICAJE de una línea de recolección. Usa la fórmula canónica del sistema
+ * (dimensiones primero; `volumenM3` como total de línea solo si no hay medidas).
+ */
 function cbmFromLine(line: CollectionOrderLine): number {
-  const vol = parseN(line.volumenM3);
-  const bultos = parseN(line.bultos);
-  if (vol > 0 && bultos > 0) return vol * bultos;
-  const l = parseN(line.l);
-  const w = parseN(line.w);
-  const h = parseN(line.h);
-  if (l > 0 && w > 0 && h > 0 && bultos > 0) {
-    return ((l * w * h) / 1_000_000) * bultos;
-  }
-  return 0;
+  return cubicajeM3FromRow(line);
 }
 
 export type CapturedLinesTotals = {
@@ -49,7 +45,7 @@ export function totalsFromCapturedLines(lines: CollectionOrderLine[]): CapturedL
     }
   }
 
-  return { bultos, pesoKg, cbm, linesWithBultos, referenciaCount };
+  return { bultos, pesoKg, cbm: roundMeasureNearest(cbm), linesWithBultos, referenciaCount };
 }
 
 /** @deprecated Usar totalsFromCapturedLines */

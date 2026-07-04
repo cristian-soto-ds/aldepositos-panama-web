@@ -49,6 +49,11 @@ function cellValue(row: DailyReceptionReportRow, key: (typeof COLUMNS)[number]["
   if (key === "queuePosition") {
     return row.queuePosition ?? "—";
   }
+  if (key === "orNumero") {
+    // OR numérico → número real (evita la advertencia "número guardado como texto").
+    const raw = String(row.orNumero ?? "").trim();
+    return /^\d+$/.test(raw) ? Number(raw) : raw;
+  }
   if (key === "minutosEnFila" || key === "minutosDescarga" || key === "minutosTotal") {
     return formatMinutesLabel(row[key]);
   }
@@ -238,6 +243,10 @@ export async function downloadDailyReceptionExcel(params: {
       if (col === 1 || col === 2 || col === 6) {
         cell.alignment = { ...cell.alignment, horizontal: "center" };
         cell.font = { ...cell.font, bold: true };
+      }
+      // OR #: formato entero sin separador de miles cuando es numérico.
+      if (col === 2 && typeof cell.value === "number") {
+        cell.numFmt = "0";
       }
     });
     dataRowNum += 1;

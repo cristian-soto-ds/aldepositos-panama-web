@@ -63,6 +63,21 @@ export const RECEPTION_RECEIPT_ON_STATUS: ReceptionStatusId[] = [
   RECEPTION_STATUS.CARRETILLADO,
 ];
 
+/**
+ * Estados en los que el camión está siendo atendido en una rampa o carretillado.
+ * Se usa para sellar la hora de atención y qué rampa se usó (para el reporte).
+ */
+export const RECEPTION_RAMP_STATUSES: ReceptionStatusId[] = [
+  RECEPTION_STATUS.RAMPA_1,
+  RECEPTION_STATUS.RAMPA_2,
+  RECEPTION_STATUS.RAMPA_EXTRA,
+  RECEPTION_STATUS.CARRETILLADO,
+];
+
+export function isRampReceptionStatus(status: ReceptionStatusId): boolean {
+  return RECEPTION_RAMP_STATUSES.includes(status);
+}
+
 /** Columnas del tablero Kanban del módulo Operador (orden de izquierda a derecha). */
 export const RECEPTION_KANBAN_COLUMNS: ReceptionStatusId[] = [
   RECEPTION_STATUS.EN_FILA,

@@ -31,8 +31,10 @@ import {
 import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
 import {
   cubicajeM3FromDims,
+  formatCubicaje2,
   formatMeasure2,
   normalizeMeasureField,
+  roundMeasureNearest,
   roundUpMeasure,
   sanitizeMeasureTyping,
 } from "@/lib/measureDecimals";
@@ -2102,7 +2104,7 @@ export function CollectionOrderModule({
                   const cubicajeTot = cubicajeM3FromDims(row.l, row.w, row.h, row.bultos);
                   const cbmBulto =
                     bultos > 0
-                      ? roundUpMeasure(cubicajeTot / bultos)
+                      ? roundMeasureNearest(cubicajeTot / bultos)
                       : cubicajeM3FromDims(row.l, row.w, row.h, 1);
                   const refUnknown =
                     unresolvedRefByRow[row.id] === true &&
@@ -2388,10 +2390,10 @@ export function CollectionOrderModule({
                         />
                       </td>
                       <td className="bg-slate-50/80 px-2 py-1 text-center text-xs font-black text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                        {formatMeasure2(cbmBulto) || "0.00"}
+                        {formatCubicaje2(cbmBulto) || "0.00"}
                       </td>
                       <td className="bg-blue-50/80 px-2 py-1 text-center text-sm font-black text-blue-700 dark:bg-blue-950/45 dark:text-blue-300">
-                        {formatMeasure2(cubicajeTot) || "0.00"}
+                        {formatCubicaje2(cubicajeTot) || "0.00"}
                       </td>
                       <td className="px-1 py-1">
                         <button

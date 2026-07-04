@@ -16,6 +16,11 @@ import {
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { downloadRelacionCargaExcel } from "@/lib/exportRelacionCargaExcel";
+import {
+  cubicajeM3FromDims,
+  formatCubicaje2,
+  sumCubicajeM3,
+} from "@/lib/measureDecimals";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -245,13 +250,7 @@ export function DispatchEntry({
       if (fromCapture > 0) return fromCapture;
     }
     if (!t.measureData || t.measureData.length === 0) return 0;
-    return t.measureData.reduce((acc: number, row: any) => {
-      const l = parseFloat(String(row.l ?? 0)) || 0;
-      const w = parseFloat(String(row.w ?? 0)) || 0;
-      const h = parseFloat(String(row.h ?? 0)) || 0;
-      const b = parseFloat(String(row.bultos ?? 0)) || 0;
-      return acc + ((l * w * h) / 1_000_000) * b;
-    }, 0);
+    return sumCubicajeM3(t.measureData as Parameters<typeof sumCubicajeM3>[0]);
   };
 
   const currentCbm = loadedTasks.reduce(
@@ -430,7 +429,7 @@ export function DispatchEntry({
           const l = parseFloat(String(m.l ?? 0)) || 0;
           const w = parseFloat(String(m.w ?? 0)) || 0;
           const h = parseFloat(String(m.h ?? 0)) || 0;
-          const cbm = ((l * w * h) / 1_000_000) * bultos;
+          const cbm = cubicajeM3FromDims(l, w, h, bultos, m.reempaque === true);
 
           let lineWeight = 0;
           if (t.weightMode === "per_bundle") {
@@ -457,7 +456,7 @@ export function DispatchEntry({
               lineWeight > 0
                 ? lineWeight.toFixed(2)
                 : "",
-            cbm: cbm.toFixed(2),
+            cbm: formatCubicaje2(cbm),
           });
         });
       } else {

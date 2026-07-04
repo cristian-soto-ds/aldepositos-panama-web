@@ -1,8 +1,8 @@
 import type { Task } from "@/lib/types/task";
 import {
-  cubicajeM3FromDims,
-  formatMeasure2,
+  formatCubicaje2,
   roundUpMeasure,
+  sumCubicajeM3,
 } from "@/lib/measureDecimals";
 import {
   stripQuickRowsForPersist,
@@ -108,20 +108,7 @@ export function computeReportData(task: Task): ReportComputed {
       (a, b) => a + (parseFloat(String(b.bultos ?? 0)) || 0),
       0,
     ),
-    cbm: formatMeasure2(
-      measureRows.reduce(
-        (acc, row) =>
-          acc +
-          cubicajeM3FromDims(
-            row.l,
-            row.w,
-            row.h,
-            row.bultos,
-            row.reempaque === true,
-          ),
-        0,
-      ),
-    ) || "0.00",
+    cbm: formatCubicaje2(sumCubicajeM3(measureRows)) || "0.00",
     weight: roundUpMeasure(totalWeight),
     unidades: totalUnidades,
   };

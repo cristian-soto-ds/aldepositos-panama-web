@@ -14,6 +14,7 @@ import {
   reportPalletWeight,
   reportRowPallet,
 } from "@/lib/reportTotals";
+import { cubicajeM3FromDims, formatCubicaje2 } from "@/lib/measureDecimals";
 
 const BRAND = "#16263F";
 const TEXT = "#1e293b";
@@ -373,7 +374,7 @@ export function ReportPdfExportLayout({
                   marginBottom: 4,
                 }}
               >
-                Marca / tracking
+                Marca
               </div>
               <div
                 style={{
@@ -529,7 +530,6 @@ export function ReportPdfExportLayout({
                 "P/B",
                 "P.Tot",
                 "Reemp.",
-                "Bulto Cont.",
                 "L",
                 "W",
                 "H",
@@ -559,8 +559,8 @@ export function ReportPdfExportLayout({
               const isReempaque = row.reempaque === true;
               const totalUnidades = bultos * undPerBulto;
               const pesoTotal = bultos * pesoPorBulto;
-              const cbmPorBulto = isReempaque ? 0 : (l * w * h) / 1_000_000;
-              const cubicajeTotal = cbmPorBulto * bultos;
+              const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
+              const cubicajeTotal = cubicajeM3FromDims(l, w, h, bultos, isReempaque);
               const bg = idx % 2 === 0 ? "#ffffff" : CELL_BG;
               return (
                 <tr key={idx} style={{ backgroundColor: bg }}>
@@ -599,9 +599,6 @@ export function ReportPdfExportLayout({
                     {row.reempaque ? "SI" : "-"}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
-                    {String(row.bultoContenedor || "-")}
-                  </td>
-                  <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
                     {l}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
@@ -611,7 +608,7 @@ export function ReportPdfExportLayout({
                     {h}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
-                    {cbmPorBulto.toFixed(2)}
+                    {formatCubicaje2(cbmPorBulto)}
                   </td>
                   <td
                     style={{
@@ -622,7 +619,7 @@ export function ReportPdfExportLayout({
                       color: "#1e40af",
                     }}
                   >
-                    {cubicajeTotal.toFixed(2)}
+                    {formatCubicaje2(cubicajeTotal)}
                   </td>
                 </tr>
               );
@@ -693,7 +690,7 @@ export function ReportPdfExportLayout({
                 const h = parseFloat(String(row.h ?? 0)) || 0;
                 const b = parseFloat(String(row.bultos ?? 0)) || 0;
                 const isReempaque = row.reempaque === true;
-                const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+                const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
                 const bg = isReempaque
                   ? "#f5f3ff"
                   : palletRowNum % 2 === 0
@@ -772,7 +769,7 @@ export function ReportPdfExportLayout({
                         color: "#1e40af",
                       }}
                     >
-                      {isReempaque ? "—" : rowCbm.toFixed(2)}
+                      {isReempaque ? "—" : formatCubicaje2(rowCbm)}
                     </td>
                   </tr>,
                 );
@@ -801,7 +798,6 @@ export function ReportPdfExportLayout({
               <th style={thBase}>W</th>
               <th style={thBase}>H</th>
               <th style={thBase}>Reempaque</th>
-              <th style={thBase}>Bulto Cont.</th>
               <th style={{ ...thBase, backgroundColor: ACCENT }}>Total CBM</th>
             </tr>
           </thead>
@@ -812,7 +808,7 @@ export function ReportPdfExportLayout({
               const h = parseFloat(String(row.h ?? 0)) || 0;
               const b = parseFloat(String(row.bultos ?? 0)) || 0;
               const isReempaque = row.reempaque === true;
-              const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+              const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
               const bg = isReempaque
                 ? "#f5f3ff"
                 : idx % 2 === 0
@@ -902,20 +898,11 @@ export function ReportPdfExportLayout({
                       border: `1px solid ${BORDER}`,
                       padding: compact ? 6 : 8,
                       textAlign: "center",
-                    }}
-                  >
-                    {String(row.bultoContenedor || "-")}
-                  </td>
-                  <td
-                    style={{
-                      border: `1px solid ${BORDER}`,
-                      padding: compact ? 6 : 8,
-                      textAlign: "center",
                       fontWeight: 800,
                       color: "#1e40af",
                     }}
                   >
-                    {rowCbm.toFixed(2)}
+                    {formatCubicaje2(rowCbm)}
                   </td>
                 </tr>
               );

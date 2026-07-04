@@ -5,7 +5,12 @@
  * Primera línea `sep=,` para que Excel abra por columnas aunque el sistema regional use `;`.
  */
 
-import { cubicajeM3FromDims, csvMeasureNum, roundUpMeasure } from "@/lib/measureDecimals";
+import {
+  cubicajeM3FromDims,
+  csvMeasureNum,
+  roundMeasureNearest,
+  roundUpMeasure,
+} from "@/lib/measureDecimals";
 
 export type InventarioCsvModule = "quick" | "airway" | "detailed";
 
@@ -80,9 +85,13 @@ function volumenM3ForRow(
   h: number,
   isReempaque: boolean,
 ): number {
-  const fromField = parseNum(row.volumenM3);
-  if (fromField > 0) return fromField;
-  return cubicajeM3FromDims(l, w, h, bultos, isReempaque);
+  // Fórmula canónica: dimensiones primero (igual que la captura y el reporte),
+  // y solo se usa el campo `volumenM3` como total de línea si no hay medidas.
+  if (isReempaque) return 0;
+  if (l > 0 && w > 0 && h > 0 && bultos > 0) {
+    return cubicajeM3FromDims(l, w, h, bultos, isReempaque);
+  }
+  return roundMeasureNearest(parseNum(row.volumenM3));
 }
 
 function buildLineCells(

@@ -21,8 +21,10 @@ import {
 import { parseReferenciasFromExcel } from "@/lib/importReferenciasExcel";
 import {
   cubicajeM3FromDims,
+  formatCubicaje2,
   formatMeasure2,
   normalizeMeasureField,
+  roundMeasureNearest,
   roundUpMeasure,
   sanitizeMeasureTyping,
 } from "@/lib/measureDecimals";
@@ -401,7 +403,7 @@ export function DetailedInventoryEntry({
 
     return {
       bultos,
-      cbm: formatMeasure2(cbm) || "0.00",
+      cbm: formatCubicaje2(cbm) || "0.00",
       weight: roundUpMeasure(weight),
       unidades,
     };
@@ -712,7 +714,7 @@ export function DetailedInventoryEntry({
       currentBultos: hasCapture ? bultos : 0,
       expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
       expectedCbm:
-        cbm > 0 ? roundUpMeasure(cbm) : task.expectedCbm,
+        cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
       status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
       originalExpectedBultos: originalExpected,
     };
@@ -1232,7 +1234,7 @@ export function DetailedInventoryEntry({
                     );
                     const cbmPorBulto =
                       bultos > 0
-                        ? roundUpMeasure(cubicajeTotal / bultos)
+                        ? roundMeasureNearest(cubicajeTotal / bultos)
                         : cubicajeM3FromDims(row.l, row.w, row.h, 1, isReempaque);
                     const containerRefOptions = measureRows
                       .filter((candidate) => candidate.id !== row.id && candidate.reempaque !== true)
@@ -1438,11 +1440,11 @@ export function DetailedInventoryEntry({
                         </td>
 
                         <td className="bg-slate-50 dark:bg-slate-800/60 px-2 py-1 text-center text-xs font-bold text-slate-500 dark:text-slate-400">
-                          {formatMeasure2(cbmPorBulto) || "0.00"}
+                          {formatCubicaje2(cbmPorBulto) || "0.00"}
                         </td>
 
                         <td className="bg-blue-50 dark:bg-blue-950/50 px-2 py-1 text-center text-sm font-black text-blue-700 dark:text-blue-300">
-                          {formatMeasure2(cubicajeTotal) || "0.00"}
+                          {formatCubicaje2(cubicajeTotal) || "0.00"}
                         </td>
 
                         <td className="px-2 py-1 text-center">

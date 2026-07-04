@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { ArrowLeft, Edit, PackageSearch, Printer, Truck } from "lucide-react";
+import { cubicajeM3FromDims, formatCubicaje2 } from "@/lib/measureDecimals";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import type { ContainerManifestPrintViewPropsInternal } from "./DispatchEntry";
 
@@ -247,7 +248,7 @@ function getDetailedRowsForPrint(tasks: Task[], fallbackDate: string) {
         const w = parseFloat(String(m.w ?? 0)) || 0;
         const h = parseFloat(String(m.h ?? 0)) || 0;
         const weight = bultos * pesoPorBulto;
-        const cbm = ((l * w * h) / 1_000_000) * bultos;
+        const cbm = cubicajeM3FromDims(l, w, h, bultos, m.reempaque === true);
 
         rows.push({
           id: `${t.id}-${idx}`,
@@ -259,7 +260,7 @@ function getDetailedRowsForPrint(tasks: Task[], fallbackDate: string) {
           date: t.date || fallbackDate,
           bultos,
           weight: weight.toFixed(2),
-          cbm: cbm.toFixed(2),
+          cbm: formatCubicaje2(cbm),
           desc: m.descripcion || "Sin descripción",
         });
       });

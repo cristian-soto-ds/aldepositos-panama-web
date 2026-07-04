@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import type { QuickMeasureRow, ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
 import { isQuickRowComplete } from "@/lib/quickInventoryTypes";
-import { cubicajeM3FromDims, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
+import { cubicajeM3FromDims, formatCubicaje2, formatMeasure2, normalizeMeasureField } from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
 type DimField = "l" | "w" | "h";
 
@@ -535,7 +535,7 @@ export function ReekonCaptureView({
               <div className="flex items-center justify-center gap-3 text-xs">
                 {rowCbm > 0 ? (
                   <span className="text-slate-500">
-                    Cubicaje: <span className="font-bold">{formatMeasure2(rowCbm)} m³</span>
+                    Cubicaje: <span className="font-bold">{formatCubicaje2(rowCbm)} m³</span>
                   </span>
                 ) : null}
                 {rowComplete ? (
@@ -554,7 +554,7 @@ export function ReekonCaptureView({
       <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 pt-2 dark:border-slate-700 dark:bg-slate-900">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-            <span>Total {formatMeasure2(totalCbm)} m³</span>
+            <span>Total {formatCubicaje2(totalCbm)} m³</span>
             <span>{formatMeasure2(totalWeight)} kg</span>
             <span>
               {autosaveState === "saving" ? (

@@ -8,6 +8,7 @@ import {
   reportRowPallet,
 } from "@/lib/reportTotals";
 import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
+import { cubicajeM3FromDims } from "@/lib/measureDecimals";
 
 const BRAND = "FF16263F";
 const BRAND_LIGHT = "FF1E3A5F";
@@ -157,7 +158,7 @@ function buildPalletizedRow(
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const b = parseFloat(String(row.bultos ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
-  const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+  const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
   return [
     lineNum,
     isReempaque ? "—" : b,
@@ -165,7 +166,7 @@ function buildPalletizedRow(
     isReempaque ? "—" : w,
     isReempaque ? "—" : h,
     isReempaque ? "SI" : "-",
-    isReempaque ? "—" : Number(rowCbm.toFixed(2)),
+    isReempaque ? "—" : rowCbm,
   ];
 }
 
@@ -200,7 +201,7 @@ function buildQuickRow(
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const b = parseFloat(String(row.bultos ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
-  const rowCbm = isReempaque ? 0 : ((l * w * h) / 1_000_000) * b;
+  const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
 
   const values: (string | number)[] = [idx + 1];
   if (showReference) values.push(String(row.referencia || "-"));
@@ -211,7 +212,7 @@ function buildQuickRow(
     );
   }
   values.push(l, w, h, row.reempaque ? "SI" : "-", String(row.bultoContenedor || "-"));
-  values.push(Number(rowCbm.toFixed(2)));
+  values.push(rowCbm);
   return values;
 }
 
@@ -226,8 +227,8 @@ function buildDetailedRow(
   const w = parseFloat(String(row.w ?? 0)) || 0;
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
-  const cbmPorBulto = isReempaque ? 0 : (l * w * h) / 1_000_000;
-  const cubicajeTotal = cbmPorBulto * bultos;
+  const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
+  const cubicajeTotal = cubicajeM3FromDims(l, w, h, bultos, isReempaque);
 
   return [
     idx + 1,
@@ -243,8 +244,8 @@ function buildDetailedRow(
     l,
     w,
     h,
-    Number(cbmPorBulto.toFixed(2)),
-    Number(cubicajeTotal.toFixed(2)),
+    cbmPorBulto,
+    cubicajeTotal,
   ];
 }
 

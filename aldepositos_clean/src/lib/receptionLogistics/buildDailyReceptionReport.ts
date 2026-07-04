@@ -89,35 +89,37 @@ export function buildDailyReceptionReport(
   trucks: ReceptionTruck[],
   reportDate: Date = new Date(),
 ): { rows: DailyReceptionReportRow[]; summary: DailyReceptionReportSummary } {
+  // Orden por llegada real: primero el que entró antes (hora de llegada).
+  const arrivalMs = (t: ReceptionTruck): number => {
+    const c = Date.parse(t.createdAt);
+    if (Number.isFinite(c)) return c;
+    return Number.isFinite(t.sortOrder) ? t.sortOrder : 0;
+  };
   const todaysOr = trucks
     .filter((t) => isCollectionOrderReceptionTruck(t))
     .filter((t) => isSameLocalDay(t.createdAt, reportDate))
-    .sort((a, b) => a.sortOrder - b.sortOrder);
+    .sort((a, b) => arrivalMs(a) - arrivalMs(b));
 
-  const queueIndex = new Map<string, number>();
-  todaysOr
-    .filter((t) => t.status === RECEPTION_STATUS.EN_FILA)
-    .forEach((t, i) => queueIndex.set(t.id, i + 1));
-
-  const rows: DailyReceptionReportRow[] = todaysOr.map((t) => {
+  const rows: DailyReceptionReportRow[] = todaysOr.map((t, i) => {
+    // Hora real de completado (sellada); respaldo para datos antiguos: updatedAt.
     const completedAt =
-      t.status === RECEPTION_STATUS.COMPLETADO ? t.updatedAt : undefined;
+      t.completedAt ??
+      (t.status === RECEPTION_STATUS.COMPLETADO ? t.updatedAt : undefined);
     const minutosEnFila = diffMinutes(t.createdAt, t.rampAssignedAt);
     const minutosDescarga = diffMinutes(t.rampAssignedAt, completedAt);
     const minutosTotal = diffMinutes(t.createdAt, completedAt);
 
     return {
-      queuePosition:
-        t.status === RECEPTION_STATUS.EN_FILA
-          ? (queueIndex.get(t.id) ?? null)
-          : null,
+      // Posición según el orden de llegada (para TODAS las OR, no solo las en fila).
+      queuePosition: i + 1,
       orNumero: parseOrNumero(t.plate),
       cliente: t.client !== "—" ? t.client : "",
       proveedor: t.provider !== "—" ? t.provider : "",
       expedidor: t.notes?.trim() ?? "",
       bultos: t.expectedBultos,
       estado: RECEPTION_STATUS_LABELS[t.status],
-      rampa: rampLabel(t.status),
+      // Rampa/carretillado usado (persistido); se mantiene aunque ya esté completado.
+      rampa: rampLabel(t.rampUsed ?? t.status),
       horaLlegada: formatTime(t.createdAt),
       horaRampa: formatTime(t.rampAssignedAt),
       horaCompletado: formatTime(completedAt),

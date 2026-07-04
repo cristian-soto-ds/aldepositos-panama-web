@@ -71,10 +71,12 @@ import {
 } from "@/lib/taskContributors";
 import {
   cubicajeM3FromDims,
+  formatCubicaje2,
   formatMeasure2,
   normalizeMeasureField,
   roundUpMeasure,
   sanitizeMeasureTyping,
+  sumCubicajeM3,
 } from "@/lib/measureDecimals";
 import { InventoryReceptionCompact } from "@/components/control-panel/InventoryReceptionCompact";
 import {
@@ -497,7 +499,7 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
       </td>
 
       <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
-        {isReempaque ? "—" : formatMeasure2(rowCbm) || "0.00"}
+        {isReempaque ? "—" : formatCubicaje2(rowCbm) || "0.00"}
       </td>
       {showWeightColumn && (
         <td className="bg-slate-50 px-2 py-1.5 text-center text-sm font-bold tabular-nums text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100 md:text-base">
@@ -831,18 +833,7 @@ export function QuickInventoryEntry({
       (a, row) => a + (parseFloat(String(row.bultos)) || 0),
       0,
     );
-    const cbmNumber = measureRows.reduce(
-      (acc, row) =>
-        acc +
-        cubicajeM3FromDims(
-          row.l,
-          row.w,
-          row.h,
-          row.bultos,
-          row.reempaque === true,
-        ),
-      0,
-    );
+    const cbmNumber = sumCubicajeM3(measureRows);
 
     // Paletizado: el peso se captura una vez por paleta (no por bulto).
     const weight =
@@ -868,7 +859,7 @@ export function QuickInventoryEntry({
             }, 0),
           );
 
-    return { bultos, cbm: roundUpMeasure(cbmNumber), weight };
+    return { bultos, cbm: cbmNumber, weight };
   };
 
   const commitMeasureField = useCallback(

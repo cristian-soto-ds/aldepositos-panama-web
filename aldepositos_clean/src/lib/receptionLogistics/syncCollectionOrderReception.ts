@@ -1,5 +1,9 @@
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
+import {
+  RECEPTION_STATUS,
+  isRampReceptionStatus,
+} from "@/lib/receptionLogistics/config";
 
 export function receptionTruckIdForCollectionOrder(orderId: string): string {
   return `or-co-${orderId}`;
@@ -47,6 +51,7 @@ export function collectionOrderToReceptionTruck(
   const now = new Date().toISOString();
   const numero = String(order.numero ?? "").trim() || order.id.slice(0, 8);
   const status = order.receptionStatus;
+  const isRamp = isRampReceptionStatus(status);
 
   return {
     id: receptionTruckIdForCollectionOrder(order.id),
@@ -60,9 +65,14 @@ export function collectionOrderToReceptionTruck(
     sortOrder: resolveReceptionSortOrder(existing, order.updatedAt),
     collectionOrderId: order.id,
     source: "collection_order",
-    rampAssignedAt: status.startsWith("RAMPA")
+    rampAssignedAt: isRamp
       ? (existing?.rampAssignedAt ?? now)
       : existing?.rampAssignedAt,
+    rampUsed: isRamp ? status : existing?.rampUsed,
+    completedAt:
+      status === RECEPTION_STATUS.COMPLETADO
+        ? (existing?.completedAt ?? existing?.updatedAt ?? now)
+        : existing?.completedAt,
     warehouseReceiptNumber: existing?.warehouseReceiptNumber,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,

@@ -13,6 +13,7 @@ import {
   rowHasExportableData,
   withExcelSeparatorHint,
 } from "@/lib/exportInventarioCsv";
+import { cubicajeM3FromDims, roundMeasureNearest } from "@/lib/measureDecimals";
 
 /** Encabezados exactos requeridos por Magaya (orden fijo). */
 export const MAGAYA_HEADERS = [
@@ -60,12 +61,12 @@ function cubicajeTotalM3(
   w: number,
   h: number,
 ): number {
-  const fromField = parseNum(row.volumenM3);
-  if (fromField > 0) return fromField;
+  // Fórmula canónica: dimensiones primero (L×W×H×bultos), y `volumenM3` como
+  // total de línea solo si no hay medidas. Redondeo al más cercano (2 dec).
   if (l > 0 && w > 0 && h > 0 && bultos > 0) {
-    return ((l * w * h) / 1_000_000) * bultos;
+    return cubicajeM3FromDims(l, w, h, bultos, false);
   }
-  return 0;
+  return roundMeasureNearest(parseNum(row.volumenM3));
 }
 
 /** Igual que `exportInventarioCsv` variant `detailed`: columna «Peso por Piezas (kg)» (= pesoPorBulto). */

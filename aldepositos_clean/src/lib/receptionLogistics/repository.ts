@@ -2,8 +2,10 @@ import type { ReceptionTruck, ReceptionQueueSnapshot } from "@/lib/receptionLogi
 import {
   RECEPTION_BROADCAST_CHANNEL,
   RECEPTION_RECEIPT_PREFIX,
+  RECEPTION_STATUS,
   RECEPTION_STORAGE_KEY,
   RECEPTION_TABLE,
+  isRampReceptionStatus,
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import {
@@ -212,11 +214,20 @@ export async function updateReceptionTruckStatus(
 
   const now = new Date().toISOString();
   const prev = trucks[idx]!;
+  const isRamp = isRampReceptionStatus(status);
   const next: ReceptionTruck = {
     ...prev,
     status,
     updatedAt: now,
-    rampAssignedAt: status.startsWith("RAMPA") ? now : prev.rampAssignedAt,
+    // Sella la hora de atención al entrar a una rampa o carretillado.
+    rampAssignedAt: isRamp ? (prev.rampAssignedAt ?? now) : prev.rampAssignedAt,
+    // Conserva qué rampa/carretillado se usó (persiste aunque luego se complete).
+    rampUsed: isRamp ? status : prev.rampUsed,
+    // Sella la hora real de completado la primera vez que pasa a Completado.
+    completedAt:
+      status === RECEPTION_STATUS.COMPLETADO
+        ? (prev.completedAt ?? now)
+        : prev.completedAt,
     warehouseReceiptNumber:
       options?.issueReceipt && !prev.warehouseReceiptNumber
         ? generateWarehouseReceiptNumber(prev.plate)

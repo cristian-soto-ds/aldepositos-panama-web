@@ -1799,20 +1799,22 @@ export function CollectionOrderModule({
 
     for (const row of useful) {
       const remapped = remapWeightMisfiledAsWidth(row);
+      const imported = normalizeCollectionOrderLineFromImport(remapped);
       const normalized: CollectionOrderLine = {
         id: generateId(),
-        ...normalizeCollectionOrderLineFromImport(remapped),
+        ...imported,
       };
-      const key = refKey(normalized.referencia);
+      const referencia = imported.referencia;
+      const key = refKey(referencia);
       if (key && refIndex.has(key)) {
         const idx = refIndex.get(key)!;
         const existingId = mergedLines[idx]!.id;
         mergedLines[idx] = { ...mergedLines[idx], ...normalized, id: existingId };
-        void runCatalogLookup(existingId, normalized.referencia);
+        void runCatalogLookup(existingId, referencia);
       } else {
         mergedLines.push(normalized);
         if (key) refIndex.set(key, mergedLines.length - 1);
-        void runCatalogLookup(normalized.id, normalized.referencia);
+        void runCatalogLookup(normalized.id, referencia);
       }
     }
 

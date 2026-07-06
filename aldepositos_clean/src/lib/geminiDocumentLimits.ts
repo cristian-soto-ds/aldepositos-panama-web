@@ -47,7 +47,7 @@ export type DocumentProcessingMeta = {
   /** Suma de bultos en líneas finales. */
   bultosSum?: number;
   /** Origen del texto PDF usado para reconciliación. */
-  pdfTextSource?: "client" | "server" | "none";
+  pdfTextSource?: "client" | "server" | "merged" | "none";
   extractionIncomplete?: boolean;
   extractionIncompleteReason?: string;
   linesWithMissingFields?: number;

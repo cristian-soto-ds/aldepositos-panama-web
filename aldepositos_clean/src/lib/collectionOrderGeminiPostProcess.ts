@@ -47,7 +47,7 @@ function geminiLineFromNormalized(
     String(normalized.descripcion ?? ""),
   );
   return {
-    referencia: normalized.referencia ?? "",
+    referencia: normalized.referencia,
     descripcion,
     bultos: String(normalized.bultos ?? "").trim(),
     unidadesPorBulto: String(normalized.unidadesPorBulto ?? "").trim(),

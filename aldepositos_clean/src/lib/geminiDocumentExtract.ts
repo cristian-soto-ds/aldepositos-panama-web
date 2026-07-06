@@ -1,7 +1,10 @@
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import { postProcessGeminiExtractedLines } from "@/lib/collectionOrderGeminiPostProcess";
 import { shouldChunkDocumentText } from "@/lib/geminiDocumentLimits";
-import { countPdfPagesInText } from "@/lib/geminiPdfPageText";
+import {
+  countPdfPagesInText,
+  detectPdfTotalPagesFromFooter,
+} from "@/lib/geminiPdfPageText";
 import {
   enrichGeminiLinesFromPdfText,
   estimateProductCodesInChunk,
@@ -32,7 +35,11 @@ export function shouldUseChunkedPdfExtraction(
   const t = String(pdfText ?? "").trim();
   if (!t) return false;
   if (shouldChunkDocumentText(t, minToSplit)) return true;
-  if (countPdfPagesInText(t) > 1) return true;
+  const pagesInText = countPdfPagesInText(t);
+  const footerTotal = detectPdfTotalPagesFromFooter(t);
+  if (pagesInText > 1) return true;
+  if (footerTotal > 1) return true;
+  if (footerTotal > pagesInText) return true;
   if (estimateProductCodesInChunk(t) >= 2) return true;
   return false;
 }

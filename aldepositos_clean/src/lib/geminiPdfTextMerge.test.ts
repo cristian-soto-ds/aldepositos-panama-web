@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { pickBestPdfTextForExtraction } from "@/lib/geminiPdfTextMerge";
+import {
+  mergePdfTextsForExtraction,
+  parsePdfPageBlocks,
+  pickBestPdfTextForExtraction,
+} from "@/lib/geminiPdfTextMerge";
 import { formatPdfPageBlock, joinPdfPageBlocks } from "@/lib/geminiPdfPageText";
+import { splitTextIntoDocumentChunks } from "@/lib/geminiCollectionOrderChunkedExtract";
 
 const PAGE1_CODES = [
   "10133-67606",
@@ -44,5 +49,38 @@ describe("pickBestPdfTextForExtraction", () => {
     const pick = pickBestPdfTextForExtraction(CLIENT_PARTIAL, SERVER_FULL);
     expect(pick.source).toBe("server");
     expect(pick.text).toBe(SERVER_FULL);
+  });
+});
+
+describe("mergePdfTextsForExtraction", () => {
+  it("fusiona página 1 del cliente con página 2 del servidor", () => {
+    const merged = mergePdfTextsForExtraction(CLIENT_PARTIAL, SERVER_FULL);
+    expect(merged.source).toBe("merged");
+    expect(merged.text).toContain("10901-67085");
+    expect(merged.text).toContain("10133-67606");
+
+    const pages = parsePdfPageBlocks(merged.text ?? "");
+    expect(pages.size).toBe(2);
+    expect(pages.get(2)).toContain("10901-67085");
+  });
+
+  it("texto fusionado se parte en 2 chunks por página", () => {
+    const merged = mergePdfTextsForExtraction(CLIENT_PARTIAL, SERVER_FULL);
+    const { chunks, splitByPages } = splitTextIntoDocumentChunks(
+      merged.text ?? "",
+      38_000,
+      2_400,
+    );
+    expect(splitByPages).toBe(true);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]).toContain("10901-67085");
+  });
+});
+
+describe("parsePdfPageBlocks", () => {
+  it("lee bloques numerados de ambas páginas", () => {
+    const pages = parsePdfPageBlocks(SERVER_FULL);
+    expect(pages.get(1)).toContain("10133-67606");
+    expect(pages.get(2)).toContain("10901-67085");
   });
 });

@@ -183,12 +183,21 @@ export type ImportLineInput = {
   composicion?: string;
 };
 
+/** Fila importada sin `id`; `referencia` y `descripcion` siempre son string (aunque vacíos). */
+export type ImportedCollectionOrderLine = Omit<
+  CollectionOrderLine,
+  "id" | "referencia" | "descripcion"
+> & {
+  referencia: string;
+  descripcion: string;
+};
+
 /**
  * Normaliza fila desde IA o pegado: docenas → unidades; totales → por bulto si hay bultos.
  */
 export function normalizeCollectionOrderLineFromImport(
   row: ImportLineInput,
-): Omit<CollectionOrderLine, "id"> {
+): ImportedCollectionOrderLine {
   let bultos = String(row.bultos ?? "").trim();
   let descripcion = String(row.descripcion ?? "").trim();
   let unidadesPorBulto = normalizeUnidadesPorBultoInput(
@@ -267,10 +276,10 @@ export function normalizeCollectionOrderLineFromImport(
     }
   }
 
-  const { id: _id, ...normalized } = normalizeCollectionOrderLineMeasures({
+  const { id: _id, ...measured } = normalizeCollectionOrderLineMeasures({
     id: "",
-    referencia: draft.referencia,
-    descripcion: draft.descripcion,
+    referencia: String(draft.referencia ?? "").trim(),
+    descripcion: String(draft.descripcion ?? "").trim(),
     bultos: draft.bultos,
     unidadesPorBulto: draft.unidadesPorBulto,
     pesoPorBulto: draft.pesoPorBulto,
@@ -288,5 +297,9 @@ export function normalizeCollectionOrderLineFromImport(
     genero: draft.genero,
     composicion: draft.composicion,
   });
-  return normalized;
+  return {
+    ...measured,
+    referencia: String(measured.referencia ?? "").trim(),
+    descripcion: String(measured.descripcion ?? "").trim(),
+  };
 }

@@ -35,7 +35,7 @@ import {
   shouldUseChunkedPdfExtraction,
 } from "@/lib/geminiDocumentExtract";
 import type { PdfExtractionValidation } from "@/lib/geminiChunkCoverage";
-import { pickBestPdfTextForExtraction } from "@/lib/geminiPdfTextMerge";
+import { mergePdfTextsForExtraction } from "@/lib/geminiPdfTextMerge";
 import type { PdfTextPickSource } from "@/lib/geminiPdfTextMerge";
 import {
   CHUNK_FIELD_INCOMPLETE_RETRY_PROMPT,
@@ -395,7 +395,7 @@ export async function POST(request: NextRequest) {
     serverPdfText = await extractPdfTextForGeminiFastPath(body.file.base64);
   }
 
-  const pickedPdfText = pickBestPdfTextForExtraction(pdfTextFromClient, serverPdfText);
+  const pickedPdfText = mergePdfTextsForExtraction(pdfTextFromClient, serverPdfText);
   extractedPdfText = pickedPdfText.text;
   pdfTextSource = pickedPdfText.source;
 
@@ -613,7 +613,7 @@ export async function POST(request: NextRequest) {
 
       const extractOneChunk = async (
         contents: GenContent[],
-      ): Promise<ChunkExtractResult | null> => {
+      ): Promise<Omit<ChunkExtractResult, "index"> | null> => {
         try {
           const { parsed, response } = await generateJsonResponse(contents, false, {
             chunkMode: true,
@@ -622,7 +622,6 @@ export async function POST(request: NextRequest) {
           const trimmed = mapRawLines(rawLines as unknown[]);
           const processed = postProcessGeminiExtractedLines(trimmed);
           return {
-            index: -1,
             lines: processed,
             reply: typeof parsed.reply === "string" ? parsed.reply.trim() : "",
             usage: usageFromGenAiResponse(response),
@@ -717,8 +716,11 @@ export async function POST(request: NextRequest) {
         },
       );
 
-      for (const result of chunkResults) {
-        if (!result) continue;
+      const sortedChunkResults = chunkResults
+        .filter((r): r is ChunkExtractResult => r != null)
+        .sort((a, b) => a.index - b.index);
+
+      for (const result of sortedChunkResults) {
         allUsages.push(result.usage);
         mergedLines.push(...result.lines);
         if (result.reply) replyParts.push(result.reply);

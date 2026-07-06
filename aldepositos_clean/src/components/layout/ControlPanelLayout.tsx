@@ -5,11 +5,9 @@ import {
   LogOut,
   Menu,
   Truck,
-  Activity,
   LayoutDashboard,
   Box,
   FileText,
-  Plane,
   X,
   ClipboardList,
   PackageSearch,
@@ -19,6 +17,7 @@ import {
   HandHelping,
   MoreHorizontal,
   Route,
+  Camera,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -108,27 +107,29 @@ export function ControlPanelLayout({
       )}
 
       <aside
-        className={`fixed z-50 flex h-full min-h-screen w-[min(86vw,20rem)] max-w-xs flex-col shadow-2xl transition-transform duration-300 md:relative md:w-60 md:max-w-none md:translate-x-0 lg:w-72 ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh min-h-screen w-[min(86vw,20rem)] max-w-xs flex-col shadow-2xl transition-transform duration-300 md:relative md:inset-auto md:h-full md:w-60 md:max-w-none md:translate-x-0 lg:w-72 ${
           preferences?.theme === "dark" ? "bg-[#0d1627]" : "bg-[#16263F]"
         } ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
       >
-        <div className="safe-area-top relative flex flex-col items-center border-b border-white/5 p-5 md:p-6 lg:p-8">
+        <div className="sidebar-brand-header relative shrink-0 border-b border-white/10">
           <button
             type="button"
             onClick={() => setSidebarOpen(false)}
-            className="touch-target absolute right-2 top-2 flex items-center justify-center text-gray-400 hover:text-white md:hidden"
+            className="touch-target absolute right-3 top-[max(0.75rem,env(safe-area-inset-top,0px))] flex items-center justify-center rounded-lg p-1 text-gray-400 hover:bg-white/10 hover:text-white md:hidden"
             aria-label="Cerrar menú"
           >
             <X className="icon-md" />
           </button>
-          <BrandLogoMark variant="sidebar" priority />
-          <div className="text-center">
-            <p className="text-fluid-title font-black leading-none tracking-tighter text-white">
-              ALDEPOSITOS
-            </p>
-            <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-gray-400 opacity-80 sm:text-[10px]">
-              Zona Libre Panamá
-            </p>
+          <div className="mx-auto flex w-full flex-col items-center gap-2.5 text-center">
+            <BrandLogoMark variant="sidebar" priority />
+            <div>
+              <p className="text-base font-black leading-none tracking-tight text-white md:text-[1.05rem]">
+                ALDEPOSITOS
+              </p>
+              <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400 sm:text-[10px]">
+                Zona Libre Panamá
+              </p>
+            </div>
           </div>
         </div>
 
@@ -155,11 +156,11 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<NavIcon Icon={Plane} />}
-            text="Guía Aérea"
-            active={currentView === "airway"}
+            icon={<NavIcon Icon={Camera} />}
+            text="Registro Fotográfico"
+            active={currentView === "photo-record"}
             onClick={() => {
-              setCurrentView("airway");
+              setCurrentView("photo-record");
               setSidebarOpen(false);
             }}
           />
@@ -202,15 +203,6 @@ export function ControlPanelLayout({
             active={currentView === "container-reports"}
             onClick={() => {
               setCurrentView("container-reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Activity} />}
-            text="Monitoreo Live"
-            active={currentView === "monitor"}
-            onClick={() => {
-              setCurrentView("monitor");
               setSidebarOpen(false);
             }}
           />

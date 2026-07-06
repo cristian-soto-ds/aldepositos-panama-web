@@ -6,6 +6,12 @@ import { Trash2, X } from "lucide-react";
 type DeleteRaConfirmModalProps = {
   open: boolean;
   raLabel: string;
+  /** Título del encabezado (por defecto: «Eliminar orden»). */
+  headingTitle?: string;
+  /** Texto antes del valor destacado (por defecto: «¿Eliminar el RA»). */
+  questionPrefix?: string;
+  /** Sufijo tras el valor destacado (por defecto: «?»). */
+  questionSuffix?: string;
   clientHint?: string;
   busy?: boolean;
   onCancel: () => void;
@@ -15,6 +21,9 @@ type DeleteRaConfirmModalProps = {
 export function DeleteRaConfirmModal({
   open,
   raLabel,
+  headingTitle = "Eliminar orden",
+  questionPrefix = "¿Eliminar el RA",
+  questionSuffix = "?",
   clientHint,
   busy = false,
   onCancel,
@@ -56,7 +65,7 @@ export function DeleteRaConfirmModal({
                 id="delete-ra-title"
                 className="text-base font-black uppercase tracking-wide text-[#16263F] dark:text-slate-100"
               >
-                Eliminar orden
+                {headingTitle}
               </h2>
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
                 Esta acción no se puede deshacer.
@@ -76,11 +85,11 @@ export function DeleteRaConfirmModal({
 
         <div className="px-5 py-5">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            ¿Eliminar el RA{" "}
+            {questionPrefix}{" "}
             <span className="font-black text-[#16263F] dark:text-white">
               {raLabel || "—"}
             </span>
-            ?
+            {questionSuffix}
           </p>
           {clientHint ? (
             <p className="mt-2 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">

@@ -13,9 +13,9 @@ const specs: Record<
 > = {
   sidebar: {
     wrap:
-      "mb-3 md:mb-4 inline-flex items-center justify-center rounded-full bg-white p-2 shadow-[0_6px_24px_rgba(0,0,0,0.35)] ring-1 ring-black/[0.06] md:p-2.5",
+      "inline-flex items-center justify-center rounded-full bg-white p-2.5 shadow-[0_8px_28px_rgba(0,0,0,0.28)] ring-1 ring-white/80 md:p-3",
     size: 120,
-    img: "h-11 w-11 md:h-[3.35rem] md:w-[3.35rem] object-contain object-center",
+    img: "h-10 w-10 md:h-11 md:w-11 object-contain object-center",
     alt: "Aldepósitos",
   },
   headerCompact: {

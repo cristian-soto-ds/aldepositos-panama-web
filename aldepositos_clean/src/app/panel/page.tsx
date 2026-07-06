@@ -62,10 +62,6 @@ const CompletedReportsModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
-const LiveMonitor = dynamic(
-  () => import("@/components/control-panel/LiveMonitor").then((m) => m.LiveMonitor),
-  { loading: () => <PanelModuleLoader /> },
-);
 const DispatchEntry = dynamic(
   () => import("@/components/control-panel/DispatchEntry").then((m) => m.DispatchEntry),
   { loading: () => <PanelModuleLoader /> },
@@ -112,15 +108,22 @@ const UserOptionsPanel = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const PhotoRecordModule = dynamic(
+  () =>
+    import("@/components/control-panel/PhotoRecordModule").then(
+      (m) => m.PhotoRecordModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "quick-entry",
   "detailed-entry",
-  "airway",
   "collection-orders",
   "receptionist",
   "truck-direction",
+  "photo-record",
 ]);
 
 export default function PanelPage() {
@@ -156,7 +159,7 @@ export default function PanelPage() {
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     editingTask: Task | null;
-    defaultModule: "quick" | "detailed" | "airway";
+    defaultModule: "quick" | "detailed";
   }>({
     isOpen: false,
     editingTask: null,
@@ -417,7 +420,7 @@ export default function PanelPage() {
 
   const handleTransferTask = async (
     task: Task,
-    newType: "quick" | "detailed" | "airway",
+    newType: "quick" | "detailed",
   ) => {
     const fromType = (task.type as string) || "quick";
     const adaptedMeasureData = adaptMeasureDataForModule(
@@ -440,7 +443,7 @@ export default function PanelPage() {
   };
 
   const openManualModal = useCallback(
-    (defaultModule: "quick" | "detailed" | "airway" = "quick") => {
+    (defaultModule: "quick" | "detailed" = "quick") => {
       setModalState({
         isOpen: true,
         editingTask: null,
@@ -458,16 +461,12 @@ export default function PanelPage() {
     () => openManualModal("detailed"),
     [openManualModal],
   );
-  const openAirwayManualModal = useCallback(
-    () => openManualModal("airway"),
-    [openManualModal],
-  );
-
   const openEditModal = useCallback((task: Task) => {
     setModalState({
       isOpen: true,
       editingTask: task,
-      defaultModule: (task.type as "quick" | "detailed" | "airway") || "quick",
+      defaultModule:
+        task.type === "detailed" ? "detailed" : "quick",
     });
   }, []);
 
@@ -644,21 +643,6 @@ export default function PanelPage() {
           />
         )}
 
-        {visibleView === "airway" && (
-          <QuickInventoryEntry
-            moduleType="airway"
-            tasks={tasks}
-            onUpdateTask={handleUpdateTask}
-            onDeleteTask={handleDeleteTask}
-            onTransferTask={handleTransferTask}
-            openManualModal={openAirwayManualModal}
-            openEditModal={openEditModal}
-            presenceUserKey={userEmail}
-            presenceUserLabel={userDisplayName}
-            presenceAvatarUrl={presenceBroadcastAvatarUrl}
-          />
-        )}
-
         {visibleView === "collection-orders" && (
           <CollectionOrderModule
             tasks={tasks}
@@ -680,6 +664,15 @@ export default function PanelPage() {
           <CompletedReportsModule tasks={tasks} onDeleteTask={handleDeleteTask} />
         )}
 
+        {visibleView === "photo-record" && (
+          <PhotoRecordModule
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            userEmail={userEmail}
+            userDisplayName={userDisplayName}
+          />
+        )}
+
         {visibleView === "dispatch" && (
           <DispatchEntry
             tasks={tasks}
@@ -692,16 +685,6 @@ export default function PanelPage() {
 
         {visibleView === "container-reports" && (
           <ContainerReportsModule tasks={tasks} onEditContainer={handleEditContainer} />
-        )}
-
-        {visibleView === "monitor" && (
-          <LiveMonitor
-            tasks={tasks}
-            onDeleteTask={handleDeleteTask}
-            userEmail={userEmail}
-            userDisplayName={userDisplayName}
-            userAvatarSrc={presenceBroadcastAvatarUrl}
-          />
         )}
 
         {showOptionsModule && visibleView === "options" && (

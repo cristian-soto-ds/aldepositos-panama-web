@@ -67,15 +67,17 @@ ${emailRule ? `${emailRule}\n` : ""}- Medidas solo en l, w, h (cm por defecto; p
 
 --- FACTURA / packing puntomoda (Zona Libre Panamá) y tablas similares ---
 - PDFs de varias páginas: lee **todas** las páginas; no te quedes solo en la primera.
-- Tabla típica: No. Bulto | Peso | Referencia | Descripcion | Cantidad (DOZ) | Precio | TOTAL.
-- **Una fila JSON por cada referencia/SKU** (B-…, JN-…, etc.) en toda la factura.
-- **bultos** = valor de columna «No. Bulto» de esa fila; si falta, «1».
-- **pesoPorBulto** = columna «Peso» (kg del bulto de esa fila).
+- Tabla típica puntomoda: No. Bulto | Peso | Referencia | Descripcion | Cantidad (DOZ) | Precio | TOTAL.
+- Tabla JEANCENTER y similares: Codigo | Descripcion | Marca | Bultos | Cantidad | Peso | Precio | Monto.
+- **Una fila JSON por cada referencia/SKU/Codigo** (B-…, JN-…, 10133-67606, etc.) en toda la factura.
+- **bultos** = columna «No. Bulto» o «Bultos» de esa fila; si falta, «1».
+- En JEANCENTER cada Codigo tiene líneas debajo (Comp., Peso B., Escala, C.Barras): NO generan fila nueva; solo el Codigo principal.
+- **pesoPorBulto** = columna «Peso» o «Peso B.» (kg del bulto de esa fila).
 - **descripcion**: solo tipo de prenda (SUETER, JEANS CORTO, BLUSA…); tallas/colores/composición van en sus campos o se omiten si no aplican a Magaya.
 - **genero**: dama si dice DAMA/MAMA; caballero si CABALLERO; etc.
-- **modelo**: marca del bloque (ej. MISS CALIFORNIA). **paisOrigen**: CHINA si ORIGEN: CHINA.
+- **modelo**: marca del bloque (ej. MISS CALIFORNIA, TIGRE-70). **paisOrigen**: CHINA si ORIGEN: CHINA o Comp.
 - Ignora filas de SUBTOTAL/TOTAL/GASTOS y filas sin referencia que solo resumen cubicaje (ej. última fila solo con CUB P3).
-- Si hay ~27 filas de producto en el documento, devuelve ~27 líneas (no un subconjunto de la primera página).
+- Si hay ~27 filas de producto en el documento, devuelve ~27 líneas (no un subconjunto de la primera página). No omitas los últimos Codigo de cada página.
 
 --- Formato de reply (campo "reply") ---
 - En operación diaria (p. ej. citas con cliente): sé breve y operativo (3–8 frases cortas o viñetas); evita preámbulos.

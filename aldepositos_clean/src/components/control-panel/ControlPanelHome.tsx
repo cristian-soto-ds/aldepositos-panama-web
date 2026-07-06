@@ -23,6 +23,7 @@ import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import { fetchCollectionOrders } from "@/lib/collectionOrders";
+import { countOrdersForCollectionListTab } from "@/lib/collectionOrderListTabs";
 import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import {
   clearWorkPresence,
@@ -56,7 +57,7 @@ function formatNumber(n: number): string {
 function moduleLabel(t: Task["type"]): string {
   if (t === "quick") return "Ingreso rápido";
   if (t === "detailed") return "Ingreso detallado";
-  if (t === "airway") return "Guía aérea";
+  if (t === "airway") return "Ingreso rápido";
   return "Sin módulo";
 }
 
@@ -71,7 +72,7 @@ function statusLabel(status: string): string {
 function moduleShort(t: WorkPresenceEntry["module"]): string {
   if (t === "quick") return "Rápido";
   if (t === "detailed") return "Detallado";
-  if (t === "airway") return "Aéreo";
+  if (t === "airway") return "Rápido";
   if (t === "none") return "Panel / sin RA";
   return "—";
 }
@@ -295,10 +296,9 @@ export function ControlPanelHome({
 
   const collectionStats = useMemo(() => {
     const total = collectionOrders.length;
-    const enBodega = collectionOrders.filter(
-      (o) => (o.linkedRaNumbers?.length ?? 0) > 0,
-    ).length;
-    return { total, enBodega, pendientes: Math.max(0, total - enBodega) };
+    const enBodega = countOrdersForCollectionListTab(collectionOrders, "warehouse");
+    const pendientes = countOrdersForCollectionListTab(collectionOrders, "general");
+    return { total, enBodega, pendientes };
   }, [collectionOrders]);
 
   const dashboard = useMemo(() => {
@@ -318,11 +318,16 @@ export function ControlPanelHome({
     const currentBultos = tasks.reduce((a, t) => a + (t.currentBultos || 0), 0);
 
     const byType = {
-      quick: tasks.filter((t) => t.type === "quick").length,
+      quick: tasks.filter(
+        (t) => t.type === "quick" || t.type === "airway" || !t.type,
+      ).length,
       detailed: tasks.filter((t) => t.type === "detailed").length,
-      airway: tasks.filter((t) => t.type === "airway").length,
       other: tasks.filter(
-        (t) => t.type !== "quick" && t.type !== "detailed" && t.type !== "airway",
+        (t) =>
+          t.type &&
+          t.type !== "quick" &&
+          t.type !== "detailed" &&
+          t.type !== "airway",
       ).length,
     };
 
@@ -450,7 +455,6 @@ export function ControlPanelHome({
       Math.max(0, t - dashboard.pending - dashboard.inProgress - dashboard.completed),
       dashboard.byType.quick,
       dashboard.byType.detailed,
-      dashboard.byType.airway,
     ];
     const max = Math.max(...raw, 1);
     return raw.map((n) => Math.round((n / max) * 100));
@@ -485,7 +489,7 @@ export function ControlPanelHome({
       ? Math.min(100, Math.round((dashboard.currentBultos / dashboard.expectedBultos) * 100))
       : 0;
   const visibleModuleTotal =
-    dashboard.byType.quick + dashboard.byType.detailed + dashboard.byType.airway;
+    dashboard.byType.quick + dashboard.byType.detailed;
   const overallProgressPct =
     tasks.length > 0
       ? Math.round(
@@ -795,7 +799,6 @@ export function ControlPanelHome({
               chips={[
                 { label: "Rápido", value: dashboard.byType.quick, tone: "sky" },
                 { label: "Detallado", value: dashboard.byType.detailed, tone: "violet" },
-                { label: "Aéreo", value: dashboard.byType.airway, tone: "amber" },
               ]}
             />
           </div>
@@ -952,12 +955,6 @@ export function ControlPanelHome({
                   count={dashboard.byType.detailed}
                   total={visibleModuleTotal}
                   color="bg-purple-500"
-                />
-                <SidebarBar
-                  label="Aéreo"
-                  count={dashboard.byType.airway}
-                  total={visibleModuleTotal}
-                  color="bg-orange-500"
                 />
               </div>
             </div>

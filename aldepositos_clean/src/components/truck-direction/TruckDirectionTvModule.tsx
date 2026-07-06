@@ -117,11 +117,11 @@ function TvAutoScrollQueueList({
       {overflows ? (
         <>
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-slate-50 via-slate-50/80 to-transparent"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-white via-white/80 to-transparent"
             aria-hidden
           />
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-slate-50 via-slate-50/80 to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-white via-white/80 to-transparent"
             aria-hidden
           />
         </>
@@ -262,6 +262,17 @@ function TruckTvCard({
   );
 }
 
+function TvColumnEmptyState({ emptyIconClass }: { emptyIconClass: string }) {
+  return (
+    <li className="relative z-[1] flex min-h-[12rem] flex-1 flex-col items-center justify-center px-4 py-12 text-center md:min-h-[14rem]">
+      <Package className={`mb-3 h-10 w-10 ${emptyIconClass}`} aria-hidden />
+      <p className="text-sm font-bold uppercase tracking-wide text-slate-500">
+        {RECEPTION_COPY.emptyColumn}
+      </p>
+    </li>
+  );
+}
+
 type KanbanColumnProps = {
   statusId: ReceptionStatusId;
   trucks: ReceptionTruck[];
@@ -299,6 +310,11 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
             <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/70">
               {columnSubtitle}
             </p>
+            {rampRetiroOccupied ? (
+              <p className="mt-1 inline-flex rounded-md bg-white/20 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+                {RAMP_OCCUPANCY_COPY.operatorBadge}
+              </p>
+            ) : null}
           </div>
           <span
             className={`flex h-9 min-w-9 items-center justify-center rounded-lg px-2.5 text-base font-black tabular-nums ${ui.countBg}`}
@@ -329,32 +345,46 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
         </TvAutoScrollQueueList>
       ) : (
         <ul
-          className={`custom-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto p-2 md:p-3 ${
+          className={`relative custom-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto p-2 md:p-3 ${
             isDense ? "gap-1" : density === "compact" ? "gap-1.5" : "gap-2.5"
           }`}
         >
+          {trucks.length === 0 && !(rampRetiroOccupied && isRampColumn) ? (
+            <div
+              className="pointer-events-none absolute inset-2 flex items-center justify-center md:inset-3"
+              aria-hidden
+            >
+              <Image
+                src={logoAldepositos}
+                alt=""
+                width={320}
+                height={320}
+                className="max-h-[min(62%,280px)] w-[min(72%,260px)] object-contain opacity-[0.09]"
+              />
+            </div>
+          ) : null}
           {trucks.length === 0 ? (
             rampRetiroOccupied && isRampColumn ? (
               <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
             ) : (
-            <li className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/60 px-4 py-12 text-center">
-              <Package className={`mb-3 h-10 w-10 ${ui.emptyIcon}`} aria-hidden />
-              <p className="text-sm font-bold uppercase tracking-wide text-slate-500">
-                {RECEPTION_COPY.emptyColumn}
-              </p>
-            </li>
+              <TvColumnEmptyState emptyIconClass={ui.emptyIcon} />
             )
           ) : (
-            trucks.map((truck, index) => (
-              <TruckTvCard
-                key={truck.id}
-                truck={truck}
-                queuePosition={isQueueColumn ? index + 1 : undefined}
-                density={density}
-                stripeClass={ui.stripe}
-                zebra={isDense && index % 2 === 1}
-              />
-            ))
+            <>
+              {rampRetiroOccupied && isRampColumn ? (
+                <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
+              ) : null}
+              {trucks.map((truck, index) => (
+                <TruckTvCard
+                  key={truck.id}
+                  truck={truck}
+                  queuePosition={isQueueColumn ? index + 1 : undefined}
+                  density={density}
+                  stripeClass={ui.stripe}
+                  zebra={isDense && index % 2 === 1}
+                />
+              ))}
+            </>
           )}
         </ul>
       )}
@@ -479,36 +509,8 @@ export function TruckDirectionTvModule({
   };
 
   return (
-    <div className="relative flex h-dvh min-h-screen flex-col overflow-hidden bg-gradient-to-br from-slate-100 via-white to-slate-50 text-slate-900">
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-10%,rgba(59,130,246,0.08),transparent)]"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(148,163,184,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.12) 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-        }}
-        aria-hidden
-      />
-
-      <div
-        className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center"
-        aria-hidden
-      >
-        <Image
-          src={logoAldepositos}
-          alt=""
-          width={900}
-          height={900}
-          className="w-[46vw] max-w-[720px] object-contain opacity-[0.16]"
-          priority={false}
-        />
-      </div>
-
-      <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur-md md:px-6 md:py-4">
+    <div className="relative flex h-dvh min-h-screen flex-col overflow-hidden bg-white text-slate-900">
+      <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 shadow-sm md:px-6 md:py-4">
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#16263F]/70">
             Aldepósitos
@@ -592,7 +594,7 @@ export function TruckDirectionTvModule({
         </div>
       )}
 
-      <footer className="relative z-10 shrink-0 border-t border-slate-200 bg-white/90 px-4 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 backdrop-blur-sm md:px-6">
+      <footer className="relative z-10 shrink-0 border-t border-slate-200 bg-white px-4 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400 md:px-6">
         {RECEPTION_COPY.companyName} — {RECEPTION_COPY.companyTagline}
       </footer>
     </div>

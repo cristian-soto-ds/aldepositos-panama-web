@@ -20,10 +20,29 @@ import {
 import type { GeminiTokenUsage } from "@/lib/geminiClientUsage";
 import {
   mergeDedupedGeminiLines,
+  mergeGeminiLinesInOrder,
   splitTextIntoDocumentChunks,
   sumGeminiUsage,
   trimGeminiLine,
 } from "@/lib/geminiCollectionOrderChunkedExtract";
+import {
+  estimateProductCodesInChunk,
+  isChunkLikelyIncomplete,
+} from "@/lib/geminiChunkCoverage";
+import {
+  finalizeDocumentGeminiLines,
+  PDF_DOCUMENT_CHUNK_INTRO,
+  shouldUseChunkedPdfExtraction,
+} from "@/lib/geminiDocumentExtract";
+import type { PdfExtractionValidation } from "@/lib/geminiChunkCoverage";
+import { pickBestPdfTextForExtraction } from "@/lib/geminiPdfTextMerge";
+import type { PdfTextPickSource } from "@/lib/geminiPdfTextMerge";
+import {
+  CHUNK_FIELD_INCOMPLETE_RETRY_PROMPT,
+  CHUNK_INCOMPLETE_RETRY_PROMPT,
+  FACTURA_TABULAR_CHUNK_HINT,
+} from "@/lib/geminiFacturaHints";
+import { countPdfPagesInText } from "@/lib/geminiPdfPageText";
 import { postProcessGeminiExtractedLines } from "@/lib/collectionOrderGeminiPostProcess";
 import {
   mapInBatches,
@@ -41,6 +60,10 @@ import {
   MARKDOWN_TABLE_EXTRACTION_PROMPT,
   tryParseMarkdownTableToLines,
 } from "@/lib/geminiMarkdownTableExtract";
+import {
+  isRefsBultosExtractMode,
+  REFS_BULTOS_CHUNK_HINT,
+} from "@/lib/geminiRefsBultosMode";
 
 function usageFromGenAiResponse(response: unknown): GeminiTokenUsage | null {
   if (!response || typeof response !== "object") return null;
@@ -76,15 +99,6 @@ const CHUNK_MAX_OUTPUT_TOKENS = 16_384;
 /** Tabla markdown (modo Gemini web): más filas sin trozar JSON. */
 const MARKDOWN_MAX_OUTPUT_TOKENS = 16_384;
 
-const FACTURA_TABULAR_CHUNK_HINT = `Formato FACTURA / packing (puntomoda y similares, Zona Libre):
-- UNA fila JSON por cada línea de producto con Referencia/SKU (ej. B-21496XM, JN-7117M, B-18536PMR).
-- Columna "No. Bulto" → campo bultos (número de bulto físico de esa fila). Si no aparece, usa "1".
-- Columna "Peso" → pesoPorBulto (kg por bulto).
-- "Cantidad" en DOZ/docenas (ej. 4.0000 DOZ) → 48 piezas (×12). EMP en descripción suele ser docenas por empaque.
-- descripcion: tipo de prenda sin medidas ni género (ej. SUETER, JEANS CORTO, BLUSA). género en campo genero si dice DAMA/MAMA/etc.
-- modelo: MISS CALIFORNIA u otra MARCA del bloque. paisOrigen: CHINA si dice ORIGEN: CHINA.
-- NO omitas filas por brevedad. Incluye TODAS las referencias visibles en este fragmento/página.
-- Ignora filas de totales (SUBTOTAL, TOTAL, GASTOS) y filas sin referencia que solo tengan cubicaje/peso resumen.`;
 const JSON_RETRY_PROMPT =
   "Corrige formato: tu salida debe ser únicamente un objeto JSON válido con propiedades \"reply\" (string) y \"lines\" (array de filas), sin texto ni ``` markdown antes/después ni comentarios. Si antes quedaste sin espacio, acorta \"reply\" a 2–3 frases y completa todas las filas detectables del documento en \"lines\".";
 
@@ -118,6 +132,7 @@ type GeminiRouteBody = {
   orderNumber?: string;
   contextHint?: string;
   viewerDisplayName?: string;
+  extractMode?: "full" | "refsBultosOnly";
 };
 
 async function parseGeminiRequestBody(
@@ -218,6 +233,41 @@ function mapRawLines(rawLines: unknown[]): CollectionGeminiLine[] {
     .map((row: CollectionGeminiLine) => trimGeminiLine(row));
 }
 
+function mergeChunkedLines(
+  lines: CollectionGeminiLine[],
+  splitByPages: boolean,
+): CollectionGeminiLine[] {
+  return splitByPages ? mergeGeminiLinesInOrder(lines) : mergeDedupedGeminiLines(lines);
+}
+
+function attachPdfValidationToMeta(
+  meta: DocumentProcessingMeta | null,
+  validation: PdfExtractionValidation | null,
+  pdfTextSource: PdfTextPickSource,
+): DocumentProcessingMeta | null {
+  if (!meta && !validation && pdfTextSource === "none") return meta;
+  const base: DocumentProcessingMeta = meta ?? {
+    tier: "normal",
+    maxChunks: DEFAULT_MAX_CHUNKS,
+    estimatedRows: 0,
+    adaptive: true,
+  };
+  return {
+    ...base,
+    pdfTextSource,
+    ...(validation
+      ? {
+          pdfCodesFound: validation.pdfCodesFound,
+          cartonesFooter: validation.cartonesFooter,
+          bultosSum: validation.bultosSum,
+          linesWithMissingFields: validation.linesWithMissingFields,
+          extractionIncomplete: validation.extractionIncomplete,
+          extractionIncompleteReason: validation.incompleteReason,
+        }
+      : {}),
+  };
+}
+
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
@@ -246,6 +296,10 @@ export async function POST(request: NextRequest) {
   const parsed = await parseGeminiRequestBody(request);
   if (!parsed.ok) return parsed.response;
   const body = parsed.body;
+  const refsBultosOnly = isRefsBultosExtractMode(body.extractMode);
+  const tabularChunkHint = refsBultosOnly
+    ? REFS_BULTOS_CHUNK_HINT
+    : FACTURA_TABULAR_CHUNK_HINT;
 
   const message = String(body.message ?? "").trim();
   const pdfTextFromClient = String(body.pdfText ?? "").trim();
@@ -325,25 +379,31 @@ export async function POST(request: NextRequest) {
       ? `Número de orden de recolección (contexto): ${body.orderNumber}.`
       : "",
     mergedContextHint ? `Contexto adicional:\n${mergedContextHint}` : "",
+    refsBultosOnly
+      ? "Modo «Leer documento»: en cada fila de lines solo referencia y bultos; demás campos vacíos."
+      : "",
     message || "(Sin texto: solo analiza el archivo adjunto.)",
   ];
 
   let pdfVisionSkippedForSpeed = false;
   let extractedPdfText: string | null = null;
+  let pdfTextSource: PdfTextPickSource = "none";
   const mime = body.file ? String(body.file.mimeType ?? "").toLowerCase() : "";
 
-  if (pdfTextFromClient && process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1") {
-    extractedPdfText = pdfTextFromClient;
-    pdfVisionSkippedForSpeed = true;
-  } else if (
-    body.file?.base64 &&
-    mime === "application/pdf" &&
+  let serverPdfText: string | null = null;
+  if (body.file?.base64 && mime === "application/pdf") {
+    serverPdfText = await extractPdfTextForGeminiFastPath(body.file.base64);
+  }
+
+  const pickedPdfText = pickBestPdfTextForExtraction(pdfTextFromClient, serverPdfText);
+  extractedPdfText = pickedPdfText.text;
+  pdfTextSource = pickedPdfText.source;
+
+  if (
+    extractedPdfText &&
     process.env.GEMINI_FORCE_PDF_VISION?.trim() !== "1"
   ) {
-    extractedPdfText = await extractPdfTextForGeminiFastPath(body.file.base64);
-    if (extractedPdfText) {
-      pdfVisionSkippedForSpeed = true;
-    }
+    pdfVisionSkippedForSpeed = true;
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -524,16 +584,6 @@ export async function POST(request: NextRequest) {
     const replyParts: string[] = [];
     let mergedLines: CollectionGeminiLine[] = [];
 
-    const pushChunkResult = (parsed: CollectionGeminiApiResponse, response: unknown) => {
-      allUsages.push(usageFromGenAiResponse(response));
-      const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
-      const trimmed = mapRawLines(rawLines as unknown[]);
-      const processed = postProcessGeminiExtractedLines(trimmed);
-      mergedLines.push(...processed);
-      const r = typeof parsed.reply === "string" ? parsed.reply.trim() : "";
-      if (r) replyParts.push(r);
-    };
-
     const CHUNK_CONCURRENCY = 3;
 
     const runChunkedExtraction = async (args: {
@@ -542,43 +592,145 @@ export async function POST(request: NextRequest) {
       introLines: string[];
       historyContents: GenContent[];
     }) => {
-      let chunks = splitTextIntoDocumentChunks(args.text, chunkSize, overlap);
+      const docSplit = splitTextIntoDocumentChunks(args.text, chunkSize, overlap);
+      let chunks = docSplit.chunks;
+      const splitByPages = docSplit.splitByPages;
+      const totalPages = countPdfPagesInText(args.text);
       const totalPlanned = chunks.length;
       const truncated = chunks.length > maxChunks;
       if (truncated) chunks = chunks.slice(0, maxChunks);
 
       const intro = args.introLines.filter(Boolean).join("\n\n");
       const failedChunks: number[] = [];
+      const incompleteChunks: number[] = [];
 
-      await mapInBatches(chunks, CHUNK_CONCURRENCY, async (chunk, i) => {
-        const chunkBody = [
-          `--- Fragmento ${i + 1}/${chunks.length} del ${args.sourceLabel} ---`,
-          "Si una fila queda cortada al inicio o al final del fragmento, solo complétala si el dato está explícito en este mismo fragmento.",
-          chunk,
-        ].join("\n\n");
+      type ChunkExtractResult = {
+        index: number;
+        lines: CollectionGeminiLine[];
+        reply: string;
+        usage: GeminiTokenUsage | null;
+      };
 
-        const userText = [intro, chunkBody].join("\n\n");
-        const contents: GenContent[] = [
-          ...args.historyContents,
-          { role: "user", parts: [{ text: userText }] },
-        ];
-
+      const extractOneChunk = async (
+        contents: GenContent[],
+      ): Promise<ChunkExtractResult | null> => {
         try {
           const { parsed, response } = await generateJsonResponse(contents, false, {
             chunkMode: true,
           });
-          pushChunkResult(parsed, response);
-        } catch (e) {
-          failedChunks.push(i + 1);
-          logGeminiServerError("collection-order/gemini/chunk", e, {
-            model,
-            chunk: i + 1,
-            total: chunks.length,
-          });
+          const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+          const trimmed = mapRawLines(rawLines as unknown[]);
+          const processed = postProcessGeminiExtractedLines(trimmed);
+          return {
+            index: -1,
+            lines: processed,
+            reply: typeof parsed.reply === "string" ? parsed.reply.trim() : "",
+            usage: usageFromGenAiResponse(response),
+          };
+        } catch {
+          return null;
         }
-      });
+      };
 
-      return { totalPlanned, truncated, failedChunks };
+      const chunkResults = await mapInBatches(
+        chunks,
+        CHUNK_CONCURRENCY,
+        async (chunk, i): Promise<ChunkExtractResult | null> => {
+          const pageMatch = /^---\s*PÁGINA\s+(\d+)\s*---/im.exec(chunk);
+          const pageNum = pageMatch ? Number(pageMatch[1]) : i + 1;
+          const fragmentTitle = pageMatch
+            ? `PÁGINA ${pageMatch[1]} (fragmento ${i + 1}/${chunks.length})`
+            : `Fragmento ${i + 1}/${chunks.length}`;
+
+          const pageScopeLine =
+            totalPages > 1 && pageMatch
+              ? `Este fragmento es la página ${pageNum} de ${totalPages}. Extrae TODAS las filas Codigo/referencia de ESTA página, incluidas las últimas antes del pie de página, SUBTOTAL o TOTAL.`
+              : "";
+
+          const chunkBody = [
+            `--- ${fragmentTitle} del ${args.sourceLabel} ---`,
+            pageScopeLine,
+            "Extrae las filas en el mismo orden en que aparecen en este fragmento (de arriba hacia abajo).",
+            refsBultosOnly
+              ? "Solo referencia y bultos por fila."
+              : "Completá TODAS las columnas visibles por fila: referencia, descripcion, bultos, unidadesTotales o unidadesPorBulto, pesoPorBulto, genero/modelo si aplica.",
+            "Si una fila queda cortada al inicio o al final del fragmento, solo complétala si el dato está explícito en este mismo fragmento.",
+            "No omitas los últimos Codigo de la tabla de este fragmento.",
+            chunk,
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+
+          const userText = [intro, chunkBody].join("\n\n");
+          const contents: GenContent[] = [
+            ...args.historyContents,
+            { role: "user", parts: [{ text: userText }] },
+          ];
+
+          let result = await extractOneChunk(contents);
+          if (!result) {
+            const retryContents: GenContent[] = [
+              ...contents,
+              { role: "user", parts: [{ text: CHUNK_INCOMPLETE_RETRY_PROMPT }] },
+            ];
+            result = await extractOneChunk(retryContents);
+          }
+          if (!result) {
+            failedChunks.push(i + 1);
+            logGeminiServerError("collection-order/gemini/chunk", new Error("chunk_extract_failed"), {
+              model,
+              chunk: i + 1,
+              total: chunks.length,
+            });
+            return null;
+          }
+
+          if (isChunkLikelyIncomplete(chunk, result.lines)) {
+            const estimate = estimateProductCodesInChunk(chunk);
+            const refsMissing = estimate > result.lines.filter((l) => l.referencia).length;
+            const retryHint = refsMissing
+              ? estimate > 0
+                ? `${CHUNK_INCOMPLETE_RETRY_PROMPT}\n\nEn este fragmento hay aproximadamente ${estimate} código(s) de producto visibles; devolvé una fila JSON por cada uno.`
+                : CHUNK_INCOMPLETE_RETRY_PROMPT
+              : CHUNK_FIELD_INCOMPLETE_RETRY_PROMPT;
+            const retryContents: GenContent[] = [
+              ...contents,
+              { role: "user", parts: [{ text: retryHint }] },
+            ];
+            const retryResult = await extractOneChunk(retryContents);
+            if (retryResult) {
+              const retryBetter =
+                retryResult.lines.length > result.lines.length ||
+                (!refsMissing &&
+                  retryResult.lines.length >= result.lines.length);
+              if (retryBetter) {
+                result = retryResult;
+              } else {
+                incompleteChunks.push(i + 1);
+              }
+            } else {
+              incompleteChunks.push(i + 1);
+            }
+          }
+
+          return { ...result, index: i };
+        },
+      );
+
+      for (const result of chunkResults) {
+        if (!result) continue;
+        allUsages.push(result.usage);
+        mergedLines.push(...result.lines);
+        if (result.reply) replyParts.push(result.reply);
+      }
+
+      if (incompleteChunks.length > 0) {
+        replyParts.push(
+          `[Advertencia: el fragmento ${incompleteChunks.join(", ")} puede tener referencias faltantes al final de la tabla. Revisá o reenviá solo esa página.]`,
+        );
+      }
+
+      return { totalPlanned, truncated, failedChunks, splitByPages };
     };
 
     const buildChunkedReply = (args: {
@@ -600,8 +752,8 @@ export async function POST(request: NextRequest) {
       return reply;
     };
 
-    // ——— PDF texto largo: varias pasadas ———
-    if (pdfVisionSkippedForSpeed && extractedPdfText && shouldChunkDocumentText(extractedPdfText, minToSplit)) {
+    // ——— PDF con texto: varias pasadas (Alde.IA general y «Leer documento») ———
+    if (extractedPdfText && shouldUseChunkedPdfExtraction(extractedPdfText, minToSplit)) {
       applyDocumentChunkConfig(extractedPdfText);
 
       const historyContents = historyToContents(
@@ -615,15 +767,25 @@ export async function POST(request: NextRequest) {
         text: extractedPdfText,
         introLines: [
           ...preambleBase,
-          FACTURA_TABULAR_CHUNK_HINT,
-          "Este PDF tiene texto seleccionable. Se procesa por páginas o fragmentos para extraer TODAS las líneas sin omitir páginas finales.",
-          "En cada fragmento: extrae SOLO las filas de producto/referencia visibles en ese texto; no inventes filas de otras partes del PDF.",
-          'En "reply" máximo 1 frase por fragmento (español, operativo). Prioriza completar "lines".',
+          tabularChunkHint,
+          ...PDF_DOCUMENT_CHUNK_INTRO,
         ],
         historyContents,
       });
 
-      mergedLines = mergeDedupedGeminiLines(mergedLines);
+      const finalized = finalizeDocumentGeminiLines(
+        mergeChunkedLines(mergedLines, chunkMeta.splitByPages),
+        {
+          extractMode: body.extractMode,
+          pdfText: extractedPdfText,
+        },
+      );
+      mergedLines = finalized.lines;
+      processingMeta = attachPdfValidationToMeta(
+        processingMeta,
+        finalized.validation,
+        pdfTextSource,
+      );
       const usage = sumGeminiUsage(allUsages);
       const reply = buildChunkedReply({
         ...chunkMeta,
@@ -673,7 +835,19 @@ export async function POST(request: NextRequest) {
         historyContents,
       });
 
-      mergedLines = mergeDedupedGeminiLines(mergedLines);
+      const finalizedMsg = finalizeDocumentGeminiLines(
+        mergeChunkedLines(mergedLines, chunkMeta.splitByPages),
+        {
+          extractMode: body.extractMode,
+          pdfText: message,
+        },
+      );
+      mergedLines = finalizedMsg.lines;
+      processingMeta = attachPdfValidationToMeta(
+        processingMeta,
+        finalizedMsg.validation,
+        pdfTextSource,
+      );
       const usage = sumGeminiUsage(allUsages);
       const reply = buildChunkedReply({
         ...chunkMeta,
@@ -711,15 +885,15 @@ export async function POST(request: NextRequest) {
       preambleLines = [
         ...preambleLines,
         "Este PDF se procesó como texto seleccionable (respuesta más rápida). Extrae líneas como siempre; si ves tablas algo rotas en el texto, infiere orden de columnas desde continuidad y encabezados.",
-        "Si el PDF tiene varias páginas (marcadores --- PÁGINA N ---), procesa TODAS; no omitas la última página.",
+        "Si el PDF tiene varias páginas (marcadores --- PÁGINA N ---), procesa TODAS en orden numérico (1, 2, 3…); no omitas la última página ni alteres el orden entre páginas.",
         "--- Contenido del PDF ---",
         extractedPdfText,
       ];
     } else if (body.file?.base64 && mime === "application/pdf") {
       preambleLines = [
         ...preambleLines,
-        "PDF adjunto como archivo: si tiene varias páginas, extrae líneas de TODAS las páginas, no solo la primera.",
-        FACTURA_TABULAR_CHUNK_HINT,
+        "PDF adjunto como archivo: si tiene varias páginas, extrae líneas de TODAS las páginas en orden (página 1, luego 2, luego 3…), no solo la primera.",
+        tabularChunkHint,
       ];
     }
 
@@ -750,7 +924,16 @@ export async function POST(request: NextRequest) {
     const { parsed, response } = await generateJsonResponse(contents, hasBinaryMedia);
     const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
     const trimmed = mapRawLines(rawLines as unknown[]);
-    const lines = postProcessGeminiExtractedLines(trimmed);
+    const finalizedSingle = finalizeDocumentGeminiLines(trimmed, {
+      extractMode: body.extractMode,
+      pdfText: extractedPdfText,
+    });
+    const lines = finalizedSingle.lines;
+    processingMeta = attachPdfValidationToMeta(
+      processingMeta,
+      finalizedSingle.validation,
+      pdfTextSource,
+    );
     const reply = typeof parsed.reply === "string" ? parsed.reply : "";
     const usage = usageFromGenAiResponse(response);
 

@@ -2,6 +2,8 @@
  * Modelo principal de carga (RA) compartido por el panel.
  * Se persiste en Supabase como JSON en la tabla `tasks`.
  */
+import type { RaPhotoRecord } from "@/lib/types/raPhoto";
+
 export type Task = {
   id: string;
   ra: string;
@@ -56,4 +58,6 @@ export type Task = {
    * Impide que otra orden de recolección envíe al mismo RA.
    */
   linkedCollectionOrderId?: string;
+  /** Registro fotográfico del RA (URLs en Supabase Storage). */
+  photoRecord?: RaPhotoRecord;
 };

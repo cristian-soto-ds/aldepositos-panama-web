@@ -5,6 +5,10 @@ import {
   type DailyReceptionReportRow,
   type DailyReceptionReportSummary,
 } from "@/lib/receptionLogistics/buildDailyReceptionReport";
+import {
+  rampOccupancyReportLines,
+  type RampOccupancyState,
+} from "@/lib/receptionLogistics/rampOccupancy";
 
 const HEADER_BLUE = "FF16263F";
 const HEADER_TEXT = "FFFFFFFF";
@@ -12,6 +16,7 @@ const TITLE_COLOR = "FF16263F";
 const ROW_ALT = "FFF1F5F9";
 const ACCENT_GREEN = "FFD1FAE5";
 const ACCENT_AMBER = "FFFEF3C7";
+const ACCENT_ORANGE = "FFFFEDD5";
 
 export type ReceptionGeminiSummary = {
   titulo?: string;
@@ -171,6 +176,7 @@ export async function downloadDailyReceptionExcel(params: {
   reportDate?: Date;
   exportedByLabel?: string;
   geminiSummary?: ReceptionGeminiSummary | null;
+  rampOccupancy?: RampOccupancyState | null;
 }): Promise<void> {
   const {
     rows,
@@ -178,18 +184,23 @@ export async function downloadDailyReceptionExcel(params: {
     reportDate = new Date(),
     exportedByLabel = "ALDEPOSITOS",
     geminiSummary,
+    rampOccupancy,
   } = params;
 
   const dateLabel = formatReportDateLabel(reportDate);
   const dateStamp = reportDate.toISOString().slice(0, 10);
+  const rampLines = rampOccupancy ? rampOccupancyReportLines(rampOccupancy) : null;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "ALDEPOSITOS";
   wb.created = new Date();
 
+  const kpiRowCount = 2 + (rampLines ? 2 : 0);
+  const headerRowNum = 3 + kpiRowCount;
+
   const ws = wb.addWorksheet("Recepción OR del día", {
     properties: { defaultRowHeight: 18 },
-    views: [{ state: "frozen", ySplit: 6, showGridLines: false }],
+    views: [{ state: "frozen", ySplit: headerRowNum, showGridLines: false }],
   });
 
   COLUMNS.forEach((col, i) => {
@@ -213,10 +224,26 @@ export async function downloadDailyReceptionExcel(params: {
   ws.getCell(3, 1).font = { name: "Calibri", size: 10, color: { argb: "FF64748B" } };
   ws.getCell(3, 1).alignment = { horizontal: "center" };
 
-  addKpiRow(ws, 4, "Total OR del día", summary.totalOr, ACCENT_AMBER);
-  addKpiRow(ws, 5, "Total bultos", summary.totalBultos, ACCENT_GREEN);
+  let kpiRow = 4;
+  addKpiRow(ws, kpiRow++, "Total OR del día", summary.totalOr, ACCENT_AMBER);
+  addKpiRow(ws, kpiRow++, "Total bultos", summary.totalBultos, ACCENT_GREEN);
+  if (rampLines) {
+    addKpiRow(
+      ws,
+      kpiRow++,
+      rampLines.rampa1.label,
+      rampLines.rampa1.value,
+      rampLines.rampa1.occupied ? ACCENT_ORANGE : ACCENT_GREEN,
+    );
+    addKpiRow(
+      ws,
+      kpiRow++,
+      rampLines.rampa2.label,
+      rampLines.rampa2.value,
+      rampLines.rampa2.occupied ? ACCENT_ORANGE : ACCENT_GREEN,
+    );
+  }
 
-  const headerRowNum = 6;
   const headerRow = ws.getRow(headerRowNum);
   headerRow.values = COLUMNS.map((c) => c.header);
   styleHeaderRow(headerRow);
@@ -263,6 +290,9 @@ export async function downloadDailyReceptionExcel(params: {
     `Prom. descarga: ${formatMinutesLabel(summary.promedioMinDescarga)}`,
     `Prom. tiempo total: ${formatMinutesLabel(summary.promedioMinTotal)}`,
   ];
+  if (summary.rampa1Estado && summary.rampa2Estado) {
+    summaryLines.push(`Rampa 1: ${summary.rampa1Estado} · Rampa 2: ${summary.rampa2Estado}`);
+  }
   ws.mergeCells(totalsRow + 1, 1, totalsRow + 1, COLUMNS.length);
   ws.getCell(totalsRow + 1, 1).value = summaryLines.join("   |   ");
   ws.getCell(totalsRow + 1, 1).font = { name: "Calibri", size: 10, bold: true };

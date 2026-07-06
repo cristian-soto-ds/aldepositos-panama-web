@@ -491,6 +491,24 @@ body.reekon-immersive-active {
   padding-left: max(var(--app-gutter), env(safe-area-inset-left, 0px));
 }
 
+/* Cabecera de marca del sidebar — espacio equilibrado (ni pegado ni excesivo) */
+.sidebar-brand-header {
+  box-sizing: border-box;
+  padding-top: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.625rem));
+  padding-right: 1.25rem;
+  padding-bottom: 1rem;
+  padding-left: 1.25rem;
+}
+
+@media (min-width: 768px) {
+  .sidebar-brand-header {
+    padding-top: max(1.125rem, calc(env(safe-area-inset-top, 0px) + 0.875rem));
+    padding-bottom: 1.125rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
 .app-shell-header {
   min-height: var(--app-header-h);
 }

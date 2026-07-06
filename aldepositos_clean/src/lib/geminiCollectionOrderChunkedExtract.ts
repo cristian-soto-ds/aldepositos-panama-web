@@ -58,14 +58,24 @@ export function splitTextIntoChunks(
 /**
  * Parte el documento por páginas PDF (si hay marcadores) o por tamaño con solapamiento.
  */
+export type DocumentChunkSplit = {
+  chunks: string[];
+  splitByPages: boolean;
+};
+
 export function splitTextIntoDocumentChunks(
   text: string,
   chunkSize: number,
   overlap: number,
-): string[] {
+): DocumentChunkSplit {
   const byPage = splitTextByPdfPages(text);
-  if (byPage && byPage.length > 1) return byPage;
-  return splitTextIntoChunks(text, chunkSize, overlap);
+  if (byPage && byPage.length > 1) {
+    return { chunks: byPage, splitByPages: true };
+  }
+  return {
+    chunks: splitTextIntoChunks(text, chunkSize, overlap),
+    splitByPages: false,
+  };
 }
 
 function preferFilled(a: string | undefined, b: string | undefined): string {
@@ -131,6 +141,11 @@ export function mergeDedupedGeminiLines(rows: CollectionGeminiLine[]): Collectio
   }
 
   return order.map((k) => map.get(k)!);
+}
+
+/** Concatena filas en orden sin deduplicar (fragmentos por página sin solapamiento). */
+export function mergeGeminiLinesInOrder(rows: CollectionGeminiLine[]): CollectionGeminiLine[] {
+  return rows.map((row) => ({ ...row }));
 }
 
 export function sumGeminiUsage(usages: (GeminiTokenUsage | null | undefined)[]): GeminiTokenUsage | null {

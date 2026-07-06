@@ -1,5 +1,8 @@
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
-import { pesoTotalFromLine } from "@/lib/collectionLineUtils";
+import {
+  normalizeCollectionOrderLineMeasures,
+  pesoTotalFromLine,
+} from "@/lib/collectionLineUtils";
 import { cubicajeM3FromRow, roundMeasureNearest } from "@/lib/measureDecimals";
 
 function parseN(v: unknown): number {
@@ -194,6 +197,6 @@ export function normalizeCollectionOrderFields(order: CollectionOrder): Collecti
     expectedBultos,
     expectedPesoKg,
     expectedCbm,
-    lines,
+    lines: lines.map((line) => normalizeCollectionOrderLineMeasures(line)),
   };
 }

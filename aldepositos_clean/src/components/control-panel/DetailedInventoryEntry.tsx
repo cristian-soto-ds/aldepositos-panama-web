@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   ArrowRightLeft,
   Box,
+  Camera,
   ClipboardCheck,
   Download,
   Edit,
@@ -14,6 +15,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
+import { PhotoCaptureModal } from "@/components/modals/PhotoCaptureModal";
+import { appendPhotoToTask } from "@/lib/raPhotoRecord";
+import type { RaPhoto } from "@/lib/types/raPhoto";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
@@ -91,7 +95,7 @@ type DetailedInventoryEntryProps = {
   tasks: any[];
   onUpdateTask: (task: any) => void;
   onDeleteTask: (id: string) => void;
-  onTransferTask: (task: any, newType: "quick" | "detailed" | "airway") => void;
+  onTransferTask: (task: any, newType: "quick" | "detailed") => void;
   openManualModal: () => void;
   openEditModal: (task: any) => void;
   presenceUserKey?: string | null;
@@ -117,6 +121,12 @@ function createEmptyDetailedRow(): MeasureRow {
     referenciasContenedor: "",
     referenciaContenedora: "",
   };
+}
+
+function normalizeDetailedRows(rows: MeasureRow[]): MeasureRow[] {
+  return rows.map(
+    (row) => stripDetailedMeasureRow(row as Record<string, unknown>) as MeasureRow,
+  );
 }
 const CATALOG_DEBOUNCE_MS = 500;
 const DETAILED_AUTOSAVE_MS = 200;
@@ -200,24 +210,31 @@ export function DetailedInventoryEntry({
     }
   }, [transferOpenId]);
 
-  const detailedTasks = tasks.filter((t) => {
-    if (t.type !== "detailed") return false;
-    if (viewMode === "completed") {
-      // Solo completados reales. "partial" es en curso/captura.
-      return t.status === "completed";
-    }
-    if (viewMode === "priority") {
+  const detailedTasks = useMemo(() => {
+    const filtered = tasks.filter((t) => {
+      if (t.type !== "detailed") return false;
+      if (viewMode === "completed") {
+        // Solo completados reales. "partial" es en curso/captura.
+        return t.status === "completed";
+      }
+      if (viewMode === "priority") {
+        return (
+          t.status === "pending" &&
+          (t.containerDraft === true || t.dispatched === true)
+        );
+      }
       return (
-        t.status === "pending" &&
-        (t.containerDraft === true || t.dispatched === true)
+        (t.status === "pending" || t.status === "partial") &&
+        !t.containerDraft &&
+        !t.dispatched
       );
-    }
-    return (
-      (t.status === "pending" || t.status === "partial") &&
-      !t.containerDraft &&
-      !t.dispatched
+    });
+    return [...filtered].sort((a, b) =>
+      String(a.ra ?? "").localeCompare(String(b.ra ?? ""), undefined, {
+        numeric: true,
+      }),
     );
-  });
+  }, [tasks, viewMode]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState("Todos");
@@ -239,6 +256,7 @@ export function DetailedInventoryEntry({
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
+  const [photoCaptureOpen, setPhotoCaptureOpen] = useState(false);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
@@ -246,9 +264,11 @@ export function DetailedInventoryEntry({
   const onLocalSaveCompletedRef = useRef<() => void>(() => {});
 
   const prepareRowsFromRemote = useCallback((remote: SharedTask): MeasureRow[] => {
-    return remote.measureData && remote.measureData.length > 0
-      ? (JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[])
-      : [createEmptyDetailedRow()];
+    const rows =
+      remote.measureData && remote.measureData.length > 0
+        ? (JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[])
+        : [createEmptyDetailedRow()];
+    return normalizeDetailedRows(rows);
   }, []);
 
   const buildEditorHash = useCallback(
@@ -447,12 +467,13 @@ export function DetailedInventoryEntry({
       }
     }
 
-    setMeasureRows(rowsToUse);
-    const hasReempaqueRows = rowsToUse.some((row) => row.reempaque === true);
+    const normalizedRows = normalizeDetailedRows(rowsToUse);
+    setMeasureRows(normalizedRows);
+    const hasReempaqueRows = normalizedRows.some((row) => row.reempaque === true);
     setDetailedMode(hasReempaqueRows ? "reempaque" : "normal");
-    latestRowsRef.current = rowsToUse;
+    latestRowsRef.current = normalizedRows;
     latestTaskRef.current = task;
-    lastSavedHashRef.current = JSON.stringify({ rows: rowsToUse });
+    lastSavedHashRef.current = JSON.stringify({ rows: normalizedRows });
     setAutosaveState("idle");
   };
 
@@ -564,7 +585,7 @@ export function DetailedInventoryEntry({
 
         void mergeCatalogIntoImportedRows("detailed", additions)
           .then(({ rows: enriched, catalogMatched }) => {
-            setMeasureRows((p) => appendDeduped(p, enriched));
+            setMeasureRows((p) => appendDeduped(p, normalizeDetailedRows(enriched)));
             // eslint-disable-next-line no-alert
             alert(
               `Añadidas ${enriched.length} fila(s). Columna usada: «${sourceColumnLabel}».` +
@@ -630,7 +651,14 @@ export function DetailedInventoryEntry({
     }
     const patch = buildMeasurePatchFromCatalog("detailed", item);
     setMeasureRows((prev) =>
-      prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+      prev.map((r) =>
+        r.id === rowId
+          ? (stripDetailedMeasureRow({
+              ...r,
+              ...patch,
+            } as Record<string, unknown>) as MeasureRow)
+          : r,
+      ),
     );
   }, []);
 
@@ -961,17 +989,6 @@ export function DetailedInventoryEntry({
                             >
                               → Ingreso Rápido
                             </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "airway");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2 text-left text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:bg-slate-800/60"
-                            >
-                              → Guía Aérea
-                            </button>
                           </div>
                         )}
                       </div>
@@ -1102,6 +1119,15 @@ export function DetailedInventoryEntry({
             >
               <Download className="h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300" />
               <span className="whitespace-nowrap">Descargar CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhotoCaptureOpen(true)}
+              title="Registro fotográfico del RA"
+              className="flex items-center gap-2 rounded-xl border-2 border-violet-400/80 bg-violet-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-violet-950 shadow-sm transition hover:border-violet-600 hover:bg-violet-100 dark:border-violet-500/50 dark:bg-violet-950/35 dark:text-violet-100 dark:hover:bg-violet-900/45"
+            >
+              <Camera className="h-4 w-4 shrink-0 text-violet-700 dark:text-violet-300" />
+              <span className="whitespace-nowrap">Fotos</span>
             </button>
           </div>
           <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -1529,6 +1555,20 @@ export function DetailedInventoryEntry({
           filenameBase: `inventario-detallado-${raSafe}`,
         });
         setCsvExportOpen(false);
+      }}
+    />
+    <PhotoCaptureModal
+      open={photoCaptureOpen}
+      taskId={t.id}
+      raLabel={String(t.ra ?? "")}
+      takenByEmail={presenceUserKey ?? undefined}
+      takenByName={presenceUserLabel ?? undefined}
+      onClose={() => setPhotoCaptureOpen(false)}
+      onPhotoSaved={async (photo: RaPhoto) => {
+        const merged = appendPhotoToTask(t as SharedTask, photo);
+        const updated = { ...t, photoRecord: merged.photoRecord };
+        await onUpdateTask(updated);
+        setSelectedTask(updated);
       }}
     />
     </>

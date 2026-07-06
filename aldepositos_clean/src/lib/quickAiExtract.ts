@@ -1,30 +1,25 @@
 import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
 import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
+import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
+import {
+  EXTRACT_REFERENCIAS_BULTOS_PROMPT,
+  toRefsBultosOnlyLines,
+} from "@/lib/geminiRefsBultosMode";
 import { supabase } from "@/lib/supabase";
 
-/**
- * Prompt del botón «Leer documento»: extrae ÚNICAMENTE referencias y bultos.
- * El resto (medidas, peso por bulto, etc.) lo captura el inventariador en el RA.
- */
-export const EXTRACT_REFERENCIAS_BULTOS_PROMPT =
-  "Lee con cuidado el documento adjunto y extrae ÚNICAMENTE dos datos por fila: " +
-  "la referencia (puede ser código, SKU, modelo, estilo, artículo, etc.) y la cantidad de bultos. " +
-  "Coloca cada referencia en el campo Referencia y su cantidad de bultos en el campo Bultos. " +
-  "NO completes descripción, unidades, peso, medidas, género ni ningún otro campo. " +
-  "Genera una fila por cada referencia. " +
-  "Si el documento no indica los bultos de una referencia, deja los bultos vacíos en vez de " +
-  "inventar un número. No inventes referencias que no aparezcan en el documento.";
+export { EXTRACT_REFERENCIAS_BULTOS_PROMPT };
 
 export type ExtractedRefLine = { referencia: string; bultos: string };
 
 type GeminiLineLike = { referencia?: unknown; bultos?: unknown };
 
 /**
- * Lee un documento (PDF/imagen) con Alde.IA y devuelve solo referencias y bultos.
- * Lanza Error con mensaje claro si falla la sesión o la respuesta.
+ * Lee un documento (PDF/imagen) con Alde.IA — mismo motor que el chat general
+ * (texto PDF, páginas en orden, fragmentos largos) — y devuelve solo referencias y bultos.
  */
 export async function extractReferenciasBultosFromFile(
   file: File,
+  opts?: { viewerDisplayName?: string | null },
 ): Promise<ExtractedRefLine[]> {
   const attachment = await prepareGeminiAttachment(
     file,
@@ -41,6 +36,8 @@ export async function extractReferenciasBultosFromFile(
     message: EXTRACT_REFERENCIAS_BULTOS_PROMPT,
     history: [{ role: "user", text: EXTRACT_REFERENCIAS_BULTOS_PROMPT }],
     attachment,
+    extractMode: "refsBultosOnly",
+    viewerDisplayName: opts?.viewerDisplayName?.trim() || undefined,
   });
 
   let data: { error?: string; lines?: GeminiLineLike[] };
@@ -63,10 +60,12 @@ export async function extractReferenciasBultosFromFile(
   }
 
   const rawLines = Array.isArray(data.lines) ? data.lines : [];
-  return rawLines
-    .map((l) => ({
-      referencia: String(l.referencia ?? "").trim(),
-      bultos: String(l.bultos ?? "").trim(),
-    }))
-    .filter((l) => l.referencia || l.bultos);
+  const asGeminiLines: CollectionGeminiLine[] = rawLines.map((l) => ({
+    referencia: String(l.referencia ?? "").trim(),
+    bultos: String(l.bultos ?? "").trim(),
+  }));
+  return toRefsBultosOnlyLines(asGeminiLines).map((l) => ({
+    referencia: l.referencia ?? "",
+    bultos: l.bultos ?? "",
+  }));
 }

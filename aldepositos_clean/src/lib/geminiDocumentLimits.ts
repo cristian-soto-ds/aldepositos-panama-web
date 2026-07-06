@@ -40,6 +40,17 @@ export type DocumentProcessingMeta = {
   estimatedRows: number;
   /** false si GEMINI_PDF_MAX_CHUNKS fija el tope manualmente. */
   adaptive: boolean;
+  /** Códigos de producto detectados en texto PDF tras reconciliar. */
+  pdfCodesFound?: number;
+  /** No. de Cartones del pie de factura (si aparece). */
+  cartonesFooter?: number | null;
+  /** Suma de bultos en líneas finales. */
+  bultosSum?: number;
+  /** Origen del texto PDF usado para reconciliación. */
+  pdfTextSource?: "client" | "server" | "none";
+  extractionIncomplete?: boolean;
+  extractionIncompleteReason?: string;
+  linesWithMissingFields?: number;
 };
 
 function clampMaxChunks(n: number): number {

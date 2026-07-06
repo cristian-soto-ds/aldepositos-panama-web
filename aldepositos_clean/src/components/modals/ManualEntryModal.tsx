@@ -11,7 +11,7 @@ type ManualEntryModalProps = {
   onClose: () => void;
   onSave: (task: Task) => void;
   initialData: Task | null;
-  defaultModule: "quick" | "detailed" | "airway";
+  defaultModule: "quick" | "detailed";
 };
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -218,7 +218,6 @@ export function ManualEntryModal({
                   >
                     <option value="quick">Ingreso Rápido</option>
                     <option value="detailed">Ingreso Detallado</option>
-                    <option value="airway">Guía Aérea</option>
                   </select>
                 </div>
               </div>

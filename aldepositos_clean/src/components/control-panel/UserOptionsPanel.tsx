@@ -220,7 +220,6 @@ export function UserOptionsPanel({
             <option value="quick-entry">Ingreso rápido</option>
             <option value="detailed-entry">Ingreso detallado</option>
             <option value="reports">Reportes</option>
-            <option value="monitor">Monitoreo live</option>
             <option value="options">Opciones de usuario</option>
           </select>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 font-semibold">

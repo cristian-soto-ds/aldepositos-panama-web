@@ -76,6 +76,12 @@ Las fotos se guardan en **Storage** (`bucket` `avatars`, ruta `{user_uuid}/avata
 
 Si la política `UPDATE` en `perfiles` choca con las tuyas, ajusta o elimina la duplicada.
 
+## Bucket `ra-photos` (registro fotográfico de RAs)
+
+Las fotos de inventario se guardan en **Storage** (`bucket` `ra-photos`, ruta `{task_id}/{photo_id}.jpg`). La metadata (URL, caption, categoría) vive en `tasks.payload.photoRecord`.
+
+Ejecuta `supabase/migrations/010_ra_photos_bucket.sql` en el SQL Editor (bucket público de lectura; escritura para usuarios autenticados del panel).
+
 ## Nota: borrador de despacho en el navegador
 
 El módulo **Entrega de carga** puede seguir usando `localStorage` solo para el **borrador visual** del formulario de contenedor (campos no guardados como fila aparte). Los **RA y el estado de cada orden** sí se guardan en Supabase vía `payload`. Si quieres unificar también ese borrador en la nube, se puede añadir otra tabla o un campo en `user_metadata`; no está incluido en esta migración.

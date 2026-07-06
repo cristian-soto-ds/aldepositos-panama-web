@@ -18,6 +18,15 @@ function parseIntN(v: unknown): number {
   return Math.round(n);
 }
 
+/** Peso y medidas de una línea de recolección: siempre 2 decimales. */
+export function normalizeCollectionOrderLineMeasures(
+  line: CollectionOrderLine,
+): CollectionOrderLine {
+  return normalizeMeasureFieldsOnRow(
+    line as unknown as Record<string, unknown>,
+  ) as CollectionOrderLine;
+}
+
 /** Unidades totales = bultos × und/bulto (admite und/bulto decimal para cuadrar totales exactos p. ej. 140÷3). */
 export function unidadesTotalesFromLine(line: CollectionOrderLine): number {
   const b = parseN(line.bultos);
@@ -104,7 +113,7 @@ export function collectionLinesToDetailedMeasureData(
       row.volumenM3 !== "" &&
       String(row.volumenM3).trim() !== "";
     const volumenM3 = hasVol ? row.volumenM3 : cubicajeTotalM3FromLine(row);
-    return {
+    return stripDetailedMeasureRow({
       id: row.id,
       referencia: String(row.referencia ?? "").trim(),
       descripcion: String(row.descripcion ?? "").trim(),
@@ -124,7 +133,7 @@ export function collectionLinesToDetailedMeasureData(
       bultoContenedor: "",
       referenciasContenedor: "",
       referenciaContenedora: "",
-    };
+    });
   });
 }
 

@@ -8,6 +8,13 @@ export type CollectionOrderGeminiHistoryTurn = {
 
 export type GeminiAttachment =
   | { mode: "pdfText"; pdfText: string }
+  | {
+      mode: "pdfWithFile";
+      file: File;
+      pdfText?: string;
+      mimeType: string;
+      isPdf?: boolean;
+    }
   | { mode: "file"; file: File; mimeType: string; isPdf?: boolean };
 
 export type CollectionOrderGeminiRequestPayload = {
@@ -17,6 +24,8 @@ export type CollectionOrderGeminiRequestPayload = {
   contextHint?: string;
   viewerDisplayName?: string;
   attachment?: GeminiAttachment;
+  /** Solo referencias y bultos (botón «Leer documento»). Mismo pipeline multipágina que Alde.IA general. */
+  extractMode?: "full" | "refsBultosOnly";
 };
 
 const GEMINI_API_PATH = "/api/collection-order/gemini";
@@ -31,6 +40,14 @@ function resolveTimeoutMs(payload: CollectionOrderGeminiRequestPayload): number 
   const { attachment, message } = payload;
   if (attachment?.mode === "pdfText") {
     return geminiClientTimeoutMs({ pdfText: attachment.pdfText });
+  }
+  if (attachment?.mode === "pdfWithFile") {
+    return geminiClientTimeoutMs({
+      pdfText: attachment.pdfText,
+      hasBinaryFile: true,
+      isPdf: true,
+      fileSizeBytes: attachment.file.size,
+    });
   }
   if (attachment?.mode === "file") {
     return geminiClientTimeoutMs({
@@ -62,8 +79,9 @@ async function callOnce(
   const { attachment, ...rest } = payload;
   const timeoutMs = resolveTimeoutMs(payload);
   const isPdfFile =
-    attachment?.mode === "file" &&
-    (attachment.isPdf ?? attachment.mimeType === "application/pdf");
+    attachment?.mode === "file" || attachment?.mode === "pdfWithFile"
+      ? attachment.isPdf ?? attachment.mimeType === "application/pdf"
+      : false;
   const timeoutReason = timeoutReasonForMs(timeoutMs, isPdfFile);
 
   if (attachment?.mode === "pdfText") {
@@ -74,6 +92,23 @@ async function callOnce(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ ...rest, pdfText: attachment.pdfText }),
+      timeoutMs,
+      timeoutReason,
+    });
+  }
+
+  if (attachment?.mode === "pdfWithFile") {
+    const fd = new FormData();
+    const payloadJson: Record<string, unknown> = { ...rest };
+    if (attachment.pdfText?.trim()) {
+      payloadJson.pdfText = attachment.pdfText.trim();
+    }
+    fd.append("payload", JSON.stringify(payloadJson));
+    fd.append("file", attachment.file, attachment.file.name || "documento.pdf");
+    return fetchWithTimeout(GEMINI_API_PATH, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
       timeoutMs,
       timeoutReason,
     });

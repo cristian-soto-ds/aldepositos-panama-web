@@ -1,6 +1,10 @@
 import { formatMeasure2 } from "@/lib/measureDecimals";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
-import { applyPesoTotalToLine, applyUnidadesTotalesToLine } from "@/lib/collectionLineUtils";
+import {
+  applyPesoTotalToLine,
+  applyUnidadesTotalesToLine,
+  normalizeCollectionOrderLineMeasures,
+} from "@/lib/collectionLineUtils";
 
 const DOZEN = 12;
 /** 12 docenas — uso mayorista en facturas/packing lists. */
@@ -263,7 +267,8 @@ export function normalizeCollectionOrderLineFromImport(
     }
   }
 
-  return {
+  const { id: _id, ...normalized } = normalizeCollectionOrderLineMeasures({
+    id: "",
     referencia: draft.referencia,
     descripcion: draft.descripcion,
     bultos: draft.bultos,
@@ -282,5 +287,6 @@ export function normalizeCollectionOrderLineFromImport(
     forro: draft.forro,
     genero: draft.genero,
     composicion: draft.composicion,
-  };
+  });
+  return normalized;
 }

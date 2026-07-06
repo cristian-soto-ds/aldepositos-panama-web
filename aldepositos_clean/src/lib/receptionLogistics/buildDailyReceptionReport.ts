@@ -35,6 +35,9 @@ export type DailyReceptionReportSummary = {
   promedioMinFila: number | null;
   promedioMinDescarga: number | null;
   promedioMinTotal: number | null;
+  /** Estado al momento de generar el reporte (recepcionista / TV). */
+  rampa1Estado?: string;
+  rampa2Estado?: string;
 };
 
 function parseOrNumero(plate: string): string {

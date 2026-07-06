@@ -1,14 +1,9 @@
 ﻿"use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./reports-print.css";
-import {
-  buildReportPdfFilename,
-  exportReportPdfFromExportRoot,
-  PDF_EXPORT_WIDTH_PX,
-  waitForReportDomReady,
-} from "./reportsPdfExport";
 import { downloadReportExcel } from "@/lib/exportReportExcel";
+import { downloadReportPdfFromExcel } from "@/lib/exportReportPdfFromExcel";
 import type { Task as TaskModel } from "@/lib/types/task";
 import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
 import {
@@ -64,14 +59,12 @@ export function CompletedReportsModule({
   const [singleViewTask, setSingleViewTask] = useState<Task | null>(null);
 
   const [clientFilter, setClientFilter] = useState("Todos");
-  const [typeFilter, setTypeFilter] = useState<
-    "Todos" | "quick" | "detailed" | "airway"
-  >("Todos");
+  const [typeFilter, setTypeFilter] = useState<"Todos" | "quick" | "detailed">(
+    "Todos",
+  );
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  /** Solo el arbol de exportacion PDF (off-screen), no la vista en pantalla */
-  const pdfExportLayoutRef = useRef<HTMLDivElement>(null);
 
   let tasksToPrint: Task[] = [];
   if (singleViewTask) {
@@ -113,17 +106,9 @@ export function CompletedReportsModule({
     setExportError(null);
     setIsDownloadingPdf(true);
     try {
-      const root = pdfExportLayoutRef.current;
-      if (!root) {
-        const err = new Error("[Reports PDF] pdfExportLayoutRef no montado.");
-        console.error(err);
-        setExportError("No se pudo acceder al contenedor de exportacion PDF.");
-        return;
-      }
-
-      await waitForReportDomReady();
-      const filename = buildReportPdfFilename(tasksToPrint);
-      await exportReportPdfFromExportRoot(root, filename);
+      await downloadReportPdfFromExcel({
+        tasks: tasksToPrint as TaskModel[],
+      });
     } catch (e) {
       console.error("[Reports PDF] Fallo al generar PDF:", e);
       setExportError(
@@ -163,7 +148,11 @@ export function CompletedReportsModule({
     );
   }
   if (typeFilter !== "Todos") {
-    displayedTasks = displayedTasks.filter((t) => t.type === typeFilter);
+    displayedTasks = displayedTasks.filter((t) =>
+      typeFilter === "quick"
+        ? t.type === "quick" || t.type === "airway" || !t.type
+        : t.type === typeFilter,
+    );
   }
 
   const toggleSelection = (id: string) => {
@@ -192,39 +181,6 @@ export function CompletedReportsModule({
 
     return (
       <div className="w-full h-full flex flex-col animate-fade bg-slate-100/50 relative">
-        {/* Vista exclusiva para PDF: fuera de pantalla, estilos inline (no captura la UI de pantalla) */}
-        <div
-          aria-hidden
-          style={{
-            position: "fixed",
-            left: "-14000px",
-            top: 0,
-            zIndex: -1,
-            pointerEvents: "none",
-            width: `${PDF_EXPORT_WIDTH_PX}px`,
-            overflow: "visible",
-          }}
-        >
-          <div
-            ref={pdfExportLayoutRef}
-            id="report-pdf-export-root"
-            style={{
-              width: `${PDF_EXPORT_WIDTH_PX}px`,
-              backgroundColor: "#ffffff",
-              boxSizing: "border-box",
-            }}
-          >
-            {tasksToPrint.map((t) => (
-              <ReportPdfExportLayout
-                key={`pdf-export-${t.id}`}
-                task={t as TaskModel}
-                currentDate={currentDate}
-                compact={tasksToPrint.length > 1}
-              />
-            ))}
-          </div>
-        </div>
-
         <div className="reports-print-toolbar shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-sm z-50 sticky top-0">
           <button
             type="button"
@@ -349,7 +305,6 @@ export function CompletedReportsModule({
                     <option value="Todos">TODOS LOS MÓDULOS</option>
                     <option value="quick">Ingreso Rápido</option>
                     <option value="detailed">Ingreso Detallado</option>
-                    <option value="airway">Guía Aérea</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 </div>

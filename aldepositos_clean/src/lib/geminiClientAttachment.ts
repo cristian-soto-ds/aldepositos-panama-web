@@ -15,6 +15,15 @@ export async function prepareGeminiAttachment(
 
   if (mime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
     const pdfText = await extractPdfTextInBrowser(file);
+    if (file.size <= MAX_BINARY_UPLOAD_BYTES) {
+      return {
+        mode: "pdfWithFile",
+        file,
+        pdfText: pdfText ?? undefined,
+        mimeType: "application/pdf",
+        isPdf: true,
+      };
+    }
     if (pdfText) {
       return { mode: "pdfText", pdfText };
     }

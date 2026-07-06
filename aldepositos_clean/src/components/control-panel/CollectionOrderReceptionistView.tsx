@@ -69,7 +69,7 @@ type CollectionOrderReceptionistViewProps = {
   standalone?: boolean;
   onBack?: () => void;
   rampOccupancy?: RampOccupancyState | null;
-  rampOccupancyBusy?: RampOccupancyRampId | null;
+  rampBusy?: RampOccupancyRampId | null;
   onToggleRampOccupancy?: (rampId: RampOccupancyRampId) => void;
   onSetReceptionStatus: (orderId: string, status: ReceptionStatusId) => void;
   onClearReceptionStatus: (orderId: string) => void;
@@ -124,7 +124,7 @@ export function CollectionOrderReceptionistView({
   standalone = false,
   onBack,
   rampOccupancy = null,
-  rampOccupancyBusy = null,
+  rampBusy = null,
   onToggleRampOccupancy,
   onSetReceptionStatus,
   onClearReceptionStatus,
@@ -180,23 +180,22 @@ export function CollectionOrderReceptionistView({
         </p>
       </header>
 
+      {onToggleRampOccupancy ? (
+        <div className="mb-4 shrink-0">
+          <RampOccupancyControls
+            occupancy={rampOccupancy}
+            busyRamp={rampBusy}
+            onToggle={onToggleRampOccupancy}
+          />
+        </div>
+      ) : null}
+
       <CollectionOrderListTabs
         active={activeTab}
         generalCount={generalCount}
         warehouseCount={warehouseCount}
         onChange={setActiveTab}
       />
-
-      {standalone && activeTab === "general" && onToggleRampOccupancy ? (
-        <div className="mb-3 shrink-0">
-          <RampOccupancyControls
-            occupancy={rampOccupancy}
-            busyRamp={rampOccupancyBusy}
-            onToggle={onToggleRampOccupancy}
-            compact
-          />
-        </div>
-      ) : null}
 
       {loading ? (
         <p className="text-sm font-bold text-slate-500">Cargando…</p>

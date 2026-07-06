@@ -2,7 +2,6 @@
 
 import React, { useCallback, useState } from "react";
 import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders";
-import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 import {
   sortCollectionOrdersByNumero,
   updateCollectionOrder,
@@ -11,6 +10,7 @@ import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { ReceptionStatusId } from "@/lib/receptionLogistics/config";
 import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
 import { CollectionOrderReceptionistView } from "@/components/control-panel/CollectionOrderReceptionistView";
+import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 
 type ReceptionistModuleProps = {
   userEmail: string | null;
@@ -22,7 +22,7 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
     userKey: userEmail,
   });
   const [receptionBusyId, setReceptionBusyId] = useState<string | null>(null);
-  const { occupancy, busyRamp, toggleRamp } = useRampOccupancy(!!userEmail);
+  const { occupancy: rampOccupancy, busyRamp, toggleRamp } = useRampOccupancy();
 
   const handleSetReceptionStatus = useCallback(
     async (orderId: string, status: ReceptionStatusId) => {
@@ -86,8 +86,8 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
       orders={orders}
       loading={ordersLoading}
       busyOrderId={receptionBusyId}
-      rampOccupancy={occupancy}
-      rampOccupancyBusy={busyRamp}
+      rampOccupancy={rampOccupancy}
+      rampBusy={busyRamp}
       onToggleRampOccupancy={(rampId) => void toggleRamp(rampId)}
       onSetReceptionStatus={(orderId, status) =>
         void handleSetReceptionStatus(orderId, status)

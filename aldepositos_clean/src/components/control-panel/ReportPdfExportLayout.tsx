@@ -315,7 +315,7 @@ export function ReportPdfExportLayout({
               marginBottom: 6,
             }}
           >
-            Número de recepción (RA)
+            Recibo de almacén
           </div>
           <div
             style={{

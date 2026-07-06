@@ -30,14 +30,14 @@ export const RAMP_OCCUPANCY_META_ID = "meta-ramp-occupancy";
 export const RAMP_OCCUPANCY_COPY = {
   sectionTitle: "Estado de rampas",
   sectionHint:
-    "Marcá cuando un camión está retirando mercancía (no entregando). Así los proveedores ven en TV por qué la rampa parece libre.",
+    "Marcá cuando la rampa no está disponible para descarga (p. ej. retiro de mercancía). Se refleja al instante en la pantalla TV.",
   ramp1Label: "Rampa 1",
   ramp2Label: "Rampa 2",
   free: "Libre",
-  occupiedRetiro: "Ocupada — retiro",
+  occupiedRetiro: "Ocupada",
   occupiedRetiroLong: "Ocupada — retiro de mercancía",
   tvBannerTitle: "Rampa ocupada",
-  tvBannerBody: "Camión retirando mercancía de bodega",
+  tvBannerBody: "No disponible para descarga en este momento",
   operatorBadge: "Retiro en curso",
 } as const;
 
@@ -64,4 +64,36 @@ export function rampOccupancyLabel(entry: RampOccupancyEntry): string {
   if (!entry.occupied) return RAMP_OCCUPANCY_COPY.free;
   if (entry.reason === "retiro") return RAMP_OCCUPANCY_COPY.occupiedRetiro;
   return RAMP_OCCUPANCY_COPY.occupiedRetiro;
+}
+
+export type RampOccupancyReportLine = {
+  label: string;
+  value: string;
+  occupied: boolean;
+};
+
+export function rampOccupancyReportLines(state: RampOccupancyState): {
+  rampa1: RampOccupancyReportLine;
+  rampa2: RampOccupancyReportLine;
+} {
+  const line = (rampLabel: string, entry: RampOccupancyEntry): RampOccupancyReportLine => {
+    let value = rampOccupancyLabel(entry);
+    if (entry.occupied && entry.updatedAt) {
+      const d = new Date(entry.updatedAt);
+      if (!Number.isNaN(d.getTime())) {
+        const time = d.toLocaleTimeString("es-PA", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+        value += ` (desde ${time})`;
+      }
+    }
+    return { label: rampLabel, value, occupied: entry.occupied };
+  };
+
+  return {
+    rampa1: line(RAMP_OCCUPANCY_COPY.ramp1Label, state.RAMPA_1),
+    rampa2: line(RAMP_OCCUPANCY_COPY.ramp2Label, state.RAMPA_2),
+  };
 }

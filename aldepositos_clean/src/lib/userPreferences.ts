@@ -4,7 +4,6 @@ export type StartView =
   | "quick-entry"
   | "detailed-entry"
   | "reports"
-  | "monitor"
   | "options";
 export type TimeFormat = "24h" | "12h";
 
@@ -41,7 +40,6 @@ export function sanitizeUserPreferences(raw: unknown): UserPreferences {
       value.startView === "quick-entry" ||
       value.startView === "detailed-entry" ||
       value.startView === "reports" ||
-      value.startView === "monitor" ||
       value.startView === "options"
         ? value.startView
         : "dashboard",

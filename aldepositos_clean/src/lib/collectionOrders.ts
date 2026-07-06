@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { normalizeCollectionOrderFields } from "@/lib/collectionOrderReconcile";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { DbPayloadRow } from "@/lib/realtimePatch";
 
@@ -55,7 +56,10 @@ export async function fetchCollectionOrders(): Promise<CollectionOrder[]> {
 
   const rows = (data ?? []) as { payload: unknown }[];
   return sortCollectionOrdersByNumero(
-    rows.map((r) => r.payload).filter(isCollectionOrder),
+    rows
+      .map((r) => r.payload)
+      .filter(isCollectionOrder)
+      .map((order) => normalizeCollectionOrderFields(order)),
   );
 }
 
@@ -108,10 +112,9 @@ export type CollectionOrderRealtimeChange = {
 function orderFromDbRow(row: DbPayloadRow | null | undefined): CollectionOrder | null {
   if (!row?.id) return null;
   if (!isCollectionOrder(row.payload)) return null;
-  if (row.payload.id !== row.id) {
-    return { ...row.payload, id: row.id };
-  }
-  return row.payload;
+  const order =
+    row.payload.id !== row.id ? { ...row.payload, id: row.id } : row.payload;
+  return normalizeCollectionOrderFields(order);
 }
 
 function parseCollectionOrderChange(

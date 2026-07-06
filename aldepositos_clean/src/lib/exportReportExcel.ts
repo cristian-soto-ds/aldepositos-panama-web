@@ -24,6 +24,26 @@ const CBM_TEXT = "FF1D4ED8";
 
 const FONT = "Calibri";
 
+export type ReportSheetExportMeta = {
+  repeatTitleStartRow: number;
+  repeatTitleEndRow: number;
+  dataStartRow: number;
+  dataEndRow: number;
+  tailStartRow: number;
+  lastRow: number;
+  colCount: number;
+  isDetailed: boolean;
+};
+
+export type ReportWorkbookResult = {
+  workbook: ExcelJS.Workbook;
+  logoDataUrl: string | null;
+};
+
+type WorksheetWithMeta = ExcelJS.Worksheet & {
+  reportExportMeta?: ReportSheetExportMeta;
+};
+
 function thinBorder(color = BORDER): Partial<ExcelJS.Borders> {
   const edge = { style: "thin" as const, color: { argb: color } };
   return { top: edge, left: edge, bottom: edge, right: edge };
@@ -50,6 +70,17 @@ async function loadLogoBuffer(): Promise<ArrayBuffer | null> {
   }
 }
 
+async function loadLogoDataUrl(): Promise<string | null> {
+  const buf = await loadLogoBuffer();
+  if (!buf) return null;
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
 function colLetter(col: number): string {
   let n = col;
   let s = "";
@@ -70,6 +101,8 @@ function applySheetPrintSetup(
   colCount: number,
   measureRowCount: number,
   isDetailed: boolean,
+  repeatTitleStartRow: number,
+  repeatTitleEndRow: number,
 ): void {
   const lastCol = colLetter(colCount);
   const compactReport = lastRow <= 48 && measureRowCount <= 24;
@@ -86,6 +119,7 @@ function applySheetPrintSetup(
     showGridLines: false,
     showRowColHeaders: false,
     printArea: `A1:${lastCol}${lastRow}`,
+    printTitlesRow: `${repeatTitleStartRow}:${repeatTitleEndRow}`,
     margins: {
       left: 0.35,
       right: 0.35,
@@ -251,6 +285,64 @@ function buildDetailedRow(
   ];
 }
 
+/** Reparte columnas: más espacio a expedidor/cliente, menos a marca. */
+function buildFieldSpans(colCount: number): [number, number][] {
+  const b1 = Math.max(2, Math.round(colCount * 0.28));
+  const b2 = Math.max(b1 + 1, Math.round(colCount * 0.58));
+  const b3 = Math.max(b2 + 1, Math.round(colCount * 0.8));
+  return [
+    [1, b1],
+    [b1 + 1, b2],
+    [b2 + 1, b3],
+    [b3 + 1, colCount],
+  ];
+}
+
+function mergedColumnsWidth(
+  ws: ExcelJS.Worksheet,
+  c1: number,
+  c2: number,
+): number {
+  let total = 0;
+  for (let c = c1; c <= c2; c++) {
+    total += ws.getColumn(c).width ?? 10;
+  }
+  return total;
+}
+
+/** Estima líneas con ajuste de texto según ancho de columnas fusionadas. */
+function estimateWrappedLines(text: string, widthUnits: number): number {
+  const charsPerLine = Math.max(6, Math.floor(widthUnits * 0.82));
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+
+  let lines = 1;
+  let currentLen = 0;
+  for (const word of words) {
+    if (currentLen === 0) {
+      currentLen = word.length;
+      continue;
+    }
+    if (currentLen + 1 + word.length <= charsPerLine) {
+      currentLen += 1 + word.length;
+    } else {
+      lines += 1;
+      currentLen = word.length;
+    }
+  }
+  return lines;
+}
+
+function valueRowHeightForText(
+  text: string,
+  widthUnits: number,
+  fontSize: number,
+): number {
+  const lines = estimateWrappedLines(text, widthUnits);
+  const pt = lines * (fontSize * 1.5) + 12;
+  return Math.min(120, Math.max(36, Math.ceil(pt)));
+}
+
 /** Etiqueta pequeña sobre valor en bloque compacto de 2 filas */
 function writeFieldBlock(
   ws: ExcelJS.Worksheet,
@@ -289,7 +381,7 @@ function writeFieldBlock(
     color: { argb: TEXT },
   };
   valueCell.alignment = {
-    vertical: "top",
+    vertical: "middle",
     horizontal: "left",
     indent: 1,
     wrapText: true,
@@ -431,7 +523,7 @@ function addReportSheet(
     richText: [
       {
         font: { name: FONT, size: 9, color: { argb: MUTED } },
-        text: "NÚMERO DE RECEPCIÓN  ",
+        text: "RECIBO DE ALMACÉN  ",
       },
       {
         font: { name: FONT, size: 20, bold: true, color: { argb: BRAND } },
@@ -450,34 +542,30 @@ function addReportSheet(
   row += 1;
 
   // ═══ DATOS DEL ENVÍO (4 campos en 2 filas) ═══
-  const spans =
-    colCount >= 9
-      ? [
-          [1, 3],
-          [4, 5],
-          [6, 7],
-          [8, colCount],
-        ]
-      : [
-          [1, Math.ceil(colCount / 4)],
-          [Math.ceil(colCount / 4) + 1, Math.ceil(colCount / 2)],
-          [Math.ceil(colCount / 2) + 1, Math.ceil((colCount * 3) / 4)],
-          [Math.ceil((colCount * 3) / 4) + 1, colCount],
-        ];
+  const spans = buildFieldSpans(colCount);
+  const valueRow = row + 1;
 
   const fields = [
     ["CLIENTE", (task.mainClient || "—").toUpperCase(), true],
     ["EXPEDIDOR", (task.subClient || "—").toUpperCase(), false],
     ["PROVEEDOR", (task.provider || "—").toUpperCase(), false],
-    ["MARCA / TRACKING", (task.brand || "—").toUpperCase(), false],
+    ["MARCA", (task.brand || "—").toUpperCase(), false],
   ] as const;
 
+  let maxValueRowHeight = 36;
   fields.forEach(([label, value, hero], i) => {
     const [c1, c2] = spans[i]!;
-    writeFieldBlock(ws, row, row + 1, c1, c2, label, value, { hero });
+    writeFieldBlock(ws, row, valueRow, c1, c2, label, value, { hero });
+    const fontSize = hero ? 12 : 10;
+    const blockHeight = valueRowHeightForText(
+      value,
+      mergedColumnsWidth(ws, c1, c2),
+      fontSize,
+    );
+    maxValueRowHeight = Math.max(maxValueRowHeight, blockHeight);
   });
   ws.getRow(row).height = 18;
-  ws.getRow(row + 1).height = 32;
+  ws.getRow(valueRow).height = maxValueRowHeight;
   row += 2;
 
   // ═══ KPIs (bultos, volumen, peso) ═══
@@ -530,6 +618,7 @@ function addReportSheet(
   // ═══ TABLA DE DIMENSIONES ═══
   safeMergeCells(ws, row, 1, row, colCount);
   setSectionTitle(ws.getCell(row, 1), "DETALLE DE DIMENSIONES");
+  const repeatTitleStartRow = row;
   row += 1;
 
   headers.forEach((label, i) => {
@@ -550,6 +639,7 @@ function addReportSheet(
     cell.border = thinBorder(BRAND);
   });
   ws.getRow(row).height = 24;
+  const repeatTitleEndRow = row;
   row += 1;
 
   const PALLET_HEADER_BG = "FFEEF2FF";
@@ -644,6 +734,9 @@ function addReportSheet(
     row += 1;
   }
 
+  const dataEndRow = row - 1;
+  const tailStartRow = row;
+
   // ═══ OBSERVACIONES ═══
   if (task.notes?.trim()) {
     row += 1;
@@ -683,16 +776,37 @@ function addReportSheet(
 
   const lastRow = row;
   paintCanvas(ws, lastRow, colCount);
-  applySheetPrintSetup(ws, lastRow, colCount, measureRows.length, isDetailed);
+  applySheetPrintSetup(
+    ws,
+    lastRow,
+    colCount,
+    measureRows.length,
+    isDetailed,
+    repeatTitleStartRow,
+    repeatTitleEndRow,
+  );
   ws.views = [{ showGridLines: false, zoomScale: 100 }];
+
+  (ws as WorksheetWithMeta).reportExportMeta = {
+    repeatTitleStartRow,
+    repeatTitleEndRow,
+    dataStartRow: repeatTitleEndRow + 1,
+    dataEndRow,
+    tailStartRow,
+    lastRow,
+    colCount,
+    isDetailed,
+  };
 }
 
-export async function downloadReportExcel(params: {
+export async function buildReportWorkbook(params: {
   tasks: Task[];
   currentDate?: string;
-}): Promise<void> {
+}): Promise<ReportWorkbookResult> {
   const { tasks } = params;
-  if (tasks.length === 0) return;
+  if (tasks.length === 0) {
+    throw new Error("No hay tareas para exportar.");
+  }
 
   const currentDate =
     params.currentDate ??
@@ -707,6 +821,7 @@ export async function downloadReportExcel(params: {
   wb.created = new Date();
 
   const logoBuffer = await loadLogoBuffer();
+  const logoDataUrl = await loadLogoDataUrl();
   const logoId =
     logoBuffer != null
       ? wb.addImage({ buffer: logoBuffer, extension: "png" })
@@ -716,7 +831,19 @@ export async function downloadReportExcel(params: {
     addReportSheet(wb, task, currentDate, logoId);
   }
 
-  const buffer = await wb.xlsx.writeBuffer();
+  return { workbook: wb, logoDataUrl };
+}
+
+export async function downloadReportExcel(params: {
+  tasks: Task[];
+  currentDate?: string;
+}): Promise<void> {
+  const { tasks } = params;
+  if (tasks.length === 0) return;
+
+  const { workbook } = await buildReportWorkbook(params);
+
+  const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });

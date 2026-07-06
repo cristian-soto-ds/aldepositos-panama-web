@@ -1,6 +1,30 @@
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import { normalizeCollectionOrderLineFromImport } from "@/lib/collectionOrderUnitNormalization";
 
+function parseLooseN(v: unknown): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Gemini a veces pone «Peso B.» (26 kg) en el campo w cuando l/h van vacíos.
+ */
+export function remapWeightMisfiledAsWidth(
+  row: CollectionGeminiLine,
+): CollectionGeminiLine {
+  if (String(row.pesoPorBulto ?? "").trim()) return row;
+  const l = parseLooseN(row.l);
+  const w = parseLooseN(row.w);
+  const h = parseLooseN(row.h);
+  if (l > 0 || h > 0 || w <= 0) return row;
+  // Peso típico por bulto (kg); anchos de caja suelen ser > 40 cm si fueran medidas.
+  if (w >= 0.5 && w <= 200) {
+    return { ...row, pesoPorBulto: String(row.w).trim(), w: "" };
+  }
+  return row;
+}
+
 /**
  * Quita patrones típicos de medidas que a veces filtran al campo descripcion.
  */
@@ -79,8 +103,9 @@ export function postProcessGeminiExtractedLines(
 ): CollectionGeminiLine[] {
   const out: CollectionGeminiLine[] = [];
   for (const row of lines) {
-    const normalized = normalizeCollectionOrderLineFromImport(row);
-    const mapped = geminiLineFromNormalized(row, normalized);
+    const remapped = remapWeightMisfiledAsWidth(row);
+    const normalized = normalizeCollectionOrderLineFromImport(remapped);
+    const mapped = geminiLineFromNormalized(remapped, normalized);
     if (lineHasExtractedData(mapped)) out.push(mapped);
   }
   return out;

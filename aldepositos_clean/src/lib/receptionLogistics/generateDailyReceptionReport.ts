@@ -7,6 +7,8 @@ import {
   downloadDailyReceptionExcel,
   type ReceptionGeminiSummary,
 } from "@/lib/receptionLogistics/exportDailyReceptionExcel";
+import { rampOccupancyReportLines, type RampOccupancyState } from "@/lib/receptionLogistics/rampOccupancy";
+import { fetchRampOccupancy } from "@/lib/receptionLogistics/rampOccupancyRepository";
 
 export class DailyReceptionReportError extends Error {
   constructor(
@@ -23,7 +25,25 @@ export async function generateAndDownloadDailyReceptionReport(
   options?: { exportedByLabel?: string; reportDate?: Date },
 ): Promise<{ rowCount: number; withGemini: boolean }> {
   const reportDate = options?.reportDate ?? new Date();
-  const { rows, summary } = buildDailyReceptionReport(trucks, reportDate);
+  const { rows, summary: baseSummary } = buildDailyReceptionReport(trucks, reportDate);
+
+  let rampOccupancy: RampOccupancyState | null = null;
+  try {
+    rampOccupancy = await fetchRampOccupancy();
+  } catch {
+    /* Estado de rampas opcional */
+  }
+
+  const rampLines = rampOccupancy ? rampOccupancyReportLines(rampOccupancy) : null;
+  const summary = {
+    ...baseSummary,
+    ...(rampLines
+      ? {
+          rampa1Estado: rampLines.rampa1.value,
+          rampa2Estado: rampLines.rampa2.value,
+        }
+      : {}),
+  };
 
   if (rows.length === 0) {
     throw new DailyReceptionReportError(
@@ -56,6 +76,7 @@ export async function generateAndDownloadDailyReceptionReport(
     reportDate,
     exportedByLabel: options?.exportedByLabel,
     geminiSummary,
+    rampOccupancy,
   });
 
   return {

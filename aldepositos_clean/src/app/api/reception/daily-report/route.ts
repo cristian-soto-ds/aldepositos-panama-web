@@ -77,7 +77,7 @@ Respondé ÚNICAMENTE con JSON válido (sin markdown) con esta forma:
   "metricasDestacadas": [{ "label": "nombre métrica", "valor": "valor legible" }]
 }
 
-Enfocate en: hora de llegada, tiempo en fila, tiempo de descarga, cuellos de botella en rampas, OR pendientes vs completadas.`;
+Enfocate en: hora de llegada, tiempo en fila, tiempo de descarga, cuellos de botella en rampas, OR pendientes vs completadas, y el estado actual de Rampa 1 / Rampa 2 (libre u ocupada por retiro) si viene en el resumen numérico.`;
 
   try {
     const ai = new GoogleGenAI({ apiKey });

@@ -39,6 +39,7 @@ import {
   sanitizeMeasureTyping,
 } from "@/lib/measureDecimals";
 import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
+import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import {
   countOrdersForCollectionListTab,
   orderHasLinkedRa,
@@ -101,6 +102,8 @@ import {
 import { supabase } from "@/lib/supabase";
 import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
 import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
+import { toRefsBultosOnlyLines } from "@/lib/geminiRefsBultosMode";
+import { remapWeightMisfiledAsWidth } from "@/lib/collectionOrderGeminiPostProcess";
 import {
   recordGeminiRequestSuccess,
 } from "@/lib/geminiClientUsage";
@@ -108,6 +111,22 @@ import {
 const generateId = () => Math.random().toString(36).slice(2, 11);
 const CATALOG_DEBOUNCE_MS = 500;
 const ORDER_AUTOSAVE_MS = 300;
+
+type CollectionOrderDeleteConfirm =
+  | { kind: "single"; order: CollectionOrder }
+  | { kind: "bulk"; orders: CollectionOrder[] };
+
+function collectionOrderDeleteLabel(o: CollectionOrder): string {
+  return `#${String(o.numero ?? "").trim() || o.id.slice(0, 8)}`;
+}
+
+function collectionOrderClientHint(o: CollectionOrder): string | undefined {
+  const hint = [o.cliente, o.proveedor]
+    .map((s) => String(s ?? "").trim())
+    .filter(Boolean)
+    .join(" · ");
+  return hint || undefined;
+}
 
 const makeEmptyGeminiJob = (): CollectionOrderGeminiJobState => ({
   input: "",
@@ -156,6 +175,17 @@ function sanitizeQtyPerBundleInput(raw: string): string {
 
 function formatWeight(value: string | number | undefined): string {
   return formatMeasure2(value);
+}
+
+/** Muestra 2 decimales si el valor guardado trae más (p. ej. 26.0000 → 26.00). */
+function displayMeasureInput(value: string | number | undefined): string {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  const dot = s.indexOf(".");
+  if (dot >= 0 && s.length - dot - 1 > 2) {
+    return formatWeight(s);
+  }
+  return s;
 }
 
 /** Referencias con número de parte en la lista de órdenes (no cuenta filas vacías). */
@@ -406,6 +436,10 @@ export function CollectionOrderModule({
   /** Selección múltiple en la lista de órdenes (eliminar en lote). */
   const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
   const [listTab, setListTab] = useState<CollectionOrderListTab>("general");
+  const [deleteConfirm, setDeleteConfirm] = useState<CollectionOrderDeleteConfirm | null>(
+    null,
+  );
+  const [deleteConfirmBusy, setDeleteConfirmBusy] = useState(false);
 
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -457,8 +491,9 @@ export function CollectionOrderModule({
       return;
     }
 
-    setEditing(remote);
-    lastSavedOrderHashRef.current = JSON.stringify(remote);
+    const normalizedRemote = normalizeCollectionOrderFields(remote);
+    setEditing(normalizedRemote);
+    lastSavedOrderHashRef.current = JSON.stringify(normalizedRemote);
     lastRemoteOrderHashRef.current = remoteLinesHash;
     pendingRemoteOrderRef.current = null;
     setRemoteOrderUpdatePending(false);
@@ -518,9 +553,12 @@ export function CollectionOrderModule({
   const applyPendingRemoteOrder = useCallback(() => {
     const remote = pendingRemoteOrderRef.current;
     if (!remote) return;
-    setEditing(JSON.parse(JSON.stringify(remote)) as CollectionOrder);
-    lastSavedOrderHashRef.current = JSON.stringify(remote);
-    lastRemoteOrderHashRef.current = JSON.stringify(remote.lines);
+    const normalizedRemote = normalizeCollectionOrderFields(
+      JSON.parse(JSON.stringify(remote)) as CollectionOrder,
+    );
+    setEditing(normalizedRemote);
+    lastSavedOrderHashRef.current = JSON.stringify(normalizedRemote);
+    lastRemoteOrderHashRef.current = JSON.stringify(normalizedRemote.lines);
     pendingRemoteOrderRef.current = null;
     setRemoteOrderUpdatePending(false);
     setPendingUndTot({});
@@ -694,12 +732,13 @@ export function CollectionOrderModule({
   const persistOrder = useCallback(
     async (params: { order: CollectionOrder; showAlerts: boolean }) => {
       const { order, showAlerts } = params;
+      const normalizedOrder = normalizeCollectionOrderFields(order);
       const maxExisting = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
       const suggested = String(maxExisting + 1);
-      const numeroRaw = String(order.numero ?? "").trim();
+      const numeroRaw = String(normalizedOrder.numero ?? "").trim();
       const numero = numeroRaw || suggested;
       const payload: CollectionOrder = {
-        ...order,
+        ...normalizedOrder,
         numero,
         updatedAt: new Date().toISOString(),
       };
@@ -740,9 +779,12 @@ export function CollectionOrderModule({
           editingRef.current &&
           JSON.stringify(editingRef.current) === lastSavedOrderHashRef.current
         ) {
-          setEditing(JSON.parse(JSON.stringify(pending)) as CollectionOrder);
-          lastSavedOrderHashRef.current = JSON.stringify(pending);
-          lastRemoteOrderHashRef.current = JSON.stringify(pending.lines);
+          const normalizedPending = normalizeCollectionOrderFields(
+            JSON.parse(JSON.stringify(pending)) as CollectionOrder,
+          );
+          setEditing(normalizedPending);
+          lastSavedOrderHashRef.current = JSON.stringify(normalizedPending);
+          lastRemoteOrderHashRef.current = JSON.stringify(normalizedPending.lines);
           pendingRemoteOrderRef.current = null;
           setRemoteOrderUpdatePending(false);
         }
@@ -786,76 +828,77 @@ export function CollectionOrderModule({
     };
   }, [editing, scheduleAutoSave]);
 
-  const deleteOrder = async (o: CollectionOrder) => {
-     
-    if (
-      !confirm(
-        `¿Eliminar la orden de recolección #${String(o.numero ?? "").trim() || o.id.slice(0, 8)}?`,
-      )
-    )
-      return;
-    try {
-      await deleteCollectionOrderById(o.id);
-      await syncCollectionOrderToReceptionQueue({
-        ...o,
-        receptionStatus: undefined,
-      });
-      setOrders((prev) => prev.filter((x) => x.id !== o.id));
-      if (editing?.id === o.id) setEditing(null);
-    } catch (e) {
-      console.error(e);
-       
-      alert("No se pudo eliminar en Supabase.");
-    }
+  const removeOrderFromState = async (o: CollectionOrder) => {
+    await deleteCollectionOrderById(o.id);
+    await syncCollectionOrderToReceptionQueue({
+      ...o,
+      receptionStatus: undefined,
+    });
+    setOrders((prev) => prev.filter((x) => x.id !== o.id));
+    if (editing?.id === o.id) setEditing(null);
   };
 
-  const deleteSelectedOrders = async () => {
+  const requestDeleteOrder = (o: CollectionOrder) => {
+    setDeleteConfirm({ kind: "single", order: o });
+  };
+
+  const requestDeleteSelectedOrders = () => {
     const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
     if (selected.length === 0) {
       alert("Seleccioná al menos una orden.");
       return;
     }
-    const labels = selected.map((o) => `#${String(o.numero ?? "").trim() || o.id.slice(0, 8)}`);
-    const preview =
-      labels.length <= 8 ? labels.join(", ") : `${labels.slice(0, 8).join(", ")}… (+${labels.length - 8})`;
-    if (
-      !confirm(
-        `¿Eliminar ${selected.length} orden(es) de recolección?\n${preview}`,
-      )
-    ) {
-      return;
-    }
-    let failed = 0;
-    const deletedIds: string[] = [];
-    for (const o of selected) {
-      try {
-        await deleteCollectionOrderById(o.id);
-        await syncCollectionOrderToReceptionQueue({
-          ...o,
-          receptionStatus: undefined,
-        });
-        deletedIds.push(o.id);
-      } catch (e) {
-        console.error(e);
-        failed += 1;
+    setDeleteConfirm({ kind: "bulk", orders: selected });
+  };
+
+  const confirmDeleteOrders = async () => {
+    if (!deleteConfirm) return;
+    setDeleteConfirmBusy(true);
+    try {
+      if (deleteConfirm.kind === "single") {
+        await removeOrderFromState(deleteConfirm.order);
+        setDeleteConfirm(null);
+        return;
       }
-    }
-    const deletedSet = new Set(deletedIds);
-    setOrders((prev) => prev.filter((x) => !deletedSet.has(x.id)));
-    setGeminiJobByOrderId((prev) => {
-      const next = { ...prev };
-      for (const id of deletedIds) delete next[id];
-      return next;
-    });
-    setSelectedOrderIds((prev) => {
-      const next = { ...prev };
-      for (const id of deletedIds) delete next[id];
-      return next;
-    });
-    if (editing && deletedSet.has(editing.id)) setEditing(null);
-    if (failed > 0) {
-      alert(`${failed} orden(es) no se pudieron eliminar. Revisá Supabase y reintentá.`);
-      void reloadOrders();
+
+      let failed = 0;
+      const deletedIds: string[] = [];
+      for (const o of deleteConfirm.orders) {
+        try {
+          await deleteCollectionOrderById(o.id);
+          await syncCollectionOrderToReceptionQueue({
+            ...o,
+            receptionStatus: undefined,
+          });
+          deletedIds.push(o.id);
+        } catch (e) {
+          console.error(e);
+          failed += 1;
+        }
+      }
+      const deletedSet = new Set(deletedIds);
+      setOrders((prev) => prev.filter((x) => !deletedSet.has(x.id)));
+      setGeminiJobByOrderId((prev) => {
+        const next = { ...prev };
+        for (const id of deletedIds) delete next[id];
+        return next;
+      });
+      setSelectedOrderIds((prev) => {
+        const next = { ...prev };
+        for (const id of deletedIds) delete next[id];
+        return next;
+      });
+      if (editing && deletedSet.has(editing.id)) setEditing(null);
+      setDeleteConfirm(null);
+      if (failed > 0) {
+        alert(`${failed} orden(es) no se pudieron eliminar. Revisá Supabase y reintentá.`);
+        void reloadOrders();
+      }
+    } catch (e) {
+      console.error(e);
+      alert("No se pudo eliminar en Supabase.");
+    } finally {
+      setDeleteConfirmBusy(false);
     }
   };
 
@@ -1225,7 +1268,18 @@ export function CollectionOrderModule({
       setSelectedOrderIds(next);
     };
 
+    const deleteModalSingle =
+      deleteConfirm?.kind === "single" ? deleteConfirm.order : null;
+    const deleteModalBulk =
+      deleteConfirm?.kind === "bulk" ? deleteConfirm.orders : null;
+    const bulkLabels = deleteModalBulk?.map(collectionOrderDeleteLabel) ?? [];
+    const bulkPreview =
+      bulkLabels.length <= 8
+        ? bulkLabels.join(", ")
+        : `${bulkLabels.slice(0, 8).join(", ")}… (+${bulkLabels.length - 8})`;
+
     return (
+      <>
       <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col bg-gradient-to-b from-indigo-50/40 via-transparent to-transparent px-2 py-3 sm:px-3 md:px-0 md:py-6 dark:from-indigo-950/20">
         <header className="mb-3 shrink-0 rounded-2xl border border-indigo-300/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-xl shadow-indigo-500/25 dark:border-indigo-900/40 sm:mb-4 sm:rounded-3xl sm:p-5 md:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1320,7 +1374,7 @@ export function CollectionOrderModule({
               <button
                 type="button"
                 disabled={listSelectedCount === 0}
-                onClick={() => void deleteSelectedOrders()}
+                onClick={() => requestDeleteSelectedOrders()}
                 className="ml-auto rounded-xl border-2 border-red-200 bg-red-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-40 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
               >
                 Eliminar seleccionadas
@@ -1465,7 +1519,7 @@ export function CollectionOrderModule({
                       type="button"
                       onClick={(ev) => {
                         ev.stopPropagation();
-                        void deleteOrder(o);
+                        requestDeleteOrder(o);
                       }}
                       className="relative z-[1] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-red-900/50 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                     >
@@ -1487,6 +1541,33 @@ export function CollectionOrderModule({
           onConfirm={(imported) => void confirmHtmImport(imported)}
         />
       </div>
+
+      <DeleteRaConfirmModal
+        open={deleteConfirm != null}
+        headingTitle="Eliminar orden"
+        questionPrefix={
+          deleteModalSingle
+            ? "¿Eliminar la orden de recolección"
+            : "¿Eliminar"
+        }
+        raLabel={
+          deleteModalSingle
+            ? collectionOrderDeleteLabel(deleteModalSingle)
+            : `${deleteModalBulk?.length ?? 0} orden(es) de recolección`
+        }
+        questionSuffix="?"
+        clientHint={
+          deleteModalSingle
+            ? collectionOrderClientHint(deleteModalSingle)
+            : bulkPreview || undefined
+        }
+        busy={deleteConfirmBusy}
+        onCancel={() => {
+          if (!deleteConfirmBusy) setDeleteConfirm(null);
+        }}
+        onConfirm={() => void confirmDeleteOrders()}
+      />
+      </>
     );
   }
 
@@ -1579,6 +1660,7 @@ export function CollectionOrderModule({
         orderNumber: String(e.numero ?? "").trim() || undefined,
         contextHint,
         viewerDisplayName: String(userDisplayName ?? "").trim() || undefined,
+        extractMode: onlyRefsBultos ? "refsBultosOnly" : undefined,
       });
 
       let data: {
@@ -1590,6 +1672,12 @@ export function CollectionOrderModule({
           candidatesTokenCount?: number;
           totalTokenCount?: number;
         } | null;
+        processing?: {
+          cartonesFooter?: number | null;
+          bultosSum?: number;
+          extractionIncomplete?: boolean;
+          extractionIncompleteReason?: string;
+        };
       };
       try {
         const ct = res.headers.get("content-type") || "";
@@ -1622,17 +1710,19 @@ export function CollectionOrderModule({
 
       const reply = String(data.reply ?? "");
       const rawLines = Array.isArray(data.lines) ? data.lines : [];
-      // Botón «Leer documento»: solo referencias y bultos. El resto (medidas,
-      // peso por bulto, etc.) lo completará el RA de Ingreso Rápido.
-      const lines = onlyRefsBultos
-        ? rawLines
-            .map((l) => ({
-              referencia: String(l.referencia ?? "").trim(),
-              bultos: String(l.bultos ?? "").trim(),
-            }))
-            .filter((l) => l.referencia || l.bultos)
-        : rawLines;
+      const lines = onlyRefsBultos ? toRefsBultosOnlyLines(rawLines) : rawLines;
       const usageSummary = recordGeminiRequestSuccess(data.usage ?? null);
+
+      if (!onlyRefsBultos && data.processing?.extractionIncomplete) {
+        const reason = String(data.processing.extractionIncompleteReason ?? "").trim();
+        patchGeminiJob(orderId, {
+          errorBanner: {
+            text: reason
+              ? `Extracción incompleta: ${reason}`
+              : "Extracción incompleta: revisá bultos, descripción o peso en algunas filas.",
+          },
+        });
+      }
 
       patchGeminiJob(orderId, {
         lastLines: lines,
@@ -1641,8 +1731,9 @@ export function CollectionOrderModule({
         pendingFileName: null,
         busy: false,
       });
-      // Auto-aplicar y autoguardar siempre.
-      applyGeminiLinesToOrder(lines);
+      applyGeminiLinesToOrder(lines, {
+        cartonesFooter: onlyRefsBultos ? undefined : data.processing?.cartonesFooter,
+      });
     } catch (err) {
       const text =
         err instanceof DOMException && err.name === "TimeoutError"
@@ -1657,7 +1748,10 @@ export function CollectionOrderModule({
     }
   };
 
-  const applyGeminiLinesToOrder = (incoming?: CollectionGeminiLine[]) => {
+  const applyGeminiLinesToOrder = (
+    incoming?: CollectionGeminiLine[],
+    opts?: { cartonesFooter?: number | null },
+  ) => {
     const source = Array.isArray(incoming)
       ? incoming
       : (geminiJobByOrderId[orderId]?.lastLines ?? []);
@@ -1684,21 +1778,55 @@ export function CollectionOrderModule({
         row.composicion,
     );
     if (useful.length === 0) return;
-    const additions: CollectionOrderLine[] = useful.map((row) => ({
-      id: generateId(),
-      ...normalizeCollectionOrderLineFromImport(row),
-    }));
+
+    const refKey = (raw: string) =>
+      String(raw ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "");
+
     const baseOrder =
       (editing && editing.id === orderId
         ? editing
         : orders.find((o) => o.id === orderId)) ?? e;
+
+    const mergedLines = [...(baseOrder.lines || [])];
+    const refIndex = new Map<string, number>();
+    mergedLines.forEach((row, i) => {
+      const key = refKey(String(row.referencia ?? ""));
+      if (key) refIndex.set(key, i);
+    });
+
+    for (const row of useful) {
+      const remapped = remapWeightMisfiledAsWidth(row);
+      const normalized: CollectionOrderLine = {
+        id: generateId(),
+        ...normalizeCollectionOrderLineFromImport(remapped),
+      };
+      const key = refKey(normalized.referencia);
+      if (key && refIndex.has(key)) {
+        const idx = refIndex.get(key)!;
+        const existingId = mergedLines[idx]!.id;
+        mergedLines[idx] = { ...mergedLines[idx], ...normalized, id: existingId };
+        void runCatalogLookup(existingId, normalized.referencia);
+      } else {
+        mergedLines.push(normalized);
+        if (key) refIndex.set(key, mergedLines.length - 1);
+        void runCatalogLookup(normalized.id, normalized.referencia);
+      }
+    }
+
+    const cartones = opts?.cartonesFooter;
     const nextOrder: CollectionOrder = {
       ...baseOrder,
-      lines: [...(baseOrder.lines || []), ...additions],
+      lines: mergedLines,
+      ...(cartones != null &&
+      cartones > 0 &&
+      (baseOrder.expectedBultos == null || baseOrder.expectedBultos === 0)
+        ? { expectedBultos: Math.round(cartones) }
+        : {}),
     };
     patchGeminiJob(orderId, { lastLines: [] });
-    // Reflejar de inmediato las líneas extraídas en el editor visible.
-    // (persistOrder conserva las ediciones del usuario y no siempre repinta.)
     setEditing((prev) =>
       prev && prev.id === orderId ? nextOrder : prev,
     );
@@ -2261,7 +2389,7 @@ export function CollectionOrderModule({
                       <td className="px-2 py-1 w-24">
                         <input
                           type="text"
-                          value={row.pesoPorBulto ?? ""}
+                          value={displayMeasureInput(row.pesoPorBulto)}
                           disabled={weightMode === "total"}
                           onChange={(ev) =>
                             updateLine(row.id, {

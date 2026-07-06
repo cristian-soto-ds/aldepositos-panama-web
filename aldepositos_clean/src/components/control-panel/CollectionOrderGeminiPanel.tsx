@@ -24,6 +24,7 @@ import {
   listGeminiLearningNotes,
   type GeminiLearningNote,
 } from "@/lib/geminiLearningNotes";
+import { EXTRACT_REFERENCIAS_BULTOS_PROMPT } from "@/lib/geminiRefsBultosMode";
 
 type ChatTurn = { role: "user" | "model"; text: string };
 
@@ -58,16 +59,6 @@ type CollectionOrderGeminiPanelProps = {
 };
 
 const ACCEPT_FILES = ".pdf,.png,.jpg,.jpeg,.webp";
-
-/** Prompt del botón rápido: leer documento y extraer referencias + bultos. */
-const EXTRACT_REFERENCIAS_PROMPT =
-  "Lee con cuidado el documento adjunto y extrae ÚNICAMENTE dos datos por fila: " +
-  "la referencia (puede ser código, SKU, modelo, estilo, artículo, etc.) y la cantidad de bultos. " +
-  "Coloca cada referencia en el campo Referencia y su cantidad de bultos en el campo Bultos. " +
-  "NO completes descripción, unidades, peso, medidas, género ni ningún otro campo: esos los " +
-  "tomará después el RA de Ingreso Rápido. Genera una fila por cada referencia. " +
-  "Si el documento no indica los bultos de una referencia, deja los bultos vacíos en vez de " +
-  "inventar un número. No inventes referencias que no aparezcan en el documento.";
 
 function greetingFirstName(displayName: string | null | undefined): string | null {
   const full = sanitizeViewerDisplayNameHint(displayName);
@@ -170,7 +161,7 @@ export function CollectionOrderGeminiPanel({
     try {
       onChangeJob({ input: "" });
       await onSend({
-        text: EXTRACT_REFERENCIAS_PROMPT,
+        text: EXTRACT_REFERENCIAS_BULTOS_PROMPT,
         file,
         onlyRefsBultos: true,
       });

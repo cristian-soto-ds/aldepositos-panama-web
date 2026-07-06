@@ -6,6 +6,7 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
+  Camera,
   Check,
   CheckCircle2,
   Circle,
@@ -14,7 +15,6 @@ import {
   Download,
   LayoutGrid,
   Loader2,
-  Plane,
   Plus,
   Recycle,
   Ruler,
@@ -55,6 +55,9 @@ import {
 } from "@/lib/quickInventoryTypes";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
+import { PhotoCaptureModal } from "@/components/modals/PhotoCaptureModal";
+import { appendPhotoToTask } from "@/lib/raPhotoRecord";
+import type { RaPhoto } from "@/lib/types/raPhoto";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
@@ -94,12 +97,10 @@ import { formatRelativeTime } from "@/lib/relativeTime";
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type QuickInventoryEntryProps = {
-  /** "quick" = Ingreso Rápido; "airway" = Guía Aérea (misma captura, otro tipo de RA). */
-  moduleType?: "quick" | "airway";
   tasks: Task[];
   onUpdateTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
-  onTransferTask: (task: Task, newType: "quick" | "detailed" | "airway") => void;
+  onTransferTask: (task: Task, newType: "quick" | "detailed") => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
   /** Si se envía, el panel principal puede mostrar quién tiene un RA abierto (pestañas mismo equipo). */
@@ -197,6 +198,15 @@ type QuickDraft = {
 
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
   `${kind}_inventory_draft_v1_${taskId}`;
+
+/** Ingreso rápido incluye RAs legacy tipo `airway` (módulo eliminado). */
+function isQuickInventoryTask(t: Task): boolean {
+  return !t.type || t.type === "quick" || t.type === "airway";
+}
+
+function taskDraftKind(task: Pick<Task, "type"> | null | undefined): "quick" | "airway" {
+  return task?.type === "airway" ? "airway" : "quick";
+}
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -566,7 +576,6 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
 });
 
 export function QuickInventoryEntry({
-  moduleType = "quick",
   tasks,
   onUpdateTask,
   onDeleteTask,
@@ -592,8 +601,8 @@ export function QuickInventoryEntry({
   }, [transferOpenId]);
 
   const moduleTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (t.type !== moduleType) return false;
+    const filtered = tasks.filter((t) => {
+      if (!isQuickInventoryTask(t)) return false;
       if (viewMode === "completed") {
         return t.status === "completed";
       }
@@ -609,7 +618,12 @@ export function QuickInventoryEntry({
         !t.dispatched
       );
     });
-  }, [tasks, moduleType, viewMode]);
+    return [...filtered].sort((a, b) =>
+      String(a.ra ?? "").localeCompare(String(b.ra ?? ""), undefined, {
+        numeric: true,
+      }),
+    );
+  }, [tasks, viewMode]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [clientFilter, setClientFilter] = useState<string>("Todos");
@@ -640,6 +654,7 @@ export function QuickInventoryEntry({
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
+  const [photoCaptureOpen, setPhotoCaptureOpen] = useState(false);
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -818,8 +833,7 @@ export function QuickInventoryEntry({
       return;
     }
     const label = presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
-    const presenceModule =
-      moduleType === "airway" ? ("airway" as const) : ("quick" as const);
+    const presenceModule = "quick" as const;
     const tabId = getSharedWorkPresenceTabId();
     const send = () => {
       publishWorkPresence({
@@ -842,7 +856,6 @@ export function QuickInventoryEntry({
     presenceUserKey,
     presenceUserLabel,
     presenceAvatarUrl,
-    moduleType,
   ]);
 
   const groupedTasks = useMemo(
@@ -945,7 +958,7 @@ export function QuickInventoryEntry({
 
     if (typeof window !== "undefined") {
       const rawDraft = window.localStorage.getItem(
-        inventoryDraftKey(task.id, moduleType),
+        inventoryDraftKey(task.id, taskDraftKind(task)),
       );
       const savedLayout = window.localStorage.getItem(CAPTURE_LAYOUT_STORAGE_KEY);
       if (isCaptureLayout(savedLayout)) {
@@ -1385,7 +1398,7 @@ export function QuickInventoryEntry({
         return;
       }
       const mod: InventoryCatalogModule =
-        moduleType === "airway" ? "airway" : "quick";
+        taskDraftKind(selectedTask) === "airway" ? "airway" : "quick";
       const patch = buildMeasurePatchFromCatalog(mod, item);
       setMeasureRows((prev) =>
         stripQuickRowsForPersist(
@@ -1393,7 +1406,7 @@ export function QuickInventoryEntry({
         ),
       );
     },
-    [moduleType],
+    [selectedTask],
   );
 
   const scheduleCatalogLookup = useCallback(
@@ -1447,7 +1460,7 @@ export function QuickInventoryEntry({
       sourceReferences: { ...sourceReferencesRef.current },
     };
     window.localStorage.setItem(
-      inventoryDraftKey(taskId, moduleType),
+      inventoryDraftKey(taskId, taskDraftKind(latestTaskRef.current)),
       JSON.stringify(draft),
     );
   };
@@ -1502,7 +1515,7 @@ export function QuickInventoryEntry({
 
     const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
     if (!hasCapture && typeof window !== "undefined") {
-      window.localStorage.removeItem(inventoryDraftKey(task.id, moduleType));
+      window.localStorage.removeItem(inventoryDraftKey(task.id, taskDraftKind(task)));
     }
 
     const updatedTask: Task = applyInventoryAttribution(
@@ -1606,7 +1619,7 @@ export function QuickInventoryEntry({
         autosaveTimerRef.current = null;
       }
     };
-  }, [measureRows, selectedTask, moduleType, referenceMode, captureLayout]);
+  }, [measureRows, selectedTask, referenceMode, captureLayout]);
 
   // Refleja en pendingCount cuando un guardado confirma (hash guardado == pendiente).
   useEffect(() => {
@@ -1674,7 +1687,7 @@ export function QuickInventoryEntry({
     const persistedRows = hasCapture ? stripQuickRowsForPersist(measureRows) : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(
-        inventoryDraftKey(selectedTask.id, moduleType),
+        inventoryDraftKey(selectedTask.id, taskDraftKind(selectedTask)),
       );
     }
 
@@ -1714,7 +1727,7 @@ export function QuickInventoryEntry({
       lastSavedHashRef.current = currentHash;
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(
-          inventoryDraftKey(selectedTask.id, moduleType),
+          inventoryDraftKey(selectedTask.id, taskDraftKind(selectedTask)),
         );
       }
       retryAttemptsRef.current = 0;
@@ -1740,17 +1753,8 @@ export function QuickInventoryEntry({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div>
                 <h2 className="text-fluid-title flex items-center gap-2 font-bold text-[#16263F] dark:text-slate-100 md:gap-3">
-                  {moduleType === "airway" ? (
-                    <>
-                      <Plane className="icon-lg text-orange-500" />
-                      Guía aérea
-                    </>
-                  ) : (
-                    <>
-                      <Box className="icon-lg text-[#16263F] dark:text-slate-100" />
-                      Ingreso rápido
-                    </>
-                  )}
+                  <Box className="icon-lg text-[#16263F] dark:text-slate-100" />
+                  Ingreso rápido
                 </h2>
               </div>
               <button
@@ -1954,57 +1958,30 @@ export function QuickInventoryEntry({
                       </button>
                     {transferOpenId === t.id && (
                       <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
-                        {moduleType === "quick" ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "detailed");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                            >
-                              → Ingreso Detallado
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "airway");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                            >
-                              → Guía Aérea
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "quick");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                            >
-                              → Ingreso Rápido
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onTransferTask(t, "detailed");
-                                setTransferOpenId(null);
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                            >
-                              → Ingreso Detallado
-                            </button>
-                          </>
-                        )}
+                        {t.type === "airway" ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTransferTask(t, "quick");
+                              setTransferOpenId(null);
+                            }}
+                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                          >
+                            → Ingreso Rápido
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onTransferTask(t, "detailed");
+                            setTransferOpenId(null);
+                          }}
+                          className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
+                        >
+                          → Ingreso Detallado
+                        </button>
                       </div>
                     )}
                   </div>
@@ -2154,7 +2131,7 @@ export function QuickInventoryEntry({
               setCsvExportOpen(false);
               return;
             }
-            const variant = moduleType === "airway" ? "airway" : "quick";
+            const variant = taskDraftKind(t);
             const raSafe = String(t.ra ?? "RA").replace(/[/\\?%*:|"<>]/g, "-");
             downloadInventarioCsv({
               numeroDocumento,
@@ -2163,6 +2140,27 @@ export function QuickInventoryEntry({
               filenameBase: `inventario-${variant}-${raSafe}`,
             });
             setCsvExportOpen(false);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setPhotoCaptureOpen(true)}
+          className="fixed bottom-24 right-4 z-[10001] flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-xl"
+        >
+          <Camera className="h-4 w-4" />
+          Fotos
+        </button>
+        <PhotoCaptureModal
+          open={photoCaptureOpen}
+          taskId={t.id}
+          raLabel={String(t.ra ?? "")}
+          takenByEmail={presenceUserKey ?? undefined}
+          takenByName={presenceUserLabel ?? undefined}
+          onClose={() => setPhotoCaptureOpen(false)}
+          onPhotoSaved={async (photo: RaPhoto) => {
+            const updated = appendPhotoToTask(t, photo);
+            await onUpdateTask(updated);
+            setSelectedTask(updated);
           }}
         />
       </>
@@ -2194,6 +2192,15 @@ export function QuickInventoryEntry({
             <Download className="icon-sm" />
             <span className="truncate">CSV</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setPhotoCaptureOpen(true)}
+            title="Registro fotográfico del RA"
+            className="inline-flex touch-target items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2 py-2.5 text-xs font-semibold text-violet-900 transition hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100 dark:hover:bg-violet-900/50 sm:gap-2 sm:px-3"
+          >
+            <Camera className="icon-sm" />
+            <span className="truncate">Fotos</span>
+          </button>
         </div>
 
           {t && (
@@ -2203,11 +2210,7 @@ export function QuickInventoryEntry({
                 onChange={setCaptureLayoutWithPersist}
               />
               <span className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#16263F] shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:flex-none sm:text-sm">
-                {moduleType === "airway" ? (
-                  <Plane className="icon-sm text-orange-500" />
-                ) : (
-                  <Box className="icon-sm text-blue-600 dark:text-blue-400" />
-                )}
+                <Box className="icon-sm text-blue-600 dark:text-blue-400" />
                 RA-{t.ra}
               </span>
               <SyncStatusBadge
@@ -2237,13 +2240,7 @@ export function QuickInventoryEntry({
         <div className="flex h-full min-h-0 max-h-full flex-1 flex-col gap-1.5 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:gap-2 sm:rounded-2xl sm:p-2 md:p-3">
           <InventoryReceptionCompact
             friendly
-            leadingIcon={
-              moduleType === "airway" ? (
-                <Plane className="h-4 w-4" aria-hidden />
-              ) : (
-                <Box className="h-4 w-4" aria-hidden />
-              )
-            }
+            leadingIcon={<Box className="h-4 w-4" aria-hidden />}
             badge="RA · referencia previa"
             provider={t.provider}
             brand={t.brand}
@@ -2532,7 +2529,7 @@ export function QuickInventoryEntry({
           setCsvExportOpen(false);
           return;
         }
-        const variant = moduleType === "airway" ? "airway" : "quick";
+        const variant = taskDraftKind(t);
         const raSafe = String(t.ra ?? "RA").replace(/[/\\?%*:|"<>]/g, "-");
         downloadInventarioCsv({
           numeroDocumento,
@@ -2541,6 +2538,19 @@ export function QuickInventoryEntry({
           filenameBase: `inventario-${variant}-${raSafe}`,
         });
         setCsvExportOpen(false);
+      }}
+    />
+    <PhotoCaptureModal
+      open={photoCaptureOpen}
+      taskId={t.id}
+      raLabel={String(t.ra ?? "")}
+      takenByEmail={presenceUserKey ?? undefined}
+      takenByName={presenceUserLabel ?? undefined}
+      onClose={() => setPhotoCaptureOpen(false)}
+      onPhotoSaved={async (photo: RaPhoto) => {
+        const updated = appendPhotoToTask(t, photo);
+        await onUpdateTask(updated);
+        setSelectedTask(updated);
       }}
     />
     {palletModalOpen && (() => {

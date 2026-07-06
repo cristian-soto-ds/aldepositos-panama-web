@@ -127,7 +127,7 @@ function parseJeancenterRowSlice(ref: string, slice: string): JeancenterInvoiceR
     if (modelo) row.modelo = modelo;
     if (genero) row.genero = genero;
   } else if (!row.descripcion) {
-    const descBeforePeso = /^(.+?)(?:\s+Peso\s*B|$)/is.exec(
+    const descBeforePeso = /^(.+?)(?:\s+Peso\s*B|$)/i.exec(
       tail.replace(/\s+/g, " ").trim(),
     );
     if (descBeforePeso?.[1]) {

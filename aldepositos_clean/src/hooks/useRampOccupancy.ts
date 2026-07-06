@@ -11,6 +11,8 @@ import {
   subscribeRampOccupancy,
 } from "@/lib/receptionLogistics/rampOccupancyRepository";
 
+const RAMP_OCCUPANCY_RELOAD_DEBOUNCE_MS = 400;
+
 export function useRampOccupancy(enabled = true) {
   const [occupancy, setOccupancy] = useState<RampOccupancyState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,14 +47,27 @@ export function useRampOccupancy(enabled = true) {
 
   useEffect(() => {
     if (!enabled) return;
-    return subscribeRampOccupancy(() => {
-      void reload();
-    });
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (debounceTimer != null) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void reload();
+      }, RAMP_OCCUPANCY_RELOAD_DEBOUNCE_MS);
+    };
+
+    const unsubscribe = subscribeRampOccupancy(scheduleReload);
+    return () => {
+      if (debounceTimer != null) clearTimeout(debounceTimer);
+      unsubscribe();
+    };
   }, [enabled, reload]);
 
   const toggleRamp = useCallback(
     async (rampId: RampOccupancyRampId) => {
       if (!occupancy) return;
+      const previous = occupancy;
       setBusyRamp(rampId);
       try {
         const currently = occupancy[rampId].occupied;
@@ -60,7 +75,12 @@ export function useRampOccupancy(enabled = true) {
         setOccupancy(next);
       } catch (e) {
         console.error(e);
-        alert("No se pudo actualizar el estado de la rampa.");
+        setOccupancy(previous);
+        const message =
+          e instanceof Error
+            ? e.message
+            : "No se pudo actualizar el estado de la rampa.";
+        alert(message);
       } finally {
         setBusyRamp(null);
       }

@@ -62,8 +62,11 @@ export async function fetchRampOccupancy(): Promise<RampOccupancyState> {
       writeLocalRampOccupancy(payload);
       return payload;
     }
-  } catch {
-    /* fallback local */
+  } catch (e) {
+    console.warn(
+      "[ramp-occupancy] No se pudo leer desde Supabase; usando copia local.",
+      e,
+    );
   }
 
   const local = readLocalRampOccupancy();
@@ -73,15 +76,16 @@ export async function fetchRampOccupancy(): Promise<RampOccupancyState> {
 
 export async function saveRampOccupancy(state: RampOccupancyState): Promise<void> {
   writeLocalRampOccupancy(state);
-  try {
-    const { error } = await supabase.from(RECEPTION_TABLE).upsert({
-      id: RAMP_OCCUPANCY_META_ID,
-      payload: state,
-      updated_at: state.updatedAt,
-    });
-    if (error) throw error;
-  } catch {
-    /* Solo local */
+  const { error } = await supabase.from(RECEPTION_TABLE).upsert({
+    id: RAMP_OCCUPANCY_META_ID,
+    payload: state,
+    updated_at: state.updatedAt,
+  });
+  if (error) {
+    throw new Error(
+      error.message ||
+        "No se pudo guardar el estado de rampas en Supabase. ¿Aplicaste la migración reception_trucks?",
+    );
   }
 }
 
@@ -105,7 +109,7 @@ export async function setRampOccupancy(
 }
 
 const RAMP_OCCUPANCY_REALTIME_CHANNEL_ID = "ramp-occupancy-live";
-const RAMP_OCCUPANCY_POLL_MS = 12_000;
+const RAMP_OCCUPANCY_POLL_MS = 5_000;
 
 let rampOccupancyListeners = new Set<() => void>();
 let rampBroadcastChannel: BroadcastChannel | null = null;
@@ -135,8 +139,15 @@ function ensureRampRealtimeChannel() {
         },
         () => notifyRampOccupancyListeners(),
       )
-      .subscribe();
-  } catch {
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(
+            `[ramp-occupancy] Realtime ${status}; se usará sondeo cada ${RAMP_OCCUPANCY_POLL_MS / 1000}s.`,
+          );
+        }
+      });
+  } catch (e) {
+    console.warn("[ramp-occupancy] No se pudo suscribir a Realtime.", e);
     rampRealtimeChannel = null;
   }
 }

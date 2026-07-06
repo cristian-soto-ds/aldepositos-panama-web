@@ -246,7 +246,16 @@ export function TruckDirectionModule() {
                     </li>
                     )
                   ) : (
-                    list.map((truck, index) => (
+                    <>
+                      {rampRetiroOccupied && isRampColumn ? (
+                        <li>
+                          <RampOccupancyTvCard
+                            rampId={statusId}
+                            stripeClass={theme.stripe}
+                          />
+                        </li>
+                      ) : null}
+                      {list.map((truck, index) => (
                       <li
                         key={truck.id}
                         draggable={moveBusy !== truck.id}
@@ -299,7 +308,8 @@ export function TruckDirectionModule() {
                           )}
                         </div>
                       </li>
-                    ))
+                    ))}
+                    </>
                   )}
                 </ul>
               </section>

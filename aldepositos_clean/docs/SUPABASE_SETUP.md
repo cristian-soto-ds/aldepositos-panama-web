@@ -44,7 +44,7 @@ Para que los cambios se vean en otros dispositivos sin recargar:
 
 ## Qué debes hacer manualmente
 
-- [ ] Ejecutar el SQL de migración una vez.
+- [ ] Ejecutar el SQL de migración una vez (`001_create_tasks.sql` y, según módulos usados, `007_collection_orders.sql`, **`009_reception_trucks.sql`**, etc.).
 - [ ] Confirmar que **Authentication** está habilitado y los usuarios pueden iniciar sesión.
 - [ ] Si usas políticas distintas (por ejemplo solo ciertos roles), ajusta las políticas RLS en Supabase.
 - [ ] En Vercel, añade las mismas variables `NEXT_PUBLIC_*` y redeploy.
@@ -55,6 +55,23 @@ El panel guarda las **órdenes de recolección** (antes del RA en almacén) en `
 
 - Ejecuta **`supabase/migrations/007_collection_orders.sql`** en el SQL Editor.
 - Activa **Replication** para esta tabla si quieres tiempo real entre dispositivos (el script intenta añadirla a `supabase_realtime`; si falla, hazlo desde el dashboard).
+
+## Tabla `reception_trucks` (recepción de camiones y estado de rampas)
+
+**Obligatoria** para la recepción de camiones (`/direccion-camiones`), la pantalla TV (`/direccion-camiones/tv`) y la sincronización del estado **LIBRE/OCUPADA** entre todos los usuarios del panel.
+
+- Ejecuta **`supabase/migrations/009_reception_trucks.sql`** en el SQL Editor.
+- Crea `public.reception_trucks` con RLS: usuarios autenticados lectura/escritura; `anon` solo lectura (TV sin login).
+- Añade la tabla a `supabase_realtime` para sincronización instantánea.
+- La cola de camiones usa ids normales; el estado de rampas vive en la fila meta `id = meta-ramp-occupancy`.
+
+**Verificación tras aplicar:**
+
+1. En Recepcionista (`/panel`), marca una rampa como OCUPADA.
+2. En Supabase → Table Editor → `reception_trucks`, confirma la fila `meta-ramp-occupancy` con `payload.RAMPA_1` / `RAMPA_2`.
+3. Abre `/direccion-camiones` en otro navegador: debe verse la tarjeta naranja de rampa ocupada.
+
+Sin esta migración, los cambios de rampa solo quedan en `localStorage` de cada dispositivo y **los demás usuarios no verán el cambio**.
 
 ## Tabla `reference_catalog` (catálogo maestro)
 

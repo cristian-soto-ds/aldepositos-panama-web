@@ -115,6 +115,13 @@ const PhotoRecordModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const InventoryLeaderboardModule = dynamic(
+  () =>
+    import("@/components/control-panel/InventoryLeaderboardModule").then(
+      (m) => m.InventoryLeaderboardModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -662,6 +669,14 @@ export default function PanelPage() {
 
         {visibleView === "reports" && (
           <CompletedReportsModule tasks={tasks} onDeleteTask={handleDeleteTask} />
+        )}
+
+        {visibleView === "inventory-leaderboard" && (
+          <InventoryLeaderboardModule
+            tasks={tasks}
+            userDisplayName={userDisplayName}
+            userEmail={userEmail}
+          />
         )}
 
         {visibleView === "photo-record" && (

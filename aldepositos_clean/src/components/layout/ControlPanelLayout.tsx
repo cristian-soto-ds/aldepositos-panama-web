@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Route,
   Camera,
+  Trophy,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -251,6 +252,15 @@ export function ControlPanelLayout({
             active={currentView === "reports"}
             onClick={() => {
               setCurrentView("reports");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<NavIcon Icon={Trophy} />}
+            text="Ranking Inventariadores"
+            active={currentView === "inventory-leaderboard"}
+            onClick={() => {
+              setCurrentView("inventory-leaderboard");
               setSidebarOpen(false);
             }}
           />

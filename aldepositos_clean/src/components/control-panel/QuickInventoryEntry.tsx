@@ -1897,7 +1897,7 @@ export function QuickInventoryEntry({
                     {viewMode === "completed" && completedBy ? (
                       <span
                         className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
-                        title="Operador que terminó medidas y peso"
+                        title="Inventariador que capturó medidas y peso"
                       >
                         Por {completedBy}
                       </span>

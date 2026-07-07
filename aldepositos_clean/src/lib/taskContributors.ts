@@ -1,5 +1,9 @@
 import type { Task } from "@/lib/types/task";
-import { presenceVisibleLabel } from "@/lib/viewerIdentity";
+import {
+  isAllowedInventoryOperator,
+  resolveAllowedInventoryOperator,
+} from "@/lib/inventoryOperatorsAllowlist";
+import { isLikelyEmail, presenceVisibleLabel } from "@/lib/viewerIdentity";
 
 function mergeContributor(
   task: Task,
@@ -17,6 +21,32 @@ function mergeContributor(
   return { ...task, contributors };
 }
 
+function resolveAttributionIdentity(
+  userKey: string,
+  userLabel: string | null | undefined,
+): { email: string; displayName: string } | null {
+  const email = String(userKey ?? "").trim().toLowerCase();
+  if (!email) return null;
+
+  const rawLabel = String(userLabel ?? "").trim();
+  const displayName = presenceVisibleLabel(
+    userLabel,
+    email.includes("@") ? email : null,
+  );
+  const nameForAllowlist =
+    displayName === "Operador" && rawLabel && !isLikelyEmail(rawLabel)
+      ? rawLabel
+      : displayName;
+  const storedName =
+    rawLabel && !isLikelyEmail(rawLabel) ? rawLabel : displayName;
+
+  if (!isAllowedInventoryOperator(email, nameForAllowlist)) {
+    return null;
+  }
+
+  return { email, displayName: storedName };
+}
+
 /** Registra quién capturó medidas/peso y quién cerró el inventario. */
 export function applyInventoryAttribution(
   task: Task,
@@ -27,13 +57,13 @@ export function applyInventoryAttribution(
     isCompleted: boolean;
   },
 ): Task {
-  const email = String(options.userKey ?? "").trim().toLowerCase();
-  if (!email) return task;
-
-  const displayName = presenceVisibleLabel(
+  const identity = resolveAttributionIdentity(
+    String(options.userKey ?? ""),
     options.userLabel,
-    email.includes("@") ? email : null,
   );
+  if (!identity) return task;
+
+  const { email, displayName } = identity;
 
   let next = task;
   if (options.hasCapture) {
@@ -52,9 +82,8 @@ export function applyInventoryAttribution(
   return next;
 }
 
+/** Nombre del inventariador permitido que capturó (ignora supervisores u otros operadores). */
 export function inventoryCompletedByLabel(task: Task): string | null {
-  const name = task.inventoryCompletedBy?.displayName?.trim();
-  if (name) return name;
-  const last = task.contributors?.[task.contributors.length - 1];
-  return last?.displayName?.trim() || null;
+  const resolved = resolveAllowedInventoryOperator(task);
+  return resolved?.displayName?.trim() || null;
 }

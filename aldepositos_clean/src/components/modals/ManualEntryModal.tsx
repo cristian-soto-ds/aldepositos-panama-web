@@ -77,45 +77,46 @@ export function ManualEntryModal({
     const ra = formData.ra.toString().trim();
     if (!ra) return;
 
-    const emptyFields = isEditing ? null : emptyManualRaTaskFields();
-
-    const taskData: Task = {
-      id: initialData ? initialData.id : generateId(),
-      ra,
-      mainClient: isEditing
-        ? formData.mainClient.trim() || "Sin Cliente"
-        : emptyFields!.mainClient,
-      provider: isEditing
-        ? formData.provider.trim() || "N/A"
-        : emptyFields!.provider,
-      subClient: isEditing
-        ? formData.subClient.trim() || "N/A"
-        : emptyFields!.subClient,
-      brand: isEditing
-        ? formData.brand.trim() || "N/A"
-        : formData.brand.trim() || emptyFields!.brand,
-      expectedBultos: isEditing
-        ? parseFloat(formData.expectedBultos) || 0
-        : emptyFields!.expectedBultos,
-      // Al editar los bultos, el "declarado original" debe seguir el nuevo valor
-      // para que la tarjeta y el detalle (DECL / progreso) coincidan.
-      originalExpectedBultos: isEditing
-        ? parseFloat(formData.expectedBultos) || 0
-        : emptyFields!.originalExpectedBultos,
-      expectedCbm: isEditing
-        ? parseFloat(formData.expectedCbm) || 0
-        : emptyFields!.expectedCbm,
-      expectedWeight: isEditing
-        ? parseFloat(formData.expectedWeight) || 0
-        : emptyFields!.expectedWeight,
-      notes: isEditing ? formData.notes.trim() || "" : emptyFields!.notes,
-      type: (isEditing ? formData.module : defaultModule) as Task["type"],
-      currentBultos: initialData ? initialData.currentBultos : 0,
-      status: initialData ? initialData.status : "pending",
-      measureData: initialData ? initialData.measureData : [],
-      weightMode: initialData ? initialData.weightMode : "no_weight",
-      manualTotalWeight: initialData ? initialData.manualTotalWeight : 0,
-    };
+    const taskData: Task = isEditing && initialData
+      ? {
+          // Preservar inventario, atribución, fotos y metadatos no editables en el modal.
+          ...initialData,
+          ra,
+          mainClient: formData.mainClient.trim() || "Sin Cliente",
+          provider: formData.provider.trim() || "N/A",
+          subClient: formData.subClient.trim() || "N/A",
+          brand: formData.brand.trim() || "N/A",
+          expectedBultos: parseFloat(formData.expectedBultos) || 0,
+          // Al editar los bultos, el "declarado original" debe seguir el nuevo valor
+          // para que la tarjeta y el detalle (DECL / progreso) coincidan.
+          originalExpectedBultos: parseFloat(formData.expectedBultos) || 0,
+          expectedCbm: parseFloat(formData.expectedCbm) || 0,
+          expectedWeight: parseFloat(formData.expectedWeight) || 0,
+          notes: formData.notes.trim() || "",
+          type: formData.module as Task["type"],
+        }
+      : (() => {
+          const emptyFields = emptyManualRaTaskFields();
+          return {
+            id: generateId(),
+            ra,
+            mainClient: emptyFields.mainClient,
+            provider: emptyFields.provider,
+            subClient: emptyFields.subClient,
+            brand: formData.brand.trim() || emptyFields.brand,
+            expectedBultos: emptyFields.expectedBultos,
+            originalExpectedBultos: emptyFields.originalExpectedBultos,
+            expectedCbm: emptyFields.expectedCbm,
+            expectedWeight: emptyFields.expectedWeight,
+            notes: emptyFields.notes,
+            type: defaultModule as Task["type"],
+            currentBultos: 0,
+            status: "pending",
+            measureData: [],
+            weightMode: "no_weight",
+            manualTotalWeight: 0,
+          };
+        })();
 
     onSave(taskData);
   };

@@ -38,6 +38,7 @@ import {
   publishWorkPresence,
   clearWorkPresence,
 } from "@/lib/panelPresence";
+import { applyInventoryAttribution } from "@/lib/taskContributors";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
@@ -736,16 +737,26 @@ export function DetailedInventoryEntry({
       window.localStorage.removeItem(detailedDraftKey(task.id));
     }
 
-    const updatedTask: Task = {
-      ...task,
-      measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? bultos : 0,
-      expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
-      expectedCbm:
-        cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
-      status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
-      originalExpectedBultos: originalExpected,
-    };
+    const updatedTask = applyInventoryAttribution(
+      {
+        ...task,
+        measureData: JSON.parse(JSON.stringify(persistedRows)),
+        currentBultos: hasCapture ? bultos : 0,
+        expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
+        expectedCbm:
+          cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
+        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight: task.manualTotalWeight ?? 0,
+        updatedAt: new Date().toISOString(),
+      } as SharedTask,
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture,
+        isCompleted,
+      },
+    ) as Task;
 
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
@@ -809,15 +820,25 @@ export function DetailedInventoryEntry({
       window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
     }
 
-    const updatedTask: Task = {
-      ...selectedTask,
-      measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? bultos : 0,
-      expectedWeight: weight > 0 ? weight : selectedTask.expectedWeight,
-      expectedCbm: parseFloat(cbm) > 0 ? parseFloat(cbm) : selectedTask.expectedCbm,
-      status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
-      originalExpectedBultos: originalExpected,
-    };
+    const updatedTask = applyInventoryAttribution(
+      {
+        ...selectedTask,
+        measureData: JSON.parse(JSON.stringify(persistedRows)),
+        currentBultos: hasCapture ? bultos : 0,
+        expectedWeight: weight > 0 ? weight : selectedTask.expectedWeight,
+        expectedCbm: parseFloat(cbm) > 0 ? parseFloat(cbm) : selectedTask.expectedCbm,
+        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight: selectedTask.manualTotalWeight ?? 0,
+        updatedAt: new Date().toISOString(),
+      } as SharedTask,
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture,
+        isCompleted,
+      },
+    ) as Task;
 
     void Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask)).catch(
       (e) => {

@@ -108,13 +108,6 @@ const UserOptionsPanel = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
-const PhotoRecordModule = dynamic(
-  () =>
-    import("@/components/control-panel/PhotoRecordModule").then(
-      (m) => m.PhotoRecordModule,
-    ),
-  { loading: () => <PanelModuleLoader /> },
-);
 const InventoryLeaderboardModule = dynamic(
   () =>
     import("@/components/control-panel/InventoryLeaderboardModule").then(
@@ -130,7 +123,6 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "collection-orders",
   "receptionist",
   "truck-direction",
-  "photo-record",
 ]);
 
 export default function PanelPage() {
@@ -676,15 +668,6 @@ export default function PanelPage() {
             tasks={tasks}
             userDisplayName={userDisplayName}
             userEmail={userEmail}
-          />
-        )}
-
-        {visibleView === "photo-record" && (
-          <PhotoRecordModule
-            tasks={tasks}
-            onUpdateTask={handleUpdateTask}
-            userEmail={userEmail}
-            userDisplayName={userDisplayName}
           />
         )}
 

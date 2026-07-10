@@ -6,7 +6,6 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
-  Camera,
   Check,
   CheckCircle2,
   Circle,
@@ -55,9 +54,6 @@ import {
 } from "@/lib/quickInventoryTypes";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
-import { PhotoCaptureModal } from "@/components/modals/PhotoCaptureModal";
-import { appendPhotoToTask } from "@/lib/raPhotoRecord";
-import type { RaPhoto } from "@/lib/types/raPhoto";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
@@ -71,6 +67,7 @@ import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
 import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
+import { resolveLiveInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
@@ -654,7 +651,6 @@ export function QuickInventoryEntry({
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
-  const [photoCaptureOpen, setPhotoCaptureOpen] = useState(false);
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -1813,32 +1809,26 @@ export function QuickInventoryEntry({
             </div>
 
             {clients.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar md:gap-3 md:pb-2">
-            <button
-              type="button"
-              onClick={() => setClientFilter("Todos")}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
-                clientFilter === "Todos"
-                  ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                  : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
-              }`}
-            >
-              TODOS ({totalModuleTasks})
-            </button>
-            {clients.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setClientFilter(c)}
-                className={`shrink-0 rounded-full border px-3 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all sm:px-6 sm:py-2.5 sm:text-xs sm:tracking-widest ${
-                  clientFilter === c
-                    ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                    : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
-                }`}
-              >
-                {c} ({groupedTasks[c].length})
-              </button>
-            ))}
+              <div className="flex items-center gap-2 sm:gap-3">
+                <label
+                  htmlFor="quick-client-filter"
+                  className="shrink-0 text-[9px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:text-[10px]"
+                >
+                  Cliente
+                </label>
+                <select
+                  id="quick-client-filter"
+                  value={clientFilter}
+                  onChange={(e) => setClientFilter(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:text-xs"
+                >
+                  <option value="Todos">TODOS ({totalModuleTasks})</option>
+                  {clients.map((c) => (
+                    <option key={c} value={c}>
+                      {c} ({groupedTasks[c].length})
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
@@ -1858,6 +1848,8 @@ export function QuickInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
+                  const activeInventariador =
+                    resolveLiveInventoryOperator(liveWorkers)?.displayName ?? null;
                   const completedBy = inventoryCompletedByLabel(t);
 
                   return (
@@ -1889,9 +1881,12 @@ export function QuickInventoryEntry({
                     >
                       RA {t.ra}
                     </h3>
-                    {t.status === "in_progress" && liveWorkers.length === 0 ? (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
-                        En curso
+                    {activeInventariador ? (
+                      <span
+                        className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
+                        title={`Inventario en curso por ${activeInventariador}`}
+                      >
+                        En curso · {activeInventariador}
                       </span>
                     ) : null}
                     {viewMode === "completed" && completedBy ? (
@@ -2142,27 +2137,6 @@ export function QuickInventoryEntry({
             setCsvExportOpen(false);
           }}
         />
-        <button
-          type="button"
-          onClick={() => setPhotoCaptureOpen(true)}
-          className="fixed bottom-24 right-4 z-[10001] flex items-center gap-2 rounded-full bg-violet-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-xl"
-        >
-          <Camera className="h-4 w-4" />
-          Fotos
-        </button>
-        <PhotoCaptureModal
-          open={photoCaptureOpen}
-          taskId={t.id}
-          raLabel={String(t.ra ?? "")}
-          takenByEmail={presenceUserKey ?? undefined}
-          takenByName={presenceUserLabel ?? undefined}
-          onClose={() => setPhotoCaptureOpen(false)}
-          onPhotoSaved={async (photo: RaPhoto) => {
-            const updated = appendPhotoToTask(t, photo);
-            await onUpdateTask(updated);
-            setSelectedTask(updated);
-          }}
-        />
       </>
     );
   }
@@ -2191,15 +2165,6 @@ export function QuickInventoryEntry({
           >
             <Download className="icon-sm" />
             <span className="truncate">CSV</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setPhotoCaptureOpen(true)}
-            title="Registro fotográfico del RA"
-            className="inline-flex touch-target items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-2 py-2.5 text-xs font-semibold text-violet-900 transition hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-100 dark:hover:bg-violet-900/50 sm:gap-2 sm:px-3"
-          >
-            <Camera className="icon-sm" />
-            <span className="truncate">Fotos</span>
           </button>
         </div>
 
@@ -2538,19 +2503,6 @@ export function QuickInventoryEntry({
           filenameBase: `inventario-${variant}-${raSafe}`,
         });
         setCsvExportOpen(false);
-      }}
-    />
-    <PhotoCaptureModal
-      open={photoCaptureOpen}
-      taskId={t.id}
-      raLabel={String(t.ra ?? "")}
-      takenByEmail={presenceUserKey ?? undefined}
-      takenByName={presenceUserLabel ?? undefined}
-      onClose={() => setPhotoCaptureOpen(false)}
-      onPhotoSaved={async (photo: RaPhoto) => {
-        const updated = appendPhotoToTask(t, photo);
-        await onUpdateTask(updated);
-        setSelectedTask(updated);
       }}
     />
     {palletModalOpen && (() => {

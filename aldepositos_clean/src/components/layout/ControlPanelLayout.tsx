@@ -17,7 +17,6 @@ import {
   HandHelping,
   MoreHorizontal,
   Route,
-  Camera,
   Trophy,
   type LucideIcon,
 } from "lucide-react";
@@ -153,15 +152,6 @@ export function ControlPanelLayout({
             active={currentView === "detailed-entry"}
             onClick={() => {
               setCurrentView("detailed-entry");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Camera} />}
-            text="Registro Fotográfico"
-            active={currentView === "photo-record"}
-            onClick={() => {
-              setCurrentView("photo-record");
               setSidebarOpen(false);
             }}
           />

@@ -3,8 +3,24 @@ import {
   RECEPTION_STATUS_LABELS,
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
+import {
+  defaultTodayReportFilter,
+  isIsoInPanamaRange,
+  resolveFilterRangeBounds,
+  type ReceptionReportFilter,
+} from "@/lib/receptionLogistics/receptionReportFilter";
 import { isCollectionOrderReceptionTruck } from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
+
+export type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
+export {
+  defaultTodayReportFilter,
+  formatReportRangeLabel,
+  formatReportFilenameStamp,
+  presetDateRange,
+  formatDateInputPanama,
+  parseDateInputPanama,
+} from "@/lib/receptionLogistics/receptionReportFilter";
 
 export type DailyReceptionReportRow = {
   queuePosition: number | null;
@@ -45,16 +61,6 @@ function parseOrNumero(plate: string): string {
   return match ? match[1].trim() : plate.trim();
 }
 
-function isSameLocalDay(iso: string, ref: Date): boolean {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  return (
-    d.getFullYear() === ref.getFullYear() &&
-    d.getMonth() === ref.getMonth() &&
-    d.getDate() === ref.getDate()
-  );
-}
-
 function formatTime(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -88,32 +94,66 @@ function average(nums: number[]): number | null {
   return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length);
 }
 
+function resolveCompletedAt(truck: ReceptionTruck): string | undefined {
+  return (
+    truck.completedAt ??
+    (truck.status === RECEPTION_STATUS.COMPLETADO ? truck.updatedAt : undefined)
+  );
+}
+
+function resolveFilterDateIso(
+  truck: ReceptionTruck,
+  dateField: ReceptionReportFilter["dateField"],
+): string | undefined {
+  if (dateField === "arrival") return truck.createdAt;
+  return resolveCompletedAt(truck);
+}
+
+function truckMatchesFilter(truck: ReceptionTruck, filter: ReceptionReportFilter): boolean {
+  if (!isCollectionOrderReceptionTruck(truck)) return false;
+  if (
+    filter.statusScope === "completed_only" &&
+    truck.status !== RECEPTION_STATUS.COMPLETADO
+  ) {
+    return false;
+  }
+  const { rangeStart, rangeEndExclusive } = resolveFilterRangeBounds(filter);
+  const dateIso = resolveFilterDateIso(truck, filter.dateField);
+  return isIsoInPanamaRange(dateIso, rangeStart, rangeEndExclusive);
+}
+
+export function previewReceptionReport(
+  trucks: ReceptionTruck[],
+  filter: ReceptionReportFilter,
+): { orCount: number; bultos: number } {
+  const matched = trucks.filter((t) => truckMatchesFilter(t, filter));
+  return {
+    orCount: matched.length,
+    bultos: matched.reduce((sum, t) => sum + t.expectedBultos, 0),
+  };
+}
+
 export function buildDailyReceptionReport(
   trucks: ReceptionTruck[],
-  reportDate: Date = new Date(),
+  filter: ReceptionReportFilter = defaultTodayReportFilter(),
 ): { rows: DailyReceptionReportRow[]; summary: DailyReceptionReportSummary } {
-  // Orden por llegada real: primero el que entró antes (hora de llegada).
   const arrivalMs = (t: ReceptionTruck): number => {
     const c = Date.parse(t.createdAt);
     if (Number.isFinite(c)) return c;
     return Number.isFinite(t.sortOrder) ? t.sortOrder : 0;
   };
-  const todaysOr = trucks
-    .filter((t) => isCollectionOrderReceptionTruck(t))
-    .filter((t) => isSameLocalDay(t.createdAt, reportDate))
+
+  const filteredOr = trucks
+    .filter((t) => truckMatchesFilter(t, filter))
     .sort((a, b) => arrivalMs(a) - arrivalMs(b));
 
-  const rows: DailyReceptionReportRow[] = todaysOr.map((t, i) => {
-    // Hora real de completado (sellada); respaldo para datos antiguos: updatedAt.
-    const completedAt =
-      t.completedAt ??
-      (t.status === RECEPTION_STATUS.COMPLETADO ? t.updatedAt : undefined);
+  const rows: DailyReceptionReportRow[] = filteredOr.map((t, i) => {
+    const completedAt = resolveCompletedAt(t);
     const minutosEnFila = diffMinutes(t.createdAt, t.rampAssignedAt);
     const minutosDescarga = diffMinutes(t.rampAssignedAt, completedAt);
     const minutosTotal = diffMinutes(t.createdAt, completedAt);
 
     return {
-      // Posición según el orden de llegada (para TODAS las OR, no solo las en fila).
       queuePosition: i + 1,
       orNumero: parseOrNumero(t.plate),
       cliente: t.client !== "—" ? t.client : "",
@@ -121,7 +161,6 @@ export function buildDailyReceptionReport(
       expedidor: t.notes?.trim() ?? "",
       bultos: t.expectedBultos,
       estado: RECEPTION_STATUS_LABELS[t.status],
-      // Rampa/carretillado usado (persistido); se mantiene aunque ya esté completado.
       rampa: rampLabel(t.rampUsed ?? t.status),
       horaLlegada: formatTime(t.createdAt),
       horaRampa: formatTime(t.rampAssignedAt),
@@ -159,6 +198,7 @@ export function buildDailyReceptionReport(
   return { rows, summary };
 }
 
+/** @deprecated Usar formatReportRangeLabel con ReceptionReportFilter */
 export function formatReportDateLabel(date: Date): string {
   return date.toLocaleDateString("es-PA", {
     weekday: "long",

@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Layers,
   LayoutGrid,
+  List,
   Loader2,
   Maximize2,
   Minimize2,
@@ -23,6 +24,7 @@ import {
   type AutosaveState,
   type SyncStatus,
 } from "@/components/control-panel/SyncStatusBadge";
+import { ReekonReferenceListSheet } from "@/components/control-panel/ReekonReferenceListSheet";
 import {
   cubicajeM3FromDims,
   formatCubicaje2,
@@ -244,6 +246,7 @@ export function ReekonCaptureView({
   const { handleDimensionKeyDown } = useReekonTapeInput();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [refListOpen, setRefListOpen] = useState(false);
 
   // Peso de paleta con borrador local: escribir es instantáneo y solo se confirma
   // al salir del campo (evita el bloqueo al replicar el peso en todas las filas).
@@ -407,6 +410,7 @@ export function ReekonCaptureView({
   };
 
   const progressPct = measureRows.length ? Math.round((completedCount / measureRows.length) * 100) : 0;
+  const pendingCount = measureRows.length - completedCount;
 
   return (
     <div className="reekon-immersive text-slate-900 dark:text-slate-100">
@@ -488,7 +492,7 @@ export function ReekonCaptureView({
             const subIdx = measureRows
               .slice(0, i + 1)
               .filter((r) => palletOf(r) === pnum).length;
-            label = `P${pnum}·${subIdx}`;
+            label = `P${pnum}-${subIdx}`;
           } else {
             label =
               referenceMode === "with" && strVal(row.referencia)
@@ -547,6 +551,22 @@ export function ReekonCaptureView({
             Paleta
           </button>
         ) : null}
+      </div>
+
+      <div className="mx-auto flex w-full max-w-md shrink-0 justify-center border-b border-slate-100 px-3 py-1.5 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => setRefListOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+        >
+          <List className="h-3.5 w-3.5" />
+          Ver todas las referencias
+          {pendingCount > 0 ? (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+              {pendingCount} pend.
+            </span>
+          ) : null}
+        </button>
       </div>
 
       {/* Navegación entre líneas */}
@@ -772,6 +792,17 @@ export function ReekonCaptureView({
           </div>
         </div>
       </footer>
+
+      <ReekonReferenceListSheet
+        open={refListOpen}
+        onClose={() => setRefListOpen(false)}
+        measureRows={measureRows}
+        referenceMode={referenceMode}
+        activeRowId={activeId}
+        onSelectRow={selectRow}
+        completedCount={completedCount}
+        faltantes={faltantes}
+      />
     </div>
   );
 }

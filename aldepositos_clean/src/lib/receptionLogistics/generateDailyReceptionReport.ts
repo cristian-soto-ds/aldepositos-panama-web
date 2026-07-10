@@ -1,12 +1,13 @@
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 import {
   buildDailyReceptionReport,
-  formatReportDateLabel,
+  formatReportRangeLabel,
 } from "@/lib/receptionLogistics/buildDailyReceptionReport";
 import {
   downloadDailyReceptionExcel,
   type ReceptionGeminiSummary,
 } from "@/lib/receptionLogistics/exportDailyReceptionExcel";
+import type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
 import { rampOccupancyReportLines, type RampOccupancyState } from "@/lib/receptionLogistics/rampOccupancy";
 import { fetchRampOccupancy } from "@/lib/receptionLogistics/rampOccupancyRepository";
 
@@ -22,10 +23,13 @@ export class DailyReceptionReportError extends Error {
 
 export async function generateAndDownloadDailyReceptionReport(
   trucks: ReceptionTruck[],
-  options?: { exportedByLabel?: string; reportDate?: Date },
+  options?: {
+    exportedByLabel?: string;
+    filter?: ReceptionReportFilter;
+  },
 ): Promise<{ rowCount: number; withGemini: boolean }> {
-  const reportDate = options?.reportDate ?? new Date();
-  const { rows, summary: baseSummary } = buildDailyReceptionReport(trucks, reportDate);
+  const filter = options?.filter;
+  const { rows, summary: baseSummary } = buildDailyReceptionReport(trucks, filter);
 
   let rampOccupancy: RampOccupancyState | null = null;
   try {
@@ -47,10 +51,17 @@ export async function generateAndDownloadDailyReceptionReport(
 
   if (rows.length === 0) {
     throw new DailyReceptionReportError(
-      "No hay órdenes de recolección (OR) registradas hoy en recepción.",
+      "No hay órdenes de recolección (OR) en recepción para el período seleccionado.",
       "NO_ROWS",
     );
   }
+
+  const dateLabel = filter ? formatReportRangeLabel(filter) : formatReportRangeLabel({
+    from: new Date(),
+    to: new Date(),
+    dateField: "arrival",
+    statusScope: "all",
+  });
 
   let geminiSummary: ReceptionGeminiSummary | null = null;
   try {
@@ -58,7 +69,7 @@ export async function generateAndDownloadDailyReceptionReport(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        dateLabel: formatReportDateLabel(reportDate),
+        dateLabel,
         rows,
         summary,
       }),
@@ -73,7 +84,7 @@ export async function generateAndDownloadDailyReceptionReport(
   await downloadDailyReceptionExcel({
     rows,
     summary,
-    reportDate,
+    filter,
     exportedByLabel: options?.exportedByLabel,
     geminiSummary,
     rampOccupancy,

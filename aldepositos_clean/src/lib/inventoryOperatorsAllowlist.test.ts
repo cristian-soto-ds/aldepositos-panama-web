@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isAllowedInventoryOperator,
   resolveAllowedInventoryOperator,
+  resolveLiveInventoryOperator,
 } from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
@@ -34,6 +35,23 @@ describe("isAllowedInventoryOperator", () => {
       false,
     );
     expect(isAllowedInventoryOperator(null, "Operador X")).toBe(false);
+  });
+});
+
+describe("resolveLiveInventoryOperator", () => {
+  it("resuelve inventariador en presencia en vivo", () => {
+    const resolved = resolveLiveInventoryOperator([
+      { userKey: "jahir@example.com", name: "Jahir" },
+    ]);
+    expect(resolved?.displayName).toBe("Jahir Jimenez");
+  });
+
+  it("ignora supervisores u otros operadores en presencia", () => {
+    expect(
+      resolveLiveInventoryOperator([
+        { userKey: "cristian@example.com", name: "Cristian Soto" },
+      ]),
+    ).toBeNull();
   });
 });
 

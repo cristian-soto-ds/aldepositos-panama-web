@@ -71,10 +71,13 @@ export function collectionOrderToReceptionTruck(
     rampUsed: isRamp ? status : existing?.rampUsed,
     completedAt:
       status === RECEPTION_STATUS.COMPLETADO
-        ? (existing?.completedAt ?? existing?.updatedAt ?? now)
+        ? (existing?.completedAt ??
+          order.updatedAt ??
+          existing?.updatedAt ??
+          now)
         : existing?.completedAt,
     warehouseReceiptNumber: existing?.warehouseReceiptNumber,
-    createdAt: existing?.createdAt ?? now,
+    createdAt: existing?.createdAt ?? order.createdAt ?? now,
     updatedAt: now,
   };
 }

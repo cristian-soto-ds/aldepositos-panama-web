@@ -195,7 +195,10 @@ export const RECEPTION_COPY = {
   tvSubtitle: "Actualización en vivo para proveedores y supervisión",
   reportLabel: "Generar reporte",
   reportHint:
-    "Excel del día: OR recibidas, hora de llegada, espera en fila, tiempo de descarga y resumen con Alde.IA.",
+    "Excel filtrado por período: OR recibidas, tiempos de espera/descarga y resumen con Alde.IA.",
+  reportModalTitle: "Descargar reporte de recepción",
+  reportModalSubtitle:
+    "Elegí el período y criterio antes de exportar el Excel.",
   searchPlaceholder: "Buscar por placa, RA, proveedor o cliente…",
   emptyColumn: "Sin camiones",
   receiptTitle: "Recibo de Almacén",

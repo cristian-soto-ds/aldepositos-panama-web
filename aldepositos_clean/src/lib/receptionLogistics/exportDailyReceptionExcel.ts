@@ -1,10 +1,15 @@
 import ExcelJS from "exceljs";
 import {
   formatMinutesLabel,
-  formatReportDateLabel,
+  formatReportRangeLabel,
   type DailyReceptionReportRow,
   type DailyReceptionReportSummary,
 } from "@/lib/receptionLogistics/buildDailyReceptionReport";
+import {
+  defaultTodayReportFilter,
+  formatReportFilenameStamp,
+  type ReceptionReportFilter,
+} from "@/lib/receptionLogistics/receptionReportFilter";
 import {
   rampOccupancyReportLines,
   type RampOccupancyState,
@@ -173,7 +178,7 @@ function addGeminiSheet(
 export async function downloadDailyReceptionExcel(params: {
   rows: DailyReceptionReportRow[];
   summary: DailyReceptionReportSummary;
-  reportDate?: Date;
+  filter?: ReceptionReportFilter;
   exportedByLabel?: string;
   geminiSummary?: ReceptionGeminiSummary | null;
   rampOccupancy?: RampOccupancyState | null;
@@ -181,14 +186,14 @@ export async function downloadDailyReceptionExcel(params: {
   const {
     rows,
     summary,
-    reportDate = new Date(),
+    filter = defaultTodayReportFilter(),
     exportedByLabel = "ALDEPOSITOS",
     geminiSummary,
     rampOccupancy,
   } = params;
 
-  const dateLabel = formatReportDateLabel(reportDate);
-  const dateStamp = reportDate.toISOString().slice(0, 10);
+  const dateLabel = formatReportRangeLabel(filter);
+  const dateStamp = formatReportFilenameStamp(filter);
   const rampLines = rampOccupancy ? rampOccupancyReportLines(rampOccupancy) : null;
 
   const wb = new ExcelJS.Workbook();
@@ -198,7 +203,7 @@ export async function downloadDailyReceptionExcel(params: {
   const kpiRowCount = 2 + (rampLines ? 2 : 0);
   const headerRowNum = 3 + kpiRowCount;
 
-  const ws = wb.addWorksheet("Recepción OR del día", {
+  const ws = wb.addWorksheet("Recepción OR", {
     properties: { defaultRowHeight: 18 },
     views: [{ state: "frozen", ySplit: headerRowNum, showGridLines: false }],
   });
@@ -209,7 +214,7 @@ export async function downloadDailyReceptionExcel(params: {
 
   ws.mergeCells(1, 1, 1, COLUMNS.length);
   const h1 = ws.getCell(1, 1);
-  h1.value = "ALDEPÓSITOS — Reporte diario de recepción (OR)";
+  h1.value = "ALDEPÓSITOS — Reporte de recepción (OR)";
   h1.font = { name: "Calibri", bold: true, size: 18, color: { argb: TITLE_COLOR } };
   h1.alignment = { vertical: "middle", horizontal: "center" };
 
@@ -225,7 +230,7 @@ export async function downloadDailyReceptionExcel(params: {
   ws.getCell(3, 1).alignment = { horizontal: "center" };
 
   let kpiRow = 4;
-  addKpiRow(ws, kpiRow++, "Total OR del día", summary.totalOr, ACCENT_AMBER);
+  addKpiRow(ws, kpiRow++, "Total OR del período", summary.totalOr, ACCENT_AMBER);
   addKpiRow(ws, kpiRow++, "Total bultos", summary.totalBultos, ACCENT_GREEN);
   if (rampLines) {
     addKpiRow(
@@ -281,7 +286,7 @@ export async function downloadDailyReceptionExcel(params: {
 
   const totalsRow = dataRowNum + 1;
   ws.mergeCells(totalsRow, 1, totalsRow, 5);
-  ws.getCell(totalsRow, 1).value = "RESUMEN DEL DÍA";
+  ws.getCell(totalsRow, 1).value = "RESUMEN DEL PERÍODO";
   ws.getCell(totalsRow, 1).font = { bold: true, size: 12, color: { argb: TITLE_COLOR } };
 
   const summaryLines = [

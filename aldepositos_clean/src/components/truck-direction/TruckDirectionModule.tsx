@@ -31,6 +31,8 @@ import {
   DailyReceptionReportError,
   generateAndDownloadDailyReceptionReport,
 } from "@/lib/receptionLogistics/generateDailyReceptionReport";
+import { ReceptionReportExportModal } from "@/components/modals/ReceptionReportExportModal";
+import type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
 import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
 import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
 import { ReceptionKanbanCardContent } from "@/components/truck-direction/ReceptionKanbanCardContent";
@@ -52,6 +54,7 @@ export function TruckDirectionModule() {
   const { trucks, loading, reload } = useReceptionQueue();
   const { occupancy: rampOccupancy } = useRampOccupancy();
   const [reportBusy, setReportBusy] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
   const dragTruckId = useRef<string | null>(null);
@@ -85,27 +88,33 @@ export function TruckDirectionModule() {
     [byStatus],
   );
 
-  const onGenerateReport = useCallback(async () => {
-    setReportBusy(true);
-    try {
-      const result = await generateAndDownloadDailyReceptionReport(trucks);
-      const geminiNote = result.withGemini
-        ? " Incluye hoja de resumen con Alde.IA."
-        : "";
-      alert(
-        `Reporte generado: ${result.rowCount} OR del día.${geminiNote}`,
-      );
-    } catch (e) {
-      if (e instanceof DailyReceptionReportError && e.code === "NO_ROWS") {
-        alert(e.message);
-        return;
+  const onGenerateReport = useCallback(
+    async (filter: ReceptionReportFilter) => {
+      setReportBusy(true);
+      try {
+        const result = await generateAndDownloadDailyReceptionReport(trucks, {
+          filter,
+        });
+        const geminiNote = result.withGemini
+          ? " Incluye hoja de resumen con Alde.IA."
+          : "";
+        alert(
+          `Reporte generado: ${result.rowCount} OR del período seleccionado.${geminiNote}`,
+        );
+        setReportModalOpen(false);
+      } catch (e) {
+        if (e instanceof DailyReceptionReportError && e.code === "NO_ROWS") {
+          alert(e.message);
+          return;
+        }
+        console.error(e);
+        alert("No se pudo generar el reporte. Intentá de nuevo.");
+      } finally {
+        setReportBusy(false);
       }
-      console.error(e);
-      alert("No se pudo generar el reporte. Intentá de nuevo.");
-    } finally {
-      setReportBusy(false);
-    }
-  }, [trucks]);
+    },
+    [trucks],
+  );
 
   const handleDropOnColumn = useCallback(
     async (status: ReceptionStatusId) => {
@@ -165,7 +174,7 @@ export function TruckDirectionModule() {
             </button>
             <button
               type="button"
-              onClick={() => void onGenerateReport()}
+              onClick={() => setReportModalOpen(true)}
               disabled={reportBusy}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:brightness-110 disabled:opacity-60"
             >
@@ -332,6 +341,16 @@ export function TruckDirectionModule() {
         </button>
       </p>
     </div>
+
+      <ReceptionReportExportModal
+        open={reportModalOpen}
+        trucks={trucks}
+        busy={reportBusy}
+        onCancel={() => {
+          if (!reportBusy) setReportModalOpen(false);
+        }}
+        onConfirm={(filter) => void onGenerateReport(filter)}
+      />
     </>
   );
 }

@@ -6,7 +6,6 @@ import {
   ArrowRight,
   ArrowRightLeft,
   Box,
-  Camera,
   ClipboardCheck,
   Download,
   Edit,
@@ -15,9 +14,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
-import { PhotoCaptureModal } from "@/components/modals/PhotoCaptureModal";
-import { appendPhotoToTask } from "@/lib/raPhotoRecord";
-import type { RaPhoto } from "@/lib/types/raPhoto";
 import {
   countInventarioCsvRows,
   downloadInventarioCsv,
@@ -39,6 +35,7 @@ import {
   clearWorkPresence,
 } from "@/lib/panelPresence";
 import { applyInventoryAttribution } from "@/lib/taskContributors";
+import { resolveLiveInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
@@ -257,7 +254,6 @@ export function DetailedInventoryEntry({
   const referenciasExcelRef = useRef<HTMLInputElement>(null);
   const [referenciasImportBusy, setReferenciasImportBusy] = useState(false);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
-  const [photoCaptureOpen, setPhotoCaptureOpen] = useState(false);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
@@ -930,32 +926,26 @@ export function DetailedInventoryEntry({
             </div>
 
             {clients.length > 0 && (
-              <div className="flex gap-2 md:gap-3 overflow-x-auto pb-2 px-2 md:px-0 hide-scrollbar">
-                <button
-                  type="button"
-                  onClick={() => setClientFilter("Todos")}
-                  className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
-                    clientFilter === "Todos"
-                      ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                      : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
-                  }`}
+              <div className="flex items-center gap-2 px-2 sm:gap-3 md:px-0">
+                <label
+                  htmlFor="detailed-client-filter"
+                  className="shrink-0 text-[9px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:text-[10px]"
                 >
-                  TODOS ({totalTasks})
-                </button>
-                {clients.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setClientFilter(c)}
-                    className={`shrink-0 px-6 py-2.5 rounded-full text-[10px] md:text-xs font-black uppercase tracking-widest transition-all border ${
-                      clientFilter === c
-                        ? "bg-[#16263F] text-white border-[#16263F] shadow-md"
-                        : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:bg-slate-800/60"
-                    }`}
-                  >
-                    {c} ({groupedTasks[c].length})
-                  </button>
-                ))}
+                  Cliente
+                </label>
+                <select
+                  id="detailed-client-filter"
+                  value={clientFilter}
+                  onChange={(e) => setClientFilter(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:text-xs"
+                >
+                  <option value="Todos">TODOS ({totalTasks})</option>
+                  {clients.map((c) => (
+                    <option key={c} value={c}>
+                      {c} ({groupedTasks[c].length})
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
@@ -975,6 +965,8 @@ export function DetailedInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
+                  const activeInventariador =
+                    resolveLiveInventoryOperator(liveWorkers)?.displayName ?? null;
                   return (
                   <div
                     key={t.id}
@@ -1050,11 +1042,14 @@ export function DetailedInventoryEntry({
                           >
                             RA: {t.ra}
                           </h3>
-                        {t.status === "partial" && (
-                          <span className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest">
-                            En curso
+                        {activeInventariador ? (
+                          <span
+                            className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest"
+                            title={`Inventario en curso por ${activeInventariador}`}
+                          >
+                            En curso · {activeInventariador}
                           </span>
-                        )}
+                        ) : null}
                         </div>
                         <div
                           className={`px-3 py-1.5 rounded-xl text-center border min-w-[3.5rem] shadow-sm flex items-center gap-1.5 ${
@@ -1140,15 +1135,6 @@ export function DetailedInventoryEntry({
             >
               <Download className="h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300" />
               <span className="whitespace-nowrap">Descargar CSV</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhotoCaptureOpen(true)}
-              title="Registro fotográfico del RA"
-              className="flex items-center gap-2 rounded-xl border-2 border-violet-400/80 bg-violet-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-violet-950 shadow-sm transition hover:border-violet-600 hover:bg-violet-100 dark:border-violet-500/50 dark:bg-violet-950/35 dark:text-violet-100 dark:hover:bg-violet-900/45"
-            >
-              <Camera className="h-4 w-4 shrink-0 text-violet-700 dark:text-violet-300" />
-              <span className="whitespace-nowrap">Fotos</span>
             </button>
           </div>
           <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -1576,20 +1562,6 @@ export function DetailedInventoryEntry({
           filenameBase: `inventario-detallado-${raSafe}`,
         });
         setCsvExportOpen(false);
-      }}
-    />
-    <PhotoCaptureModal
-      open={photoCaptureOpen}
-      taskId={t.id}
-      raLabel={String(t.ra ?? "")}
-      takenByEmail={presenceUserKey ?? undefined}
-      takenByName={presenceUserLabel ?? undefined}
-      onClose={() => setPhotoCaptureOpen(false)}
-      onPhotoSaved={async (photo: RaPhoto) => {
-        const merged = appendPhotoToTask(t as SharedTask, photo);
-        const updated = { ...t, photoRecord: merged.photoRecord };
-        await onUpdateTask(updated);
-        setSelectedTask(updated);
       }}
     />
     </>

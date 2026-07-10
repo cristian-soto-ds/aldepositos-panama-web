@@ -227,6 +227,31 @@ export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
 }
 
+export type QuickRowMissingField = "referencia" | "bultos" | "largo" | "ancho" | "alto";
+
+export const QUICK_ROW_MISSING_LABELS: Record<QuickRowMissingField, string> = {
+  referencia: "Referencia",
+  bultos: "Bultos",
+  largo: "Largo",
+  ancho: "Ancho",
+  alto: "Alto",
+};
+
+/** Campos que aún faltan capturar en una línea (para lista de referencias en Reekon). */
+export function getQuickRowMissingFields(row: QuickMeasureRow): QuickRowMissingField[] {
+  const referencia = String(row.referencia ?? "").trim();
+  if (row.reempaque === true) {
+    return referencia.length > 0 ? [] : ["referencia"];
+  }
+  const missing: QuickRowMissingField[] = [];
+  if (!referencia) missing.push("referencia");
+  if (!(parseFloat(String(row.bultos ?? 0)) > 0)) missing.push("bultos");
+  if (!(parseFloat(String(row.l ?? 0)) > 0)) missing.push("largo");
+  if (!(parseFloat(String(row.w ?? 0)) > 0)) missing.push("ancho");
+  if (!(parseFloat(String(row.h ?? 0)) > 0)) missing.push("alto");
+  return missing;
+}
+
 export function formatRowLabel(
   index: number,
   row: QuickMeasureRow,

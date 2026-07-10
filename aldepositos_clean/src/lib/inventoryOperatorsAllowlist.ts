@@ -107,6 +107,25 @@ function toResolved(
  * 1) inventoryCompletedBy si es permitido
  * 2) último contributor permitido (más reciente)
  */
+export type LivePresenceIdentity = {
+  userKey: string;
+  name: string;
+};
+
+/** Inventariador permitido con presencia activa en un RA (ingreso rápido / detallado). */
+export function resolveLiveInventoryOperator(
+  operators: LivePresenceIdentity[],
+): ResolvedInventoryOperator | null {
+  for (const op of operators) {
+    const key = String(op.userKey ?? "").trim();
+    const email = key.includes("@") ? key : undefined;
+    const name = String(op.name ?? "").trim();
+    if (!isAllowedInventoryOperator(email ?? null, name)) continue;
+    return toResolved(email ?? key, name);
+  }
+  return null;
+}
+
 export function resolveAllowedInventoryOperator(
   task: Task,
 ): ResolvedInventoryOperator | null {

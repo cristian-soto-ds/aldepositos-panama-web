@@ -94,8 +94,10 @@ export function ControlPanelLayout({
 
   return (
     <div
-      className={`flex h-dvh min-h-screen flex-col overflow-hidden font-sans text-gray-800 md:flex-row dark:text-slate-200 ${
-        preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+      className={`flex h-dvh min-h-screen flex-col overflow-hidden font-sans md:flex-row ${
+        preferences?.theme === "dark"
+          ? "bg-[var(--panel-bg)] text-slate-200"
+          : "bg-slate-50 text-gray-800"
       }`}
     >
       {sidebarOpen && (
@@ -320,7 +322,7 @@ export function ControlPanelLayout({
 
       <div
         className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${
-          preferences?.theme === "dark" ? "bg-slate-900" : "bg-slate-50"
+          preferences?.theme === "dark" ? "bg-[var(--panel-bg)]" : "bg-slate-50"
         }`}
       >
         <header

@@ -35,7 +35,7 @@ import {
   clearWorkPresence,
 } from "@/lib/panelPresence";
 import { applyInventoryAttribution } from "@/lib/taskContributors";
-import { resolveLiveInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
+import { resolveActiveInventoryOperatorLabel } from "@/lib/inventoryOperatorsAllowlist";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
@@ -344,7 +344,9 @@ export function DetailedInventoryEntry({
       void clearWorkPresence(getSharedWorkPresenceTabId());
       return;
     }
-    const label = presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
+    const rawLabel = String(presenceUserLabel ?? "").trim();
+    const label =
+      rawLabel || presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
     const tabId = getSharedWorkPresenceTabId();
     const send = () => {
       publishWorkPresence({
@@ -965,8 +967,10 @@ export function DetailedInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
-                  const activeInventariador =
-                    resolveLiveInventoryOperator(liveWorkers)?.displayName ?? null;
+                  const activeInventariador = resolveActiveInventoryOperatorLabel(
+                    t,
+                    liveWorkers,
+                  );
                   return (
                   <div
                     key={t.id}

@@ -3,9 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, Circle, List, Recycle, X } from "lucide-react";
 import {
-  getQuickRowMissingFields,
   isQuickRowComplete,
-  QUICK_ROW_MISSING_LABELS,
   type QuickMeasureRow,
   type ReferenceCaptureMode,
 } from "@/lib/quickInventoryTypes";
@@ -48,6 +46,36 @@ function rowLabel(
   return `#${index + 1}`;
 }
 
+function rowSummary(row: QuickMeasureRow, reemp: boolean): string {
+  if (reemp) {
+    const refCont = strVal(row.referenciaContenedora);
+    return refCont ? `Reempaque · cont: ${refCont}` : "Reempaque";
+  }
+
+  const parts: string[] = [];
+  const bultos = strVal(row.bultos);
+  if (bultos) {
+    parts.push(`${bultos} bulto${Number(row.bultos) !== 1 ? "s" : ""}`);
+  }
+
+  const l = strVal(row.l);
+  const w = strVal(row.w);
+  const h = strVal(row.h);
+  if (l || w || h) {
+    parts.push(`${l || "—"}×${w || "—"}×${h || "—"}`);
+  }
+
+  const weight = strVal(row.weight) || strVal(row.pesoPorBulto);
+  if (weight) parts.push(`${weight} kg`);
+
+  const desc = strVal(row.descripcion);
+  if (desc) {
+    parts.push(desc.length > 28 ? `${desc.slice(0, 28)}…` : desc);
+  }
+
+  return parts.join(" · ") || "Pendiente de captura";
+}
+
 const FILTERS: { id: FilterId; label: string }[] = [
   { id: "all", label: "Todas" },
   { id: "pending", label: "Pendientes" },
@@ -71,14 +99,13 @@ export function ReekonReferenceListSheet({
     return measureRows.map((row, index) => {
       const done = isQuickRowComplete(row);
       const reemp = row.reempaque === true;
-      const missing = getQuickRowMissingFields(row);
       return {
         row,
         index,
         done,
         reemp,
-        missing,
         label: rowLabel(row, index, referenceMode, measureRows),
+        summary: rowSummary(row, reemp),
       };
     });
   }, [measureRows, referenceMode]);
@@ -110,32 +137,35 @@ export function ReekonReferenceListSheet({
         role="dialog"
         aria-modal="true"
         aria-labelledby="reekon-ref-list-title"
-        className="relative flex max-h-[min(88vh,720px)] flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="relative flex max-h-[min(92vh,820px)] flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800 sm:px-4 sm:py-2.5">
           <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <List className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-              <h2 id="reekon-ref-list-title" className="text-base font-bold text-slate-900 dark:text-slate-100">
+              <h2
+                id="reekon-ref-list-title"
+                className="text-sm font-bold text-slate-900 dark:text-slate-100 sm:text-base"
+              >
                 Todas las referencias
               </h2>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               {completedCount} completas · {pendingCount} pendientes
-              {faltantes > 0 ? ` · faltan ${faltantes} bultos en total` : ""}
+              {faltantes > 0 ? ` · faltan ${faltantes} bultos` : ""}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
             aria-label="Cerrar"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 py-2.5">
+        <div className="flex shrink-0 gap-1 overflow-x-auto px-3 py-1.5 sm:px-4 sm:py-2">
           {FILTERS.map((f) => {
             const count =
               f.id === "all"
@@ -148,7 +178,7 @@ export function ReekonReferenceListSheet({
                 key={f.id}
                 type="button"
                 onClick={() => setFilter(f.id)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold transition sm:px-3 sm:py-1.5 sm:text-xs ${
                   filter === f.id
                     ? "bg-[#16263F] text-white"
                     : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
@@ -160,33 +190,33 @@ export function ReekonReferenceListSheet({
           })}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-3">
           {filtered.length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+            <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
               No hay líneas en este filtro.
             </p>
           ) : (
-            <ul className="flex flex-col gap-2 py-1">
-              {filtered.map(({ row, index, done, reemp, missing, label }) => {
+            <ul className="flex flex-col gap-1 py-0.5">
+              {filtered.map(({ row, index, done, reemp, label, summary }) => {
                 const isActive = row.id === activeRowId;
                 return (
                   <li key={row.id}>
                     <button
                       type="button"
                       onClick={() => handleSelect(row.id)}
-                      className={`w-full rounded-xl border px-3 py-3 text-left transition active:scale-[0.99] ${
+                      className={`w-full rounded-lg border px-2.5 py-2 text-left transition active:scale-[0.99] sm:px-3 ${
                         isActive
                           ? "border-blue-500 bg-blue-50 shadow-sm dark:border-blue-400 dark:bg-blue-950/40"
                           : done
-                            ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/30"
+                            ? "border-emerald-200/80 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/25"
                             : reemp
-                              ? "border-violet-200 bg-violet-50/80 dark:border-violet-800 dark:bg-violet-950/30"
+                              ? "border-violet-200/80 bg-violet-50/60 dark:border-violet-800 dark:bg-violet-950/25"
                               : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60"
                       }`}
                     >
-                      <div className="flex items-start gap-2.5">
+                      <div className="flex items-center gap-2">
                         <span
-                          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                             reemp
                               ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
                               : done
@@ -195,63 +225,26 @@ export function ReekonReferenceListSheet({
                           }`}
                         >
                           {reemp ? (
-                            <Recycle className="h-3.5 w-3.5" />
+                            <Recycle className="h-3 w-3" />
                           ) : done ? (
-                            <Check className="h-3.5 w-3.5" />
+                            <Check className="h-3 w-3" />
                           ) : (
-                            <Circle className="h-3.5 w-3.5" />
+                            <Circle className="h-3 w-3" />
                           )}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate text-[13px] font-bold leading-tight text-slate-900 dark:text-slate-100">
                               {label}
                             </span>
-                            <span className="text-[11px] font-medium text-slate-400">
-                              Línea {index + 1}
+                            <span className="shrink-0 text-[10px] font-semibold tabular-nums text-slate-400">
+                              L{index + 1}
+                              {palletized ? ` · P${palletOf(row)}` : ""}
                             </span>
-                            {palletized ? (
-                              <span className="text-[11px] font-semibold text-violet-600 dark:text-violet-400">
-                                Paleta {palletOf(row)}
-                              </span>
-                            ) : null}
                           </div>
-                          {referenceMode === "with" && strVal(row.referencia) && label !== strVal(row.referencia) ? (
-                            <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                              Ref: {strVal(row.referencia)}
-                            </p>
-                          ) : null}
-                          {reemp ? (
-                            <p className="mt-1 text-xs font-medium text-violet-600 dark:text-violet-400">
-                              Reempaque — no requiere medidas
-                            </p>
-                          ) : done ? (
-                            <p className="mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                              Captura completa
-                            </p>
-                          ) : missing.length > 0 ? (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                                Falta:
-                              </span>
-                              {missing.map((field) => (
-                                <span
-                                  key={field}
-                                  className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                                >
-                                  {QUICK_ROW_MISSING_LABELS[field]}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                          {!reemp && strVal(row.bultos) ? (
-                            <p className="mt-1 text-[11px] text-slate-400">
-                              {strVal(row.bultos)} bulto{Number(row.bultos) !== 1 ? "s" : ""}
-                              {strVal(row.l) && strVal(row.w) && strVal(row.h)
-                                ? ` · ${strVal(row.l)}×${strVal(row.w)}×${strVal(row.h)}`
-                                : ""}
-                            </p>
-                          ) : null}
+                          <p className="truncate text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                            {summary}
+                          </p>
                         </div>
                       </div>
                     </button>

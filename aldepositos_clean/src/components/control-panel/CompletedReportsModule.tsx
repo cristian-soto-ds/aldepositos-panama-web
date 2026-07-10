@@ -180,14 +180,14 @@ export function CompletedReportsModule({
     });
 
     return (
-      <div className="w-full h-full flex flex-col animate-fade bg-slate-100/50 relative">
-        <div className="reports-print-toolbar shrink-0 flex justify-between items-center p-4 md:px-8 border-b border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 shadow-sm z-50 sticky top-0">
+      <div className="relative flex h-full w-full animate-fade flex-col bg-[var(--panel-bg-subtle)]">
+        <div className="reports-print-toolbar panel-card sticky top-0 z-50 flex shrink-0 items-center justify-between border-b-0 p-4 md:px-8">
           <button
             type="button"
             onClick={() => {
               singleViewTask ? setSingleViewTask(null) : setIsViewingReports(false);
             }}
-            className="text-slate-500 dark:text-slate-400 hover:text-[#16263F] dark:text-slate-100 font-bold flex items-center gap-2 uppercase text-[10px] tracking-widest px-4 py-2 bg-slate-50 dark:bg-slate-800/60 rounded-lg transition-colors"
+            className="flex items-center gap-2 rounded-lg bg-[var(--panel-surface-muted)] px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-600 transition-colors hover:text-[var(--panel-heading)] dark:text-slate-300"
           >
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
@@ -224,7 +224,7 @@ export function CompletedReportsModule({
         {exportError && (
           <div
             role="status"
-            className="shrink-0 px-4 md:px-8 py-2 bg-red-50 border-b border-red-100 text-red-700 text-[11px] font-bold"
+            className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] font-bold text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300 md:px-8"
           >
             {exportError}
           </div>
@@ -232,10 +232,10 @@ export function CompletedReportsModule({
 
         <div
           id="reports-print-root"
-          className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 flex flex-col items-center gap-8"
+          className="custom-scrollbar flex flex-1 flex-col items-center gap-8 overflow-y-auto bg-[var(--panel-bg)] p-4 md:p-8"
         >
           {tasksToPrint.map((t) => (
-            <div key={t.id} className="w-full max-w-[8.5in]">
+            <div key={t.id} className="report-preview-frame w-full max-w-[8.5in]">
               <ReportPdfExportLayout
                 task={t as TaskModel}
                 currentDate={currentDate}
@@ -254,18 +254,18 @@ export function CompletedReportsModule({
         {exportError && (
           <div
             role="status"
-            className="shrink-0 mx-2 md:mx-0 mb-3 px-4 py-2 bg-red-50 border border-red-100 rounded-xl text-red-700 text-[11px] font-bold"
+            className="mx-2 mb-3 shrink-0 rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-[11px] font-bold text-red-700 dark:border-red-900/40 dark:bg-red-950/35 dark:text-red-300 md:mx-0"
           >
             {exportError}
           </div>
         )}
         <div className="shrink-0 space-y-4 md:space-y-6 mb-4 md:mb-6 px-2 md:px-0">
-          <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3">
-            <FileText className="text-purple-600 w-5 h-5 md:w-8 md:h-8" />{" "}
+          <h2 className="flex items-center gap-2 text-xl font-black text-[#16263F] dark:text-slate-100 md:gap-3 md:text-3xl">
+            <FileText className="h-5 w-5 text-purple-600 dark:text-purple-400 md:h-8 md:w-8" />{" "}
             REPORTES
           </h2>
 
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-[1.5rem] border border-slate-200 dark:border-slate-600 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div className="panel-card flex flex-col items-center justify-between gap-4 rounded-[1.5rem] p-4 md:flex-row">
             <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
               {clients.length > 0 && (
                 <div className="flex flex-col">
@@ -276,7 +276,7 @@ export function CompletedReportsModule({
                     <select
                       value={clientFilter}
                       onChange={(e) => setClientFilter(e.target.value)}
-                      className="appearance-none w-full sm:w-48 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 text-[#16263F] dark:text-slate-100 font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
+                      className="panel-input w-full cursor-pointer appearance-none rounded-xl py-2.5 pl-4 pr-10 text-xs font-bold uppercase sm:w-48"
                     >
                       <option value="Todos">TODOS LOS CLIENTES</option>
                       {clients.map((c) => (
@@ -300,7 +300,7 @@ export function CompletedReportsModule({
                     onChange={(e) =>
                       setTypeFilter(e.target.value as typeof typeFilter)
                     }
-                    className="appearance-none w-full sm:w-48 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 text-[#16263F] dark:text-slate-100 font-bold py-2.5 pl-4 pr-10 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-xs uppercase"
+                    className="panel-input w-full cursor-pointer appearance-none rounded-xl py-2.5 pl-4 pr-10 text-xs font-bold uppercase sm:w-48"
                   >
                     <option value="Todos">TODOS LOS MÓDULOS</option>
                     <option value="quick">Ingreso Rápido</option>
@@ -315,7 +315,7 @@ export function CompletedReportsModule({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="w-full md:w-auto text-xs font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/45 hover:bg-blue-100 px-4 py-2.5 rounded-xl uppercase tracking-widest transition-colors shrink-0"
+                className="w-full shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/55 dark:text-blue-200 dark:hover:bg-blue-900/45 md:w-auto"
               >
                 {isAllSelected ? "Desmarcar Resultados" : "Seleccionar Resultados"}
               </button>
@@ -326,8 +326,8 @@ export function CompletedReportsModule({
         <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-24">
           <div className="grid grid-cols-1 gap-3 md:gap-4 px-2 md:px-0">
             {displayedTasks.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500 flex flex-col items-center">
-                <Search className="w-12 h-12 text-slate-300 mb-4" />
+              <div className="panel-card flex flex-col items-center rounded-[2rem] p-8 text-center font-bold text-slate-400 dark:text-slate-500 md:p-16">
+                <Search className="mb-4 h-12 w-12 text-slate-300 dark:text-slate-600" />
                 No se encontraron reportes finalizados con estos filtros.
               </div>
             ) : (
@@ -343,10 +343,10 @@ export function CompletedReportsModule({
                 return (
                   <div
                     key={t.id}
-                    className={`bg-white dark:bg-slate-900 p-4 md:p-6 rounded-[1.5rem] border transition-all cursor-pointer flex items-center group ${
+                    className={`panel-card group flex cursor-pointer items-center rounded-[1.5rem] p-4 transition-all md:p-6 ${
                       isSelected
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/45 shadow-md ring-2 ring-blue-500/20"
-                        : "border-slate-200 dark:border-slate-600 shadow-sm hover:border-blue-300"
+                        ? "border-blue-500 bg-blue-50 shadow-md ring-2 ring-blue-500/20 dark:border-blue-500/70 dark:bg-blue-950/50"
+                        : "hover:border-blue-300 dark:hover:border-blue-700/60"
                     }`}
                     onClick={() => setSingleViewTask(t)}
                   >
@@ -366,7 +366,7 @@ export function CompletedReportsModule({
                       className={`w-6 h-6 rounded border flex items-center justify-center shrink-0 mr-4 md:mr-6 transition-colors hover:scale-110 ${
                         isSelected
                           ? "bg-blue-600 border-blue-600 text-white"
-                          : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900"
+                          : "border-slate-300 bg-[var(--panel-surface)] dark:border-slate-600"
                       }`}
                     >
                       {isSelected && <Check size={16} strokeWidth={4} />}
@@ -376,29 +376,29 @@ export function CompletedReportsModule({
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest ${
+                            className={`rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-widest ${
                               t.status === "partial"
-                                ? "bg-orange-100 text-orange-700"
-                                : "bg-green-100 text-green-700"
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-950/55 dark:text-orange-300"
+                                : "bg-green-100 text-green-700 dark:bg-emerald-950/55 dark:text-emerald-300"
                             }`}
                           >
                             {t.status === "partial" ? "Parcial" : "Completado"}
                           </span>
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase leading-normal tracking-wide ${
+                            className={`rounded-md px-2 py-0.5 text-[9px] font-black uppercase leading-normal tracking-wide ${
                               t.type === "detailed"
-                                ? "bg-purple-100 text-purple-700"
-                                : "bg-slate-100 text-slate-600 dark:text-slate-300"
+                                ? "bg-purple-100 text-purple-700 dark:bg-purple-950/55 dark:text-purple-300"
+                                : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                             }`}
                           >
                             {moduleName}
                           </span>
-                          <span className="text-slate-300 mx-1">|</span>
+                          <span className="mx-1 text-slate-300 dark:text-slate-600">|</span>
                           <p className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate max-w-[120px]">
                             {t.mainClient}
                           </p>
                         </div>
-                        <h3 className="text-xl md:text-2xl font-black text-[#16263F] dark:text-slate-100 leading-tight group-hover:text-blue-600 dark:text-blue-400 transition-colors">
+                        <h3 className="text-xl font-black leading-tight text-[#16263F] transition-colors group-hover:text-blue-600 dark:text-slate-100 dark:group-hover:text-blue-400 md:text-2xl">
                           RA: {t.ra}
                         </h3>
                         <p className="text-[10px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">
@@ -415,7 +415,7 @@ export function CompletedReportsModule({
                             e.stopPropagation();
                             void handleDownloadExcel([t]);
                           }}
-                          className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 transition-colors border border-emerald-200 disabled:opacity-60"
+                          className="flex h-10 w-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 transition-colors hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-800/60 dark:bg-emerald-950/45 dark:text-emerald-300 dark:hover:bg-emerald-900/50"
                         >
                           {isDownloadingExcel ? (
                             <Loader2 size={18} className="animate-spin" />
@@ -431,7 +431,7 @@ export function CompletedReportsModule({
                               e.stopPropagation();
                               onDeleteTask(t.id);
                             }}
-                            className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors border border-red-200 dark:bg-red-950/40 dark:border-red-900/60"
+                            className="flex h-10 w-10 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-500 transition-colors hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-400 dark:hover:bg-red-900/50"
                           >
                             <Trash2 size={18} />
                           </button>
@@ -441,7 +441,7 @@ export function CompletedReportsModule({
                             {t.currentBultos} BULTOS
                           </p>
                         </div>
-                        <div className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800/60 text-slate-400 dark:text-slate-500 flex items-center justify-center group-hover:bg-blue-100 group-hover:text-blue-600 dark:text-blue-400 transition-colors border border-slate-200 dark:border-slate-600">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-[var(--panel-surface-muted)] text-slate-400 transition-colors group-hover:bg-blue-100 group-hover:text-blue-600 dark:border-slate-600 dark:text-slate-400 dark:group-hover:bg-blue-950/50 dark:group-hover:text-blue-300">
                           <Eye size={18} />
                         </div>
                       </div>

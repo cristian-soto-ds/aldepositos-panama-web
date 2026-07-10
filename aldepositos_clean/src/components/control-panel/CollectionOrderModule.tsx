@@ -1240,6 +1240,7 @@ export function CollectionOrderModule({
     const listSelectedCount = orders.filter((o) => selectedOrderIds[o.id] === true).length;
     const generalCount = countOrdersForCollectionListTab(orders, "general");
     const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
+    const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
     const displayedListOrders = ordersForCollectionListTab(orders, listTab);
     const listDominantCliente = (() => {
       const freq = new Map<string, number>();
@@ -1315,6 +1316,7 @@ export function CollectionOrderModule({
           active={listTab}
           generalCount={generalCount}
           warehouseCount={warehouseCount}
+          linkedRaCount={linkedRaCount}
           onChange={setListTab}
         />
 
@@ -1331,7 +1333,9 @@ export function CollectionOrderModule({
             <p className="font-bold text-slate-500 dark:text-slate-400">
               {listTab === "general"
                 ? "No hay órdenes en recepción."
-                : "No hay órdenes en bodega pendientes de RA."}
+                : listTab === "warehouse"
+                  ? "No hay órdenes en bodega pendientes de RA."
+                  : "No hay órdenes con RA asignado."}
             </p>
           </div>
         ) : (
@@ -1392,6 +1396,7 @@ export function CollectionOrderModule({
               const clienteLabel =
                 String(o.cliente ?? "").trim() || listDominantCliente;
               const inWarehouse = listTab === "warehouse";
+              const inLinkedRa = listTab === "linkedRa";
               const hasRa = orderHasLinkedRa(o);
               return (
                 <div
@@ -1474,26 +1479,25 @@ export function CollectionOrderModule({
                         </span>
                       </span>
                       {inWarehouse ? (
-                        hasRa ? (
-                          <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-                            RA: {o.linkedRaNumbers!.join(", ")}
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                            Pendiente RA
-                          </span>
-                        )
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                          Pendiente RA
+                        </span>
                       ) : null}
-                      {o.status === "sent" && (
+                      {inLinkedRa && hasRa ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+                          RA: {o.linkedRaNumbers!.join(", ")}
+                        </span>
+                      ) : null}
+                      {o.status === "sent" && !inLinkedRa && (
                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
                           Enviada al almacén
                         </span>
                       )}
-                      {o.linkedRaNumbers && o.linkedRaNumbers.length > 0 && (
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                          RA: {o.linkedRaNumbers.join(", ")}
+                      {inLinkedRa && o.linkedRaNumbers && o.linkedRaNumbers.length > 0 ? (
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+                          Vinculada · RA: {o.linkedRaNumbers.join(", ")}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto">
@@ -1507,12 +1511,12 @@ export function CollectionOrderModule({
                     ) : null}
                     <span
                       className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
-                        inWarehouse && !hasRa
+                        inWarehouse
                           ? "bg-amber-600 group-hover:bg-amber-700"
                           : "bg-[#16263F] group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500"
                       }`}
                     >
-                      {inWarehouse && !hasRa ? "Asignar RA" : "Abrir"}
+                      {inWarehouse ? "Asignar RA" : "Abrir"}
                       <ChevronRight className="h-3 w-3 opacity-80" aria-hidden />
                     </span>
                     <button

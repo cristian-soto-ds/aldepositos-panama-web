@@ -36,8 +36,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es-PA">
-      <body className="font-sans antialiased">{children}</body>
+    <html lang="es-PA" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("aldepositos_last_theme_v1");if(t==="dark"||(!t&&window.matchMedia("(prefers-color-scheme: dark)").matches)){document.documentElement.classList.add("panel-dark");}}catch(e){}})();`,
+          }}
+        />
+      </head>
+      <body className="font-sans antialiased bg-[var(--panel-bg)] text-[var(--panel-text)]">
+        {children}
+      </body>
     </html>
   );
 }

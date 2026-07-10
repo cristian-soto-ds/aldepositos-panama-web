@@ -1,4 +1,8 @@
 import type { Task } from "@/lib/types/task";
+import {
+  getInventariadorById,
+  resolveInventariadorId,
+} from "@/lib/inventariadoresRoster";
 
 export type InventoryOperatorEntry = {
   /** Nombres aceptados (perfiles.nombre_completo o variantes cortas). */
@@ -110,20 +114,70 @@ function toResolved(
 export type LivePresenceIdentity = {
   userKey: string;
   name: string;
+  rawLabel?: string;
 };
+
+function resolveOperatorFromIdentity(
+  userKey: string,
+  ...nameCandidates: Array<string | undefined>
+): ResolvedInventoryOperator | null {
+  const key = String(userKey ?? "").trim();
+  if (!key) return null;
+  const email = key.includes("@") ? key : undefined;
+
+  for (const candidate of nameCandidates) {
+    const name = String(candidate ?? "").trim();
+    if (!name) continue;
+    if (isAllowedInventoryOperator(email ?? null, name)) {
+      return toResolved(email ?? key, name);
+    }
+    const rosterId = resolveInventariadorId(name, email ?? key);
+    if (rosterId) {
+      const entry = getInventariadorById(rosterId);
+      if (entry) {
+        return {
+          email: (email ?? key).toLowerCase(),
+          displayName: entry.name,
+        };
+      }
+    }
+  }
+
+  return null;
+}
 
 /** Inventariador permitido con presencia activa en un RA (ingreso rápido / detallado). */
 export function resolveLiveInventoryOperator(
   operators: LivePresenceIdentity[],
 ): ResolvedInventoryOperator | null {
   for (const op of operators) {
-    const key = String(op.userKey ?? "").trim();
-    const email = key.includes("@") ? key : undefined;
-    const name = String(op.name ?? "").trim();
-    if (!isAllowedInventoryOperator(email ?? null, name)) continue;
-    return toResolved(email ?? key, name);
+    const resolved = resolveOperatorFromIdentity(
+      op.userKey,
+      op.rawLabel,
+      op.name,
+    );
+    if (resolved) return resolved;
   }
   return null;
+}
+
+/**
+ * Etiqueta «En curso» para un RA:
+ * 1) inventariador permitido con presencia en vivo en ese RA
+ * 2) RA en progreso con captura de un inventariador permitido (contributors / completedBy)
+ */
+export function resolveActiveInventoryOperatorLabel(
+  task: Task,
+  operators: LivePresenceIdentity[],
+): string | null {
+  const live = resolveLiveInventoryOperator(operators);
+  if (live?.displayName) return live.displayName;
+
+  const activeStatus =
+    task.status === "in_progress" || task.status === "partial";
+  if (!activeStatus) return null;
+
+  return resolveAllowedInventoryOperator(task)?.displayName ?? null;
 }
 
 export function resolveAllowedInventoryOperator(

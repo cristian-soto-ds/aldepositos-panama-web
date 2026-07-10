@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAllowedInventoryOperator,
+  resolveActiveInventoryOperatorLabel,
   resolveAllowedInventoryOperator,
   resolveLiveInventoryOperator,
 } from "@/lib/inventoryOperatorsAllowlist";
@@ -52,6 +53,49 @@ describe("resolveLiveInventoryOperator", () => {
         { userKey: "cristian@example.com", name: "Cristian Soto" },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("resolveActiveInventoryOperatorLabel", () => {
+  it("usa presencia en vivo si hay inventariador en el RA", () => {
+    const label = resolveActiveInventoryOperatorLabel(baseTask({ status: "pending" }), [
+      { userKey: "jahir@example.com", name: "Jahir", rawLabel: "Jahir Jimenez" },
+    ]);
+    expect(label).toBe("Jahir Jimenez");
+  });
+
+  it("usa contributor permitido si el RA está en progreso sin presencia", () => {
+    const label = resolveActiveInventoryOperatorLabel(
+      baseTask({
+        status: "in_progress",
+        contributors: [
+          {
+            email: "claudio@example.com",
+            displayName: "Claudio",
+            at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+      [],
+    );
+    expect(label).toBe("Claudio Guitierrez");
+  });
+
+  it("no muestra en curso si el RA está en progreso pero no es inventariador permitido", () => {
+    const label = resolveActiveInventoryOperatorLabel(
+      baseTask({
+        status: "in_progress",
+        contributors: [
+          {
+            email: "cristian@example.com",
+            displayName: "Cristian Soto",
+            at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+      [],
+    );
+    expect(label).toBeNull();
   });
 });
 

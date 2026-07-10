@@ -111,63 +111,63 @@ export const RECEPTION_COLUMN_THEME: Record<
 > = {
   EN_FILA: {
     header: "bg-slate-700 text-white border-slate-600",
-    card: "bg-white border-slate-200 text-slate-900",
-    badge: "bg-slate-100 text-slate-700",
+    card: "bg-white border-slate-200 text-slate-900 dark:bg-slate-800/90 dark:border-slate-600 dark:text-slate-100",
+    badge: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-700 dark:text-slate-100 dark:border-slate-600",
     stripe: "from-slate-500 to-slate-700",
     actionIdle:
-      "border-2 border-slate-300 bg-slate-100 text-slate-800 hover:border-slate-400 hover:bg-slate-200",
+      "border-2 border-slate-300 bg-slate-100 text-slate-800 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700",
     actionActive:
-      "border-2 border-slate-800 bg-slate-700 text-white shadow-md ring-2 ring-slate-400/60 ring-offset-1",
+      "border-2 border-slate-800 bg-slate-700 text-white shadow-md ring-2 ring-slate-400/60 ring-offset-1 dark:ring-offset-slate-900",
   },
   RAMPA_1: {
     header: "bg-amber-600 text-white border-amber-500",
-    card: "bg-amber-50 border-amber-200 text-amber-950",
-    badge: "bg-amber-100 text-amber-800",
+    card: "bg-amber-50 border-amber-200 text-amber-950 dark:bg-amber-950/45 dark:border-amber-700/55 dark:text-amber-50",
+    badge: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/75 dark:text-amber-100 dark:border-amber-700/50",
     stripe: "from-amber-400 to-amber-600",
     actionIdle:
-      "border-2 border-amber-300 bg-amber-50 text-amber-900 hover:border-amber-400 hover:bg-amber-100",
+      "border-2 border-amber-300 bg-amber-50 text-amber-900 hover:border-amber-400 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/50",
     actionActive:
-      "border-2 border-amber-600 bg-amber-500 text-white shadow-md ring-2 ring-amber-300/70 ring-offset-1",
+      "border-2 border-amber-600 bg-amber-500 text-white shadow-md ring-2 ring-amber-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
   RAMPA_2: {
     header: "bg-orange-600 text-white border-orange-500",
-    card: "bg-orange-50 border-orange-200 text-orange-950",
-    badge: "bg-orange-100 text-orange-800",
+    card: "bg-orange-50 border-orange-200 text-orange-950 dark:bg-orange-950/45 dark:border-orange-700/55 dark:text-orange-50",
+    badge: "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/75 dark:text-orange-100 dark:border-orange-700/50",
     stripe: "from-orange-400 to-orange-600",
     actionIdle:
-      "border-2 border-orange-300 bg-orange-50 text-orange-900 hover:border-orange-400 hover:bg-orange-100",
+      "border-2 border-orange-300 bg-orange-50 text-orange-900 hover:border-orange-400 hover:bg-orange-100 dark:border-orange-700 dark:bg-orange-950/40 dark:text-orange-100 dark:hover:bg-orange-900/50",
     actionActive:
-      "border-2 border-orange-600 bg-orange-500 text-white shadow-md ring-2 ring-orange-300/70 ring-offset-1",
+      "border-2 border-orange-600 bg-orange-500 text-white shadow-md ring-2 ring-orange-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
   RAMPA_EXTRA: {
     header: "bg-sky-600 text-white border-sky-500",
-    card: "bg-sky-50 border-sky-200 text-sky-950",
-    badge: "bg-sky-100 text-sky-800",
+    card: "bg-sky-50 border-sky-200 text-sky-950 dark:bg-sky-950/45 dark:border-sky-700/55 dark:text-sky-50",
+    badge: "bg-sky-100 text-sky-800 border-sky-200 dark:bg-sky-900/75 dark:text-sky-100 dark:border-sky-700/50",
     stripe: "from-sky-400 to-sky-600",
     actionIdle:
-      "border-2 border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100",
+      "border-2 border-sky-300 bg-sky-50 text-sky-900 hover:border-sky-400 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100 dark:hover:bg-sky-900/50",
     actionActive:
-      "border-2 border-sky-600 bg-sky-500 text-white shadow-md ring-2 ring-sky-300/70 ring-offset-1",
+      "border-2 border-sky-600 bg-sky-500 text-white shadow-md ring-2 ring-sky-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
   CARRETILLADO: {
     header: "bg-violet-600 text-white border-violet-500",
-    card: "bg-violet-50 border-violet-200 text-violet-950",
-    badge: "bg-violet-100 text-violet-800",
+    card: "bg-violet-50 border-violet-200 text-violet-950 dark:bg-violet-950/45 dark:border-violet-700/55 dark:text-violet-50",
+    badge: "bg-violet-100 text-violet-800 border-violet-200 dark:bg-violet-900/75 dark:text-violet-100 dark:border-violet-700/50",
     stripe: "from-violet-400 to-violet-600",
     actionIdle:
-      "border-2 border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100",
+      "border-2 border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100 dark:hover:bg-violet-900/50",
     actionActive:
-      "border-2 border-violet-600 bg-violet-500 text-white shadow-md ring-2 ring-violet-300/70 ring-offset-1",
+      "border-2 border-violet-600 bg-violet-500 text-white shadow-md ring-2 ring-violet-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
   COMPLETADO: {
     header: "bg-emerald-700 text-white border-emerald-600",
-    card: "bg-emerald-50 border-emerald-200 text-emerald-950",
-    badge: "bg-emerald-100 text-emerald-800",
+    card: "bg-emerald-50 border-emerald-200 text-emerald-950 dark:bg-emerald-950/50 dark:border-emerald-700/55 dark:text-emerald-50",
+    badge: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/75 dark:text-emerald-100 dark:border-emerald-700/50",
     stripe: "from-emerald-400 to-emerald-600",
     actionIdle:
-      "border-2 border-emerald-300 bg-emerald-50 text-emerald-900 hover:border-emerald-400 hover:bg-emerald-100",
+      "border-2 border-emerald-300 bg-emerald-50 text-emerald-900 hover:border-emerald-400 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100 dark:hover:bg-emerald-900/50",
     actionActive:
-      "border-2 border-emerald-700 bg-emerald-600 text-white shadow-md ring-2 ring-emerald-300/70 ring-offset-1",
+      "border-2 border-emerald-700 bg-emerald-600 text-white shadow-md ring-2 ring-emerald-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
 };
 

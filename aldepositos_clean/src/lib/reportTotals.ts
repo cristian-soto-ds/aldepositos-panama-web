@@ -5,8 +5,10 @@ import {
   sumCubicajeM3,
 } from "@/lib/measureDecimals";
 import {
+  isReferenceCaptureMode,
   stripQuickRowsForPersist,
   type QuickMeasureRow,
+  type ReferenceCaptureMode,
 } from "@/lib/quickInventoryTypes";
 
 export type ReportTotals = {
@@ -22,6 +24,9 @@ export type ReportComputed = {
   isAirway: boolean;
   /** Ingreso rápido guardado en modo paletizado (agrupa por paleta; peso por paleta). */
   isPalletized: boolean;
+  /** Ingreso rápido guardado en modo sin referencias. */
+  isWithoutReferences: boolean;
+  referenceMode: ReferenceCaptureMode | null;
   showWeightColumn: boolean;
   showReferenceColumn: boolean;
   totals: ReportTotals;
@@ -45,6 +50,10 @@ function sumPalletWeight(rows: Record<string, unknown>[]): number {
   return acc;
 }
 
+export function resolveTaskReferenceMode(task: Task): ReferenceCaptureMode | null {
+  return isReferenceCaptureMode(task.referenceMode) ? task.referenceMode : null;
+}
+
 export function computeReportData(task: Task): ReportComputed {
   const rawRows = (task.measureData || []) as Record<string, unknown>[];
   const isDetailed = task.type === "detailed";
@@ -55,17 +64,19 @@ export function computeReportData(task: Task): ReportComputed {
         string,
         unknown
       >[]);
-  // Paletizado: el ingreso rápido se guardó con filas agrupadas por paleta
-  // (cada fila lleva su número de paleta; el peso se captura una vez por paleta).
-  const isPalletized =
+  const storedMode = resolveTaskReferenceMode(task);
+  const inferredPalletized =
     !isDetailed &&
     measureRows.some((r) => r.pallet != null && (Number(r.pallet) || 0) >= 1);
+  const isPalletized =
+    !isDetailed && (storedMode === "palletized" || (storedMode === null && inferredPalletized));
+  const isWithoutReferences = !isDetailed && storedMode === "without";
   // En paletizado el peso no va por fila (se muestra por paleta), así que no
   // se usa la columna de peso por fila.
   const showWeightColumn =
     !isPalletized && (task.weightMode === "per_bundle" || isDetailed);
-  /** Misma regla que ingreso rápido / guía aérea: siempre mostrar Referencia en el reporte. */
-  const showReferenceColumn = true;
+  const showReferenceColumn =
+    isDetailed || storedMode === "with" || (storedMode === null && !isPalletized && !isWithoutReferences);
 
   let totalWeight = task.expectedWeight || 0;
   let totalUnidades = 0;
@@ -118,6 +129,8 @@ export function computeReportData(task: Task): ReportComputed {
     isDetailed,
     isAirway,
     isPalletized,
+    isWithoutReferences,
+    referenceMode: storedMode,
     showWeightColumn,
     showReferenceColumn,
     totals,
@@ -140,5 +153,9 @@ export function reportPalletWeight(
 export function reportModuleLabel(task: Task): string {
   if (task.type === "detailed") return "detallado";
   if (task.type === "airway") return "guía aérea";
+  const mode = resolveTaskReferenceMode(task);
+  if (mode === "with") return "rápido · con referencias";
+  if (mode === "without") return "rápido · sin referencias";
+  if (mode === "palletized") return "rápido · paletizado";
   return "rápido";
 }

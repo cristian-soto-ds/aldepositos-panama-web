@@ -145,6 +145,7 @@ export function CollectionOrderReceptionistView({
 
   const generalCount = countOrdersForCollectionListTab(orders, "general");
   const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
+  const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
   const displayedOrders = useMemo(
     () => ordersForCollectionListTab(orders, activeTab),
     [orders, activeTab],
@@ -176,7 +177,9 @@ export function CollectionOrderReceptionistView({
         <p className="mt-1 text-sm font-medium text-indigo-100/90">
           {activeTab === "general"
             ? "Asigná una ubicación a cada orden. «Quitar» la saca del tablero."
-            : "Mercancía en bodega. El operador debe asignar un RA a cada orden."}
+            : activeTab === "warehouse"
+              ? "Mercancía en bodega. El operador debe asignar un RA a cada orden."
+              : "Órdenes que ya tienen un RA asignado en almacén."}
         </p>
       </header>
 
@@ -194,6 +197,7 @@ export function CollectionOrderReceptionistView({
         active={activeTab}
         generalCount={generalCount}
         warehouseCount={warehouseCount}
+        linkedRaCount={linkedRaCount}
         onChange={setActiveTab}
       />
 
@@ -210,7 +214,9 @@ export function CollectionOrderReceptionistView({
           <p className="font-bold text-slate-500 dark:text-slate-400">
             {activeTab === "general"
               ? "No hay órdenes en recepción."
-              : "No hay órdenes en bodega pendientes de RA."}
+              : activeTab === "warehouse"
+                ? "No hay órdenes en bodega pendientes de RA."
+                : "No hay órdenes con RA asignado."}
           </p>
         </div>
       ) : (

@@ -6,6 +6,20 @@
  * En Chrome: Más opciones → desactivar "Encabezados y pies de página".
  */
 
+/* Vista previa en pantalla (tema oscuro: marco alrededor del documento blanco) */
+.report-preview-frame {
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+:root.panel-dark .report-preview-frame {
+  padding: 0.65rem;
+  border: 1px solid var(--panel-border-subtle);
+  border-radius: 1rem;
+  background: var(--panel-surface-muted);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
 @media print {
   @page {
     size: letter portrait;

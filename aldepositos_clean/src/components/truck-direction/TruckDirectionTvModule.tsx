@@ -509,7 +509,7 @@ export function TruckDirectionTvModule({
   };
 
   return (
-    <div className="relative flex h-dvh min-h-screen flex-col overflow-hidden bg-white text-slate-900">
+    <div className="force-light relative flex h-dvh min-h-screen flex-col overflow-hidden bg-white text-slate-900">
       <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 shadow-sm md:px-6 md:py-4">
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#16263F]/70">

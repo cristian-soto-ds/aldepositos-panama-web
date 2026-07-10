@@ -1,13 +1,14 @@
 "use client";
 
 import React from "react";
-import { Package, Warehouse } from "lucide-react";
+import { Link2, Package, Warehouse } from "lucide-react";
 import type { CollectionOrderListTab } from "@/lib/collectionOrderListTabs";
 
 type CollectionOrderListTabsProps = {
   active: CollectionOrderListTab;
   generalCount: number;
   warehouseCount: number;
+  linkedRaCount: number;
   onChange: (tab: CollectionOrderListTab) => void;
 };
 
@@ -15,6 +16,7 @@ export function CollectionOrderListTabs({
   active,
   generalCount,
   warehouseCount,
+  linkedRaCount,
   onChange,
 }: CollectionOrderListTabsProps) {
   return (
@@ -55,6 +57,25 @@ export function CollectionOrderListTabs({
           }`}
         >
           {warehouseCount}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("linkedRa")}
+        className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-black uppercase tracking-widest transition ${
+          active === "linkedRa"
+            ? "bg-blue-700 text-white shadow-md"
+            : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+        }`}
+      >
+        <Link2 className="h-4 w-4" aria-hidden />
+        Con RA
+        <span
+          className={`rounded-full px-2 py-0.5 text-[9px] tabular-nums ${
+            active === "linkedRa" ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"
+          }`}
+        >
+          {linkedRaCount}
         </span>
       </button>
     </div>

@@ -19,6 +19,7 @@ import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   DEFAULT_USER_PREFERENCES,
+  LAST_THEME_STORAGE_KEY,
   sanitizeUserPreferences,
   userPrefsStorageKey,
   type UserPreferences,
@@ -36,7 +37,7 @@ import { fetchWithTimeout } from "@/lib/clientFetch";
 function PanelModuleLoader() {
   return (
     <div className="flex min-h-[12rem] flex-1 items-center justify-center p-8">
-      <p className="text-sm font-semibold text-slate-500">Cargando módulo…</p>
+      <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Cargando módulo…</p>
     </div>
   );
 }
@@ -241,6 +242,12 @@ export default function PanelPage() {
             nextPrefs = { ...nextPrefs, avatarDataUrl: serverAvatar };
           }
           setPreferences(nextPrefs);
+          try {
+            window.localStorage.setItem(LAST_THEME_STORAGE_KEY, nextPrefs.theme);
+            document.documentElement.classList.toggle("panel-dark", nextPrefs.theme === "dark");
+          } catch {
+            /* almacenamiento no disponible */
+          }
         }
       }
       setLoading(false);
@@ -265,7 +272,17 @@ export default function PanelPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    root.classList.toggle("panel-dark", preferences.theme === "dark");
+    const isDark = preferences.theme === "dark";
+    root.classList.toggle("panel-dark", isDark);
+    try {
+      window.localStorage.setItem(LAST_THEME_STORAGE_KEY, preferences.theme);
+    } catch {
+      /* almacenamiento no disponible */
+    }
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute("content", isDark ? "#0b1220" : "#16263F");
+    }
     return () => {
       root.classList.remove("panel-dark");
     };

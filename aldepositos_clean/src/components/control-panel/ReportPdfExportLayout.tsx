@@ -11,6 +11,7 @@ import logoMark from "@/assets/brand/logo-aldepositos.png";
 import { PDF_EXPORT_WIDTH_PX } from "./reportsPdfExport";
 import {
   computeReportData,
+  reportModuleLabel,
   reportPalletWeight,
   reportRowPallet,
 } from "@/lib/reportTotals";
@@ -63,8 +64,7 @@ export function ReportPdfExportLayout({
     showReferenceColumn,
     totals,
   } = computeTotals(task);
-  // En paletizado la referencia es consecutiva; se muestra el # de línea por paleta.
-  const showRefCol = showReferenceColumn && !isPalletized;
+  const showRefCol = showReferenceColumn;
 
   const padX = compact ? 14 : 44;
   const padY = compact ? 12 : 40;
@@ -214,7 +214,7 @@ export function ReportPdfExportLayout({
           >
             Reporte de ingreso
             <br />
-            {isDetailed ? "detallado" : isPalletized ? "rápido · paletizado" : "rápido"}
+            {reportModuleLabel(task)}
             {rowPages.length > 1 ? ` · pág ${pageIndex + 1}/${rowPages.length}` : ""}
           </div>
           <div

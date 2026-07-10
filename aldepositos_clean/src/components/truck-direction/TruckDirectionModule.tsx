@@ -167,7 +167,7 @@ export function TruckDirectionModule() {
             <button
               type="button"
               onClick={() => setTvModeOpen(true)}
-              className="inline-flex items-center justify-center gap-2 border border-neutral-600 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-neutral-800 transition hover:bg-neutral-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-800 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             >
               <Monitor className="h-4 w-4" />
               Modo TV
@@ -190,7 +190,7 @@ export function TruckDirectionModule() {
       </header>
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-slate-400">
+        <div className="flex flex-1 items-center justify-center text-slate-400 dark:text-slate-500">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           Cargando tablero…
         </div>
@@ -216,7 +216,7 @@ export function TruckDirectionModule() {
             return (
               <section
                 key={statusId}
-                className="flex min-h-[200px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/50 xl:min-h-0 xl:overflow-hidden"
+                className="flex min-h-[200px] min-w-0 flex-col rounded-2xl border border-slate-200 bg-slate-50/80 dark:border-slate-700/80 dark:bg-slate-900/70 xl:min-h-0 xl:overflow-hidden"
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
@@ -250,7 +250,7 @@ export function TruckDirectionModule() {
                         stripeClass={theme.stripe}
                       />
                     ) : (
-                    <li className="py-8 text-center text-xs text-slate-400">
+                    <li className="py-8 text-center text-xs font-medium text-slate-400 dark:text-slate-500">
                       {RECEPTION_COPY.emptyColumn}
                     </li>
                     )
@@ -274,7 +274,7 @@ export function TruckDirectionModule() {
                         onDragEnd={() => {
                           dragTruckId.current = null;
                         }}
-                        className={`cursor-grab border active:cursor-grabbing ${theme.card} ${
+                        className={`reception-kanban-card cursor-grab border active:cursor-grabbing ${theme.card} ${
                           isDenseQueue
                             ? "rounded-lg px-2 py-1.5 shadow-none ring-0"
                             : density === "compact"
@@ -286,7 +286,7 @@ export function TruckDirectionModule() {
                           className={`flex items-center gap-1.5 ${isDenseQueue ? "" : "items-start gap-2"}`}
                         >
                           <GripVertical
-                            className={`shrink-0 text-slate-300 ${
+                            className={`shrink-0 text-slate-300 dark:text-slate-500 ${
                               isDenseQueue ? "h-3.5 w-3.5" : "mt-1 h-4 w-4"
                             }`}
                           />
@@ -305,7 +305,7 @@ export function TruckDirectionModule() {
                               <button
                                 key={target}
                                 type="button"
-                                className="rounded-lg border border-slate-200 px-2 py-1 text-[9px] font-bold uppercase"
+                                className="rounded-lg border border-slate-200 px-2 py-1 text-[9px] font-bold uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
                                 onClick={() => {
                                   dragTruckId.current = truck.id;
                                   void handleDropOnColumn(target);
@@ -327,14 +327,14 @@ export function TruckDirectionModule() {
         </div>
       )}
 
-      <p className="shrink-0 text-center text-[10px] text-slate-400">
+      <p className="shrink-0 text-center text-[10px] text-slate-400 dark:text-slate-500">
         <FileSpreadsheet className="mr-1 inline h-3 w-3" />
         Arrastra tarjetas entre columnas · Recibo automático al asignar rampa
         {" · "}
         <button
           type="button"
           onClick={() => setTvModeOpen(true)}
-          className="inline-flex items-center gap-0.5 font-semibold text-neutral-700 underline-offset-2 hover:underline"
+          className="inline-flex items-center gap-0.5 font-semibold text-slate-600 underline-offset-2 hover:underline dark:text-slate-300"
         >
           <Monitor className="h-3 w-3" />
           Abrir pantalla TV

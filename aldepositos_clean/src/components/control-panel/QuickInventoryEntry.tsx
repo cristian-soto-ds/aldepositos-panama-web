@@ -67,7 +67,7 @@ import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
 import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
-import { resolveLiveInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
+import { resolveActiveInventoryOperatorLabel } from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
@@ -139,6 +139,20 @@ function stripPalletFields<T extends MeasureRow>(rows: T[]): T[] {
   });
 }
 
+/** Copia de filas del modo «Con refs» antes de pasar a sin refs / paletizado. */
+function buildWithModeSnapshot(
+  rows: MeasureRow[],
+  sourceReferences: Record<string, string>,
+): MeasureRow[] {
+  return JSON.parse(
+    JSON.stringify(
+      stripQuickRowsForPersist(
+        restoreSourceReferences(stripPalletFields(rows), sourceReferences),
+      ),
+    ),
+  ) as MeasureRow[];
+}
+
 /**
  * Campo de peso de paleta con borrador local: escribir es instantáneo (sin tocar
  * el estado global por tecla) y solo se confirma al salir del campo. Evita el
@@ -191,6 +205,8 @@ type QuickDraft = {
   referenceMode?: ReferenceCaptureMode;
   captureLayout?: CaptureLayout;
   sourceReferences?: Record<string, string>;
+  /** Filas originales del modo «Con refs» para restaurar al volver. */
+  withModeRowsSnapshot?: MeasureRow[];
 };
 
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
@@ -660,6 +676,7 @@ export function QuickInventoryEntry({
   const [aiExtractError, setAiExtractError] = useState<string | null>(null);
   const aiFileRef = useRef<HTMLInputElement>(null);
   const sourceReferencesRef = useRef<Record<string, string>>({});
+  const withModeRowsSnapshotRef = useRef<MeasureRow[] | null>(null);
   // Espejo del modo de captura para leerlo de forma síncrona (p. ej. al aplicar
   // un modo que acaba de llegar por el canal en vivo, antes del re-render).
   const referenceModeRef = useRef<ReferenceCaptureMode>(referenceMode);
@@ -681,7 +698,7 @@ export function QuickInventoryEntry({
           ? stripQuickRowsForPersist(
               JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[],
             )
-          : [createEmptyMeasureRow()];
+          : [];
       // Autoridad local sobre eliminaciones: si el estado remoto todavía trae una
       // fila que acabamos de borrar (eco atrasado), la quitamos. Cuando la BD ya no
       // la incluye, damos la eliminación por confirmada y limpiamos el guard.
@@ -693,7 +710,6 @@ export function QuickInventoryEntry({
         }
         if (pendingDel.size > 0) {
           taskRows = taskRows.filter((r) => !pendingDel.has(r.id));
-          if (taskRows.length === 0) taskRows = [createEmptyMeasureRow()];
         }
       }
       const incomingSnapshot = taskHasImportedReferences(taskRows)
@@ -717,10 +733,14 @@ export function QuickInventoryEntry({
         setReferenceMode("palletized");
       }
       if (mode === "palletized") {
-        return ensurePalletNumbers(applyConsecutiveReferences(taskRows));
+        return taskRows.length > 0
+          ? ensurePalletNumbers(applyConsecutiveReferences(taskRows))
+          : [];
       }
       if (mode === "without") {
-        return applyConsecutiveReferences(stripPalletFields(taskRows));
+        return taskRows.length > 0
+          ? applyConsecutiveReferences(stripPalletFields(taskRows))
+          : [];
       }
       return restoreSourceReferences(
         stripPalletFields(taskRows),
@@ -828,7 +848,9 @@ export function QuickInventoryEntry({
       void clearWorkPresence(getSharedWorkPresenceTabId());
       return;
     }
-    const label = presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
+    const rawLabel = String(presenceUserLabel ?? "").trim();
+    const label =
+      rawLabel || presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
     const presenceModule = "quick" as const;
     const tabId = getSharedWorkPresenceTabId();
     const send = () => {
@@ -929,6 +951,8 @@ export function QuickInventoryEntry({
   const handleSelectTask = (task: Task) => {
     setSelectedTask(task);
     activeTaskIdRef.current = task.id;
+    withModeRowsSnapshotRef.current = null;
+    sourceReferencesRef.current = {};
 
     const taskRows =
       task.measureData && task.measureData.length > 0
@@ -949,6 +973,9 @@ export function QuickInventoryEntry({
       : taskHasImportedReferences(taskRows)
         ? "with"
         : "without";
+    if (isReferenceCaptureMode(task.referenceMode)) {
+      refModeToUse = task.referenceMode;
+    }
     let layoutToUse: CaptureLayout =
       typeof window !== "undefined" && window.innerWidth < 768 ? "reekon" : "table";
 
@@ -963,16 +990,6 @@ export function QuickInventoryEntry({
       if (rawDraft) {
         try {
           const parsed = JSON.parse(rawDraft) as QuickDraft;
-          if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
-            const draftHasCapture = quickRowsHaveAnyCapture(parsed.rows);
-            if (!serverHasCapture && draftHasCapture) {
-              rowsToUse = stripQuickRowsForPersist(parsed.rows);
-            } else if (serverHasCapture) {
-              rowsToUse = taskRows;
-            } else {
-              rowsToUse = stripQuickRowsForPersist(parsed.rows);
-            }
-          }
           if (isReferenceCaptureMode(parsed.referenceMode)) {
             refModeToUse = parsed.referenceMode;
           }
@@ -988,6 +1005,31 @@ export function QuickInventoryEntry({
               sourceReferencesRef.current,
             );
           }
+          if (
+            Array.isArray(parsed.withModeRowsSnapshot) &&
+            parsed.withModeRowsSnapshot.length > 0
+          ) {
+            withModeRowsSnapshotRef.current = stripQuickRowsForPersist(
+              parsed.withModeRowsSnapshot,
+            );
+          }
+          if (
+            isReferenceCaptureMode(parsed.referenceMode) &&
+            parsed.referenceMode !== "with"
+          ) {
+            if (Array.isArray(parsed.rows)) {
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
+            }
+          } else if (Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+            const draftHasCapture = quickRowsHaveAnyCapture(parsed.rows);
+            if (!serverHasCapture && draftHasCapture) {
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
+            } else if (serverHasCapture) {
+              rowsToUse = taskRows;
+            } else {
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
+            }
+          }
         } catch {
           // ignore invalid draft
         }
@@ -1002,12 +1044,34 @@ export function QuickInventoryEntry({
       serverSnapshot,
     );
 
+    if (!withModeRowsSnapshotRef.current && taskHasImportedReferences(serverRows)) {
+      withModeRowsSnapshotRef.current = buildWithModeSnapshot(
+        serverRows,
+        sourceReferencesRef.current,
+      );
+    }
+
     if (refModeToUse === "palletized") {
-      rowsToUse = ensurePalletNumbers(applyConsecutiveReferences(rowsToUse));
+      rowsToUse =
+        rowsToUse.length > 0
+          ? ensurePalletNumbers(applyConsecutiveReferences(rowsToUse))
+          : [];
     } else if (refModeToUse === "without") {
-      rowsToUse = applyConsecutiveReferences(rowsToUse);
+      rowsToUse =
+        rowsToUse.length > 0
+          ? applyConsecutiveReferences(stripPalletFields(rowsToUse))
+          : [];
     } else {
-      rowsToUse = restoreSourceReferences(rowsToUse, sourceReferencesRef.current);
+      rowsToUse = restoreSourceReferences(
+        stripPalletFields(rowsToUse),
+        sourceReferencesRef.current,
+      );
+      if (!withModeRowsSnapshotRef.current && rowsToUse.length > 0) {
+        withModeRowsSnapshotRef.current = buildWithModeSnapshot(
+          rowsToUse,
+          sourceReferencesRef.current,
+        );
+      }
     }
 
     rowsToUse = stripQuickRowsForPersist(rowsToUse);
@@ -1033,6 +1097,8 @@ export function QuickInventoryEntry({
     flushAutosaveRef.current();
     setSelectedTask(null);
     activeTaskIdRef.current = null;
+    withModeRowsSnapshotRef.current = null;
+    sourceReferencesRef.current = {};
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
@@ -1048,31 +1114,44 @@ export function QuickInventoryEntry({
 
   const switchReferenceMode = (mode: ReferenceCaptureMode) => {
     if (mode === referenceMode) return;
-    if (mode === "with") {
-      setMeasureRows((prev) =>
-        restoreSourceReferences(
-          stripPalletFields(prev),
-          sourceReferencesRef.current,
-        ),
-      );
-    } else if (mode === "palletized") {
-      sourceReferencesRef.current = captureSourceReferencesFromRows(
+
+    let nextRows: MeasureRow[] = [];
+
+    if (referenceMode === "with") {
+      withModeRowsSnapshotRef.current = buildWithModeSnapshot(
         measureRows,
         sourceReferencesRef.current,
       );
-      setMeasureRows((prev) =>
-        ensurePalletNumbers(applyConsecutiveReferences(prev)),
-      );
-    } else {
       sourceReferencesRef.current = captureSourceReferencesFromRows(
-        measureRows,
+        withModeRowsSnapshotRef.current,
         sourceReferencesRef.current,
       );
-      setMeasureRows((prev) => applyConsecutiveReferences(stripPalletFields(prev)));
     }
-    // Espejo síncrono para prepareRowsFromRemote y la difusión en vivo.
+
+    if (mode === "with") {
+      const snapshot = withModeRowsSnapshotRef.current;
+      nextRows =
+        snapshot && snapshot.length > 0
+          ? (JSON.parse(JSON.stringify(snapshot)) as MeasureRow[])
+          : restoreSourceReferences(
+              stripPalletFields(measureRows),
+              sourceReferencesRef.current,
+            );
+      nextRows = restoreSourceReferences(nextRows, sourceReferencesRef.current);
+    } else {
+      nextRows = [];
+    }
+
     referenceModeRef.current = mode;
     setReferenceMode(mode);
+    setMeasureRows(nextRows);
+    setExpandedRowId(
+      nextRows.find((r) => !isQuickRowComplete(r))?.id ?? nextRows[0]?.id ?? null,
+    );
+
+    if (selectedTask) {
+      persistQuickDraft(selectedTask.id, nextRows, mode, captureLayout);
+    }
   };
 
   const addRow = () => {
@@ -1454,6 +1533,11 @@ export function QuickInventoryEntry({
       referenceMode: refMode,
       captureLayout: layout,
       sourceReferences: { ...sourceReferencesRef.current },
+      withModeRowsSnapshot: withModeRowsSnapshotRef.current
+        ? (JSON.parse(
+            JSON.stringify(withModeRowsSnapshotRef.current),
+          ) as MeasureRow[])
+        : undefined,
     };
     window.localStorage.setItem(
       inventoryDraftKey(taskId, taskDraftKind(latestTaskRef.current)),
@@ -1520,6 +1604,7 @@ export function QuickInventoryEntry({
         measureData: JSON.parse(JSON.stringify(persistedRows)),
         currentBultos: hasCapture ? totalsBultos : 0,
         weightMode: QUICK_WEIGHT_MODE,
+        referenceMode: referenceModeRef.current,
         status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
         originalExpectedBultos: originalExpected,
         manualTotalWeight:
@@ -1693,6 +1778,7 @@ export function QuickInventoryEntry({
         measureData: JSON.parse(JSON.stringify(persistedRows)),
         currentBultos: hasCapture ? totals.bultos : 0,
         weightMode: QUICK_WEIGHT_MODE,
+        referenceMode: referenceModeRef.current,
         status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
         originalExpectedBultos: originalExpected,
         manualTotalWeight:
@@ -1848,8 +1934,10 @@ export function QuickInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
-                  const activeInventariador =
-                    resolveLiveInventoryOperator(liveWorkers)?.displayName ?? null;
+                  const activeInventariador = resolveActiveInventoryOperatorLabel(
+                    t,
+                    liveWorkers,
+                  );
                   const completedBy = inventoryCompletedByLabel(t);
 
                   return (

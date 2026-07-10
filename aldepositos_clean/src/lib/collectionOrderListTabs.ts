@@ -1,7 +1,7 @@
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 
-export type CollectionOrderListTab = "general" | "warehouse";
+export type CollectionOrderListTab = "general" | "warehouse" | "linkedRa";
 
 /** Recepcionista marcó completado: mercancía en bodega, pendiente de RA. */
 export function isOrderInWarehouse(order: CollectionOrder): boolean {
@@ -16,8 +16,13 @@ export function ordersForCollectionListTab(
   orders: CollectionOrder[],
   tab: CollectionOrderListTab,
 ): CollectionOrder[] {
-  if (tab === "warehouse") return orders.filter(isOrderInWarehouse);
-  return orders.filter((o) => !isOrderInWarehouse(o));
+  if (tab === "linkedRa") {
+    return orders.filter(orderHasLinkedRa);
+  }
+  if (tab === "warehouse") {
+    return orders.filter((o) => isOrderInWarehouse(o) && !orderHasLinkedRa(o));
+  }
+  return orders.filter((o) => !isOrderInWarehouse(o) && !orderHasLinkedRa(o));
 }
 
 export function countOrdersForCollectionListTab(

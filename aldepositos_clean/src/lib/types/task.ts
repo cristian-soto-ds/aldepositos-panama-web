@@ -2,6 +2,8 @@
  * Modelo principal de carga (RA) compartido por el panel.
  * Se persiste en Supabase como JSON en la tabla `tasks`.
  */
+import type { ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
+
 export type Task = {
   id: string;
   ra: string;
@@ -20,6 +22,8 @@ export type Task = {
   weightMode: string;
   manualTotalWeight: number;
   type?: "quick" | "detailed" | "airway";
+  /** Modo de captura del ingreso rápido: con refs, sin refs o paletizado. */
+  referenceMode?: ReferenceCaptureMode;
   dispatched?: boolean;
   containerDraft?: boolean;
   dispatchInfo?: {

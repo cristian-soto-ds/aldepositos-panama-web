@@ -4,6 +4,8 @@ import { peerPresenceVisibleName } from "@/lib/viewerIdentity";
 export type LiveOperatorOnRa = {
   userKey: string;
   name: string;
+  /** Etiqueta cruda de presencia (antes de enmascarar correos como «Operador»). */
+  rawLabel: string;
   module: WorkPresenceModule;
   avatarUrl?: string | null;
 };
@@ -28,7 +30,8 @@ export function buildPresenceByRa(
     const raKey = String(entry.ra ?? "").trim().toUpperCase();
     if (!raKey) continue;
 
-    const name = peerPresenceVisibleName(entry.userLabel, entry.userKey);
+    const rawLabel = String(entry.userLabel ?? "").trim();
+    const name = peerPresenceVisibleName(rawLabel, entry.userKey);
     const list = map.get(raKey) ?? [];
     const exists = list.some(
       (op) => op.userKey === entry.userKey && op.module === entry.module,
@@ -37,6 +40,7 @@ export function buildPresenceByRa(
       list.push({
         userKey: entry.userKey,
         name,
+        rawLabel: rawLabel || name,
         module: entry.module,
         avatarUrl: entry.avatarUrl,
       });

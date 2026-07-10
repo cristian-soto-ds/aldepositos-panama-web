@@ -20,7 +20,7 @@ export function ModulePlaceholder({
       <h2 className="text-xl md:text-3xl font-black text-[#16263F] dark:text-slate-100 flex items-center gap-2 md:gap-3 px-2 md:px-0">
         {moduleTitle}
       </h2>
-      <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 shadow-sm text-center flex flex-col items-center justify-center">
+      <div className="panel-card flex flex-col items-center justify-center rounded-[2rem] p-8 text-center md:p-16">
         <div className="flex items-center justify-center w-16 h-16 mb-4">
           {icon}
         </div>

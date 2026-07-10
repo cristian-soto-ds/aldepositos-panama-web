@@ -23,6 +23,9 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   showSeconds: false,
 };
 
+/** Tema guardado en el dispositivo (login y primera pintura sin parpadeo). */
+export const LAST_THEME_STORAGE_KEY = "aldepositos_last_theme_v1";
+
 export function userPrefsStorageKey(userId: string): string {
   return `aldepositos_user_prefs_v1_${userId}`;
 }

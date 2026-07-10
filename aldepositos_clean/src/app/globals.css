@@ -47,8 +47,12 @@ body {
   background-color: rgb(226 232 240 / 0.95);
 }
 
+:root.panel-dark .modal-overlay {
+  background-color: var(--panel-overlay);
+}
+
 :root.panel-dark .collection-order-ai-progress-track {
-  background-color: rgb(51 65 85 / 0.55);
+  background-color: rgb(30 41 59 / 0.75);
 }
 
 .collection-order-ai-progress-fill {
@@ -196,12 +200,143 @@ input[type="number"] {
 }
 
 /* Tema oscuro de panel (preferencias por usuario) */
+:root {
+  color-scheme: light;
+  --panel-bg: #f8fafc;
+  --panel-bg-subtle: #f1f5f9;
+  --panel-surface: #ffffff;
+  --panel-surface-raised: #ffffff;
+  --panel-surface-muted: #f8fafc;
+  --panel-border: rgba(148, 163, 184, 0.45);
+  --panel-border-subtle: #e2e8f0;
+  --panel-text: #334155;
+  --panel-text-muted: #64748b;
+  --panel-text-faint: #94a3b8;
+  --panel-heading: #16263f;
+  --panel-input-bg: #ffffff;
+  --panel-input-border: #e2e8f0;
+  --panel-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --panel-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --panel-overlay: rgba(15, 23, 42, 0.45);
+}
+
+:root.panel-dark {
+  color-scheme: dark;
+  --panel-bg: #0b1220;
+  --panel-bg-subtle: #0f172a;
+  --panel-surface: #131b2e;
+  --panel-surface-raised: #1a2438;
+  --panel-surface-muted: #111827;
+  --panel-border: rgba(148, 163, 184, 0.22);
+  --panel-border-subtle: rgba(71, 85, 105, 0.65);
+  --panel-text: #e2e8f0;
+  --panel-text-muted: #94a3b8;
+  --panel-text-faint: #64748b;
+  --panel-heading: #f8fafc;
+  --panel-input-bg: #0f172a;
+  --panel-input-border: rgba(71, 85, 105, 0.85);
+  --panel-shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.35);
+  --panel-shadow-md: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --panel-overlay: rgba(2, 6, 23, 0.72);
+}
+
 :root.panel-dark body {
-  background: #0b1220;
+  background: var(--panel-bg);
+  color: var(--panel-text);
+}
+
+:root.panel-dark select,
+:root.panel-dark textarea {
+  background-color: var(--panel-input-bg);
+  color: var(--panel-text);
+  border-color: var(--panel-input-border);
+}
+
+:root.panel-dark select option {
+  background-color: var(--panel-surface-raised);
+  color: var(--panel-text);
+}
+
+:root.panel-dark ::placeholder {
+  color: var(--panel-text-faint);
 }
 
 :root.panel-dark .panel-loading-overlay {
-  background: rgba(11, 18, 32, 0.72);
+  background: var(--panel-overlay);
+}
+
+/* Tarjetas y superficies reutilizables */
+.panel-card {
+  background-color: var(--panel-surface-raised);
+  border: 1px solid var(--panel-border-subtle);
+  box-shadow: var(--panel-shadow-sm);
+  color: var(--panel-text);
+}
+
+.panel-card-muted {
+  background-color: var(--panel-surface-muted);
+  border: 1px solid var(--panel-border-subtle);
+}
+
+.panel-input {
+  background-color: var(--panel-input-bg);
+  border: 1px solid var(--panel-input-border);
+  color: var(--panel-heading);
+}
+
+.panel-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+/* Ajustes suaves en el contenido principal para componentes sin dark: explícito */
+:root.panel-dark .panel-main-content .bg-white:not(.force-light):not([class*="dark:bg"]):not(.reception-kanban-card) {
+  background-color: var(--panel-surface-raised) !important;
+}
+
+:root.panel-dark .panel-main-content .bg-slate-50:not(.force-light):not([class*="dark:bg"]) {
+  background-color: var(--panel-surface-muted) !important;
+}
+
+:root.panel-dark .panel-main-content .border-slate-200:not(.force-light):not([class*="dark:border"]) {
+  border-color: var(--panel-border-subtle) !important;
+}
+
+:root.panel-dark .panel-main-content .text-\[\#16263F\]:not(.force-light) {
+  color: var(--panel-heading) !important;
+}
+
+:root.panel-dark .panel-main-content .text-slate-600:not(.force-light) {
+  color: var(--panel-text) !important;
+}
+
+:root.panel-dark .panel-main-content .text-slate-500:not(.force-light) {
+  color: var(--panel-text-muted) !important;
+}
+
+:root.panel-dark .panel-main-content .text-slate-400:not(.force-light) {
+  color: var(--panel-text-faint) !important;
+}
+
+:root.panel-dark .panel-main-content .divide-slate-100:not(.force-light) > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--panel-border-subtle);
+}
+
+:root.panel-dark .panel-main-content .hover\:bg-slate-50:hover:not(.force-light) {
+  background-color: var(--panel-surface-muted) !important;
+}
+
+:root.panel-dark .panel-main-content .hover\:bg-white:hover:not(.force-light) {
+  background-color: var(--panel-surface-raised) !important;
+}
+
+:root.panel-dark .shadow-sm:not(.force-light) {
+  box-shadow: var(--panel-shadow-sm) !important;
+}
+
+:root.panel-dark .shadow-md:not(.force-light) {
+  box-shadow: var(--panel-shadow-md) !important;
 }
 
 /* Scrollbars en módulos — contraste cómodo en tema oscuro */
@@ -314,7 +449,7 @@ body.reekon-immersive-active {
   -webkit-overflow-scrolling: touch;
 }
 :root.panel-dark .reekon-immersive {
-  background-color: #0f172a;
+  background-color: var(--panel-bg-subtle);
 }
 .reekon-safe-top {
   padding-top: max(env(safe-area-inset-top, 0px), 0px);
@@ -521,6 +656,7 @@ body.reekon-immersive-active {
     max(0.75rem, env(safe-area-inset-right, 0px))
     max(0.75rem, env(safe-area-inset-bottom, 0px))
     max(0.75rem, env(safe-area-inset-left, 0px));
+  background-color: var(--panel-overlay);
 }
 .modal-panel {
   max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 1.5rem));

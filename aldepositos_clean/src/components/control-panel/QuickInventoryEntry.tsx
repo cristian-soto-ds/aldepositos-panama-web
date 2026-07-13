@@ -1135,6 +1135,11 @@ export function QuickInventoryEntry({
       clearTask();
       return;
     }
+    // Ya pausado: salir sin preguntar.
+    if (selectedTask.status === "paused") {
+      clearTask();
+      return;
+    }
     const hasCapture = quickRowsHaveAnyCapture(measureRows);
     const totalsBultos = measureRows.reduce(
       (a, row) => a + (parseFloat(String(row.bultos)) || 0),
@@ -1144,11 +1149,8 @@ export function QuickInventoryEntry({
       hasCapture &&
       totalsBultos >= selectedTask.expectedBultos &&
       hasQuickRequiredData(measureRows);
-    const needsPausePrompt =
-      hasCapture &&
-      !isCompleted &&
-      selectedTask.status !== "paused";
-    if (needsPausePrompt) {
+    // Inventariador con trabajo abierto (no pausado): pedir pausa al volver.
+    if (hasCapture && !isCompleted) {
       setLeavePromptOpen(true);
       return;
     }
@@ -2399,7 +2401,7 @@ export function QuickInventoryEntry({
         />
         {leavePromptOpen ? (
           <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
             role="dialog"
             aria-modal="true"
             aria-labelledby="leave-pause-title-reekon"
@@ -2412,8 +2414,9 @@ export function QuickInventoryEntry({
                 ¿Pausar inventario?
               </h3>
               <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                Hay captura a medias. Si lo dejas en curso, seguirá apareciendo
-                como activo en la lista.
+                Debes pausar el inventario antes de salir, o confirmar que
+                quieres salir sin pausar. Si lo dejas en curso, seguirá
+                apareciendo como activo en la lista.
               </p>
               <div className="mt-4 flex flex-col gap-2">
                 <button

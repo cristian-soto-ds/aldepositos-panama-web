@@ -822,6 +822,13 @@ export function DetailedInventoryEntry({
       queuedHashRef.current = hash;
       return;
     }
+
+    if (!canPauseInventory) {
+      lastSavedHashRef.current = hash;
+      setAutosaveState("saved");
+      return;
+    }
+
     isSavingRef.current = true;
     setAutosaveState("saving");
 
@@ -852,30 +859,45 @@ export function DetailedInventoryEntry({
       window.localStorage.removeItem(detailedDraftKey(task.id));
     }
 
-    const updatedTask = applyInventoryAttribution(
-      applyInventorySessionOnSave({
-        task: {
-          ...task,
-          measureData: JSON.parse(JSON.stringify(persistedRows)),
-          currentBultos: hasCapture ? bultos : 0,
-          expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
-          expectedCbm:
-            cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
-          originalExpectedBultos: originalExpected,
-          manualTotalWeight: task.manualTotalWeight ?? 0,
-        } as SharedTask,
-        hasCapture,
-        isCompleted,
-        workStatusWhenActive: "partial",
-        forceResume: task.status === "paused",
-      }),
-      {
-        userKey: presenceUserKey,
-        userLabel: presenceUserLabel,
-        hasCapture,
-        isCompleted,
-      },
-    ) as Task;
+    const measureChanged =
+      JSON.stringify(task.measureData ?? []) !== JSON.stringify(persistedRows);
+    const forceResume = task.status === "paused" && measureChanged;
+
+    const withSession = applyInventorySessionOnSave({
+      task: {
+        ...task,
+        measureData: JSON.parse(JSON.stringify(persistedRows)),
+        currentBultos: hasCapture ? bultos : 0,
+        expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
+        expectedCbm:
+          cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight: task.manualTotalWeight ?? 0,
+      } as SharedTask,
+      hasCapture,
+      isCompleted,
+      workStatusWhenActive: "partial",
+      forceResume,
+    });
+
+    if (
+      !measureChanged &&
+      withSession.status === task.status &&
+      !isCompleted
+    ) {
+      lastSavedHashRef.current = hash;
+      setAutosaveState("saved");
+      isSavingRef.current = false;
+      onLocalSaveCompletedRef.current();
+      return;
+    }
+
+    const updatedTask = applyInventoryAttribution(withSession, {
+      userKey: presenceUserKey,
+      userLabel: presenceUserLabel,
+      hasCapture,
+      isCompleted,
+    }) as Task;
 
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
@@ -922,6 +944,10 @@ export function DetailedInventoryEntry({
 
   const saveOrder = () => {
     if (!selectedTask) return;
+    if (!canPauseInventory) {
+      clearTask();
+      return;
+    }
 
     const { bultos, weight, cbm } = calculateTotals();
     const originalExpected =
@@ -939,6 +965,10 @@ export function DetailedInventoryEntry({
       window.localStorage.removeItem(detailedDraftKey(selectedTask.id));
     }
 
+    const measureChanged =
+      JSON.stringify(selectedTask.measureData ?? []) !==
+      JSON.stringify(persistedRows);
+
     const updatedTask = applyInventoryAttribution(
       applyInventorySessionOnSave({
         task: {
@@ -953,7 +983,7 @@ export function DetailedInventoryEntry({
         hasCapture,
         isCompleted,
         workStatusWhenActive: "partial",
-        forceResume: selectedTask.status === "paused",
+        forceResume: selectedTask.status === "paused" && measureChanged,
       }),
       {
         userKey: presenceUserKey,

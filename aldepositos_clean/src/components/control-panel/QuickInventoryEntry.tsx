@@ -1714,6 +1714,16 @@ export function QuickInventoryEntry({
       queuedHashRef.current = hash;
       return;
     }
+
+    // Monitores: no escribir al servidor (no deben pisar updatedAt ni el estado que dejó el inventariador).
+    if (!canPauseInventory) {
+      lastSavedHashRef.current = hash;
+      pendingAutosaveHashRef.current = hash;
+      setPendingCount(0);
+      setAutosaveState("saved");
+      return;
+    }
+
     isSavingRef.current = true;
     setAutosaveState("saving");
 
@@ -1733,6 +1743,13 @@ export function QuickInventoryEntry({
       window.localStorage.removeItem(inventoryDraftKey(task.id, taskDraftKind(task)));
     }
 
+    const measureChanged =
+      JSON.stringify(task.measureData ?? []) !== JSON.stringify(persistedRows);
+    const referenceModeChanged =
+      (task.referenceMode ?? null) !== (referenceModeRef.current ?? null);
+    // Solo reanudar pausa si hubo cambio real de captura (no por abrir el RA).
+    const forceResume = task.status === "paused" && measureChanged;
+
     const withData: Task = {
       ...task,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
@@ -1748,9 +1765,18 @@ export function QuickInventoryEntry({
       hasCapture,
       isCompleted,
       workStatusWhenActive: "in_progress",
-      // Cualquier autosave con cambios mientras está pausado = reanudar trabajo.
-      forceResume: task.status === "paused",
+      forceResume,
     });
+
+    const statusUnchanged = withSession.status === task.status;
+    if (!measureChanged && !referenceModeChanged && statusUnchanged && !isCompleted) {
+      lastSavedHashRef.current = hash;
+      setAutosaveState("saved");
+      setPendingCount(0);
+      isSavingRef.current = false;
+      onLocalSaveCompletedRef.current();
+      return;
+    }
 
     const updatedTask: Task = applyInventoryAttribution(withSession, {
       userKey: presenceUserKey,
@@ -1896,6 +1922,10 @@ export function QuickInventoryEntry({
 
   const saveOrder = async () => {
     if (!selectedTask) return;
+    if (!canPauseInventory) {
+      clearTask();
+      return;
+    }
     const totals = calculateTotals();
     const hasCapture = quickRowsHaveAnyCapture(measureRows);
     const originalExpected =
@@ -1912,6 +1942,9 @@ export function QuickInventoryEntry({
       );
     }
 
+    const measureChanged =
+      JSON.stringify(selectedTask.measureData ?? []) !==
+      JSON.stringify(persistedRows);
     const withData: Task = {
       ...selectedTask,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
@@ -1929,7 +1962,7 @@ export function QuickInventoryEntry({
       hasCapture,
       isCompleted,
       workStatusWhenActive: "in_progress",
-      forceResume: selectedTask.status === "paused",
+      forceResume: selectedTask.status === "paused" && measureChanged,
     });
 
     const updatedTask: Task = applyInventoryAttribution(withSession, {

@@ -1187,7 +1187,8 @@ export function QuickInventoryEntry({
     const updatedTask = applyInventoryAttribution(paused, {
       userKey: presenceUserKey,
       userLabel: presenceUserLabel,
-      hasCapture,
+      // Siempre atribuir al inventariador que pausa (refresca `at` para el badge).
+      hasCapture: true,
       isCompleted: false,
     });
     const currentHash = JSON.stringify({
@@ -1226,7 +1227,7 @@ export function QuickInventoryEntry({
       {
         userKey: presenceUserKey,
         userLabel: presenceUserLabel,
-        hasCapture: quickRowsHaveAnyCapture(measureRows),
+        hasCapture: true,
         isCompleted: false,
       },
     );

@@ -578,7 +578,7 @@ export function DetailedInventoryEntry({
     const updatedTask = applyInventoryAttribution(paused, {
       userKey: presenceUserKey,
       userLabel: presenceUserLabel,
-      hasCapture,
+      hasCapture: true,
       isCompleted: false,
     }) as Task;
     void Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
@@ -594,7 +594,7 @@ export function DetailedInventoryEntry({
       {
         userKey: presenceUserKey,
         userLabel: presenceUserLabel,
-        hasCapture: detailedRowsHaveAnyCapture(measureRows),
+        hasCapture: true,
         isCompleted: false,
       },
     ) as Task;

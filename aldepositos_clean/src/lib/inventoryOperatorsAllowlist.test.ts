@@ -4,6 +4,7 @@ import {
   isAllowedInventoryOperator,
   resolveActiveInventoryOperatorLabel,
   resolveAllowedInventoryOperator,
+  resolveLatestAllowedContributor,
   resolveLiveInventoryOperator,
   resolvePausedInventoryOperatorLabel,
 } from "@/lib/inventoryOperatorsAllowlist";
@@ -85,6 +86,28 @@ describe("resolveLiveInventoryOperator", () => {
   });
 });
 
+describe("resolveLatestAllowedContributor", () => {
+  it("elige el inventariador con at más reciente aunque no sea el último del array", () => {
+    const resolved = resolveLatestAllowedContributor(
+      baseTask({
+        contributors: [
+          {
+            email: "claudio@example.com",
+            displayName: "Claudio",
+            at: "2026-07-12T14:00:00Z",
+          },
+          {
+            email: "jahir@example.com",
+            displayName: "Jahir",
+            at: "2026-07-12T10:00:00Z",
+          },
+        ],
+      }),
+    );
+    expect(resolved?.displayName).toBe("Claudio Guitierrez");
+  });
+});
+
 describe("resolveActiveInventoryOperatorLabel", () => {
   it("usa presencia en vivo si hay inventariador en el RA", () => {
     const label = resolveActiveInventoryOperatorLabel(baseTask({ status: "pending" }), [
@@ -93,7 +116,7 @@ describe("resolveActiveInventoryOperatorLabel", () => {
     expect(label).toBe("Jahir Jimenez");
   });
 
-  it("no muestra En curso por contributors si nadie está en vivo", () => {
+  it("sin presencia muestra En curso por el contributor más reciente", () => {
     const label = resolveActiveInventoryOperatorLabel(
       baseTask({
         status: "in_progress",
@@ -107,10 +130,27 @@ describe("resolveActiveInventoryOperatorLabel", () => {
       }),
       [],
     );
-    expect(label).toBeNull();
+    expect(label).toBe("Claudio Guitierrez");
   });
 
-  it("no muestra en curso si la presencia no es inventariador permitido", () => {
+  it("presencia en vivo gana sobre contributor más viejo", () => {
+    const label = resolveActiveInventoryOperatorLabel(
+      baseTask({
+        status: "in_progress",
+        contributors: [
+          {
+            email: "claudio@example.com",
+            displayName: "Claudio",
+            at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+      [{ userKey: "jahir@example.com", name: "Jahir", rawLabel: "Jahir Jimenez" }],
+    );
+    expect(label).toBe("Jahir Jimenez");
+  });
+
+  it("Cristian Soto en presencia no muestra En curso; usa contributor", () => {
     const label = resolveActiveInventoryOperatorLabel(
       baseTask({
         status: "in_progress",
@@ -124,7 +164,25 @@ describe("resolveActiveInventoryOperatorLabel", () => {
       }),
       [{ userKey: "cristian@example.com", name: "Cristian Soto" }],
     );
-    expect(label).toBeNull();
+    expect(label).toBe("Claudio Guitierrez");
+  });
+
+  it("pending sin presencia no muestra En curso", () => {
+    expect(
+      resolveActiveInventoryOperatorLabel(
+        baseTask({
+          status: "pending",
+          contributors: [
+            {
+              email: "claudio@example.com",
+              displayName: "Claudio",
+              at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        }),
+        [],
+      ),
+    ).toBeNull();
   });
 });
 
@@ -143,6 +201,27 @@ describe("resolvePausedInventoryOperatorLabel", () => {
       }),
     );
     expect(label).toBe("Jahir Jimenez");
+  });
+
+  it("elige el at más reciente en pausa", () => {
+    const label = resolvePausedInventoryOperatorLabel(
+      baseTask({
+        status: "paused",
+        contributors: [
+          {
+            email: "jahir@example.com",
+            displayName: "Jahir",
+            at: "2026-01-01T08:00:00Z",
+          },
+          {
+            email: "raul@example.com",
+            displayName: "Raul",
+            at: "2026-01-01T12:00:00Z",
+          },
+        ],
+      }),
+    );
+    expect(label).toBe("Raul Lezcano");
   });
 
   it("no aplica si el status no es paused", () => {

@@ -173,21 +173,52 @@ export function resolveLiveInventoryOperator(
 }
 
 /**
- * Etiqueta «En curso» solo con presencia en vivo de un inventariador.
- * No usa contributors: un RA a medias no debe parecer activo si nadie lo tiene abierto.
+ * Inventariador permitido con `contributors[].at` más reciente.
+ * No depende del orden del array (mergeContributor actualiza in-place).
+ */
+export function resolveLatestAllowedContributor(
+  task: Task,
+): ResolvedInventoryOperator | null {
+  const contributors = task.contributors ?? [];
+  let best: ResolvedInventoryOperator | null = null;
+  let bestAt = "";
+
+  for (const c of contributors) {
+    if (!c?.email) continue;
+    if (!isAllowedInventoryOperator(c.email, c.displayName)) continue;
+    const at = String(c.at ?? "").trim();
+    if (!best || at > bestAt) {
+      best = toResolved(c.email, c.displayName, c.at);
+      bestAt = at;
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Etiqueta «En curso»:
+ * 1) inventariador con presencia en vivo
+ * 2) si status in_progress/partial → último inventariador por `at`
  */
 export function resolveActiveInventoryOperatorLabel(
-  _task: Task,
+  task: Task,
   operators: LivePresenceIdentity[],
 ): string | null {
   const live = resolveLiveInventoryOperator(operators);
-  return live?.displayName ?? null;
+  if (live?.displayName) return live.displayName;
+
+  if (task.status === "in_progress" || task.status === "partial") {
+    return resolveLatestAllowedContributor(task)?.displayName ?? null;
+  }
+
+  return null;
 }
 
-/** Nombre para badge «En pausa» (última atribución permitida, sin exigir presencia). */
+/** Nombre para badge «En pausa» (último inventariador por `at`). */
 export function resolvePausedInventoryOperatorLabel(task: Task): string | null {
   if (task.status !== "paused") return null;
-  return resolveAllowedInventoryOperator(task)?.displayName ?? null;
+  return resolveLatestAllowedContributor(task)?.displayName ?? null;
 }
 
 export function resolveAllowedInventoryOperator(

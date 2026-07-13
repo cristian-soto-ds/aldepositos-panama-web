@@ -12,6 +12,8 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
+  Pause,
+  Play,
   Plus,
   Recycle,
   Save,
@@ -62,6 +64,10 @@ type ReekonCaptureViewProps = {
   onBack: () => void;
   onSwitchToTable: () => void;
   onSave: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  isPaused?: boolean;
+  canPause?: boolean;
   autosaveState: AutosaveState;
   isSaving: boolean;
   /** Estado de sincronización enriquecido (última sync, conexión, cola). */
@@ -238,6 +244,10 @@ export function ReekonCaptureView({
   onBack,
   onSwitchToTable,
   onSave,
+  onPause,
+  onResume,
+  isPaused = false,
+  canPause = false,
   autosaveState,
   isSaving,
   syncStatus,
@@ -428,6 +438,11 @@ export function ReekonCaptureView({
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-bold">{raLabel || "Inventario"}</p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              {isPaused ? (
+                <span className="font-semibold text-slate-600 dark:text-slate-300">
+                  En pausa ·{" "}
+                </span>
+              ) : null}
               {completedCount}/{measureRows.length} líneas · {physicalBultos}/{declaredBultos} bultos
               {faltantes > 0 ? ` · faltan ${faltantes}` : ""}
             </p>
@@ -772,14 +787,46 @@ export function ReekonCaptureView({
             >
               <Trash2 className="h-6 w-6" />
             </button>
-            <button
-              type="button"
-              onClick={addRowHere}
-              className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-            >
-              <Plus className="h-5 w-5" />
-              {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Línea"}
-            </button>
+            {isPaused && onResume ? (
+              <button
+                type="button"
+                onClick={onResume}
+                disabled={isSaving}
+                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 text-base font-bold text-emerald-800 active:scale-[0.98] disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+              >
+                <Play className="h-5 w-5" />
+                Reanudar
+              </button>
+            ) : canPause && onPause ? (
+              <button
+                type="button"
+                onClick={onPause}
+                disabled={isSaving}
+                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <Pause className="h-5 w-5" />
+                Pausar
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={addRowHere}
+                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <Plus className="h-5 w-5" />
+                {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Línea"}
+              </button>
+            )}
+            {!isPaused && canPause && onPause ? (
+              <button
+                type="button"
+                onClick={addRowHere}
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                aria-label={palletized && activeRow ? `Agregar fila P${palletOf(activeRow)}` : "Agregar línea"}
+              >
+                <Plus className="h-6 w-6" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onSave}

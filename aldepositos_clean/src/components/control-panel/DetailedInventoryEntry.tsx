@@ -10,6 +10,8 @@ import {
   Download,
   Edit,
   FileSpreadsheet,
+  Pause,
+  Play,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -35,7 +37,17 @@ import {
   clearWorkPresence,
 } from "@/lib/panelPresence";
 import { applyInventoryAttribution } from "@/lib/taskContributors";
-import { resolveActiveInventoryOperatorLabel } from "@/lib/inventoryOperatorsAllowlist";
+import {
+  canManageInventoryPause,
+  resolveActiveInventoryOperatorLabel,
+  resolveLiveInventoryOperator,
+  resolvePausedInventoryOperatorLabel,
+} from "@/lib/inventoryOperatorsAllowlist";
+import {
+  applyInventorySessionOnSave,
+  pauseInventory,
+  resumeInventory,
+} from "@/lib/inventorySessionTiming";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
@@ -198,6 +210,10 @@ export function DetailedInventoryEntry({
     "pending" | "completed" | "priority"
   >("pending");
   const presenceByRa = useInventoryPresenceByRa();
+  const canPauseInventory = canManageInventoryPause(
+    presenceUserKey,
+    presenceUserLabel,
+  );
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -222,7 +238,9 @@ export function DetailedInventoryEntry({
         );
       }
       return (
-        (t.status === "pending" || t.status === "partial") &&
+        (t.status === "pending" ||
+          t.status === "partial" ||
+          t.status === "paused") &&
         !t.containerDraft &&
         !t.dispatched
       );
@@ -235,6 +253,7 @@ export function DetailedInventoryEntry({
   }, [tasks, viewMode]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
   const [clientFilter, setClientFilter] = useState("Todos");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
@@ -289,12 +308,20 @@ export function DetailedInventoryEntry({
         hasCapture &&
         bultos >= expected &&
         hasDetailedRequiredData(rows);
+      const base = (selectedTask ?? { status: "pending" }) as SharedTask;
+      const withSession = applyInventorySessionOnSave({
+        task: base,
+        hasCapture,
+        isCompleted,
+        workStatusWhenActive: "partial",
+        forceResume: false,
+      });
       return {
         currentBultos: hasCapture ? bultos : 0,
-        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
+        status: withSession.status,
       };
     },
-    [selectedTask?.expectedBultos],
+    [selectedTask],
   );
 
   const {
@@ -477,6 +504,7 @@ export function DetailedInventoryEntry({
   };
 
   const clearTask = () => {
+    setLeavePromptOpen(false);
     setSelectedTask(null);
     setMeasureRows([]);
     activeTaskIdRef.current = null;
@@ -484,6 +512,95 @@ export function DetailedInventoryEntry({
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
+  };
+
+  const requestLeave = () => {
+    if (!selectedTask) return;
+    if (!canPauseInventory) {
+      clearTask();
+      return;
+    }
+    let bultos = 0;
+    measureRows.forEach((row) => {
+      const rowBultos = parseFloat(String(row.bultos ?? 0)) || 0;
+      bultos += row.reempaque === true ? 0 : rowBultos;
+    });
+    const hasCapture = detailedRowsHaveAnyCapture(measureRows);
+    const isCompleted =
+      hasCapture &&
+      bultos >= selectedTask.expectedBultos &&
+      hasDetailedRequiredData(measureRows);
+    if (hasCapture && !isCompleted && selectedTask.status !== "paused") {
+      setLeavePromptOpen(true);
+      return;
+    }
+    clearTask();
+  };
+
+  const pauseAndExit = () => {
+    if (!selectedTask) return;
+    const rows = latestRowsRef.current;
+    let bultos = 0;
+    let weight = 0;
+    let cbm = 0;
+    rows.forEach((row) => {
+      const rowBultos = parseFloat(String(row.bultos ?? 0)) || 0;
+      const rowPesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
+      const isReempaque = row.reempaque === true;
+      const countedBultos = isReempaque ? 0 : rowBultos;
+      bultos += countedBultos;
+      weight += countedBultos * rowPesoPorBulto;
+      cbm += cubicajeM3FromDims(row.l, row.w, row.h, countedBultos, isReempaque);
+    });
+    const hasCapture = detailedRowsHaveAnyCapture(rows);
+    const persistedRows = hasCapture
+      ? rows.map((r) => stripDetailedMeasureRow(r as Record<string, unknown>))
+      : [];
+    const withData = {
+      ...selectedTask,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? bultos : 0,
+      expectedWeight: weight > 0 ? roundUpMeasure(weight) : selectedTask.expectedWeight,
+      expectedCbm: cbm > 0 ? roundMeasureNearest(cbm) : selectedTask.expectedCbm,
+      originalExpectedBultos:
+        selectedTask.originalExpectedBultos ?? selectedTask.expectedBultos,
+      manualTotalWeight: selectedTask.manualTotalWeight ?? 0,
+    } as SharedTask;
+    const paused = pauseInventory(
+      applyInventorySessionOnSave({
+        task: withData,
+        hasCapture,
+        isCompleted: false,
+        workStatusWhenActive: "partial",
+        forceResume: false,
+      }),
+    );
+    const updatedTask = applyInventoryAttribution(paused, {
+      userKey: presenceUserKey,
+      userLabel: presenceUserLabel,
+      hasCapture,
+      isCompleted: false,
+    }) as Task;
+    void Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+    lastSavedHashRef.current = JSON.stringify({ rows });
+    clearTask();
+  };
+
+  const resumePausedInventory = () => {
+    if (!selectedTask || selectedTask.status !== "paused") return;
+    const next = resumeInventory(selectedTask as SharedTask, "partial");
+    const updatedTask = applyInventoryAttribution(
+      { ...next, updatedAt: new Date().toISOString() },
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture: detailedRowsHaveAnyCapture(measureRows),
+        isCompleted: false,
+      },
+    ) as Task;
+    setSelectedTask(updatedTask);
+    latestTaskRef.current = updatedTask;
+    void Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
   };
 
   const addRow = () => {
@@ -736,18 +853,22 @@ export function DetailedInventoryEntry({
     }
 
     const updatedTask = applyInventoryAttribution(
-      {
-        ...task,
-        measureData: JSON.parse(JSON.stringify(persistedRows)),
-        currentBultos: hasCapture ? bultos : 0,
-        expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
-        expectedCbm:
-          cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
-        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
-        originalExpectedBultos: originalExpected,
-        manualTotalWeight: task.manualTotalWeight ?? 0,
-        updatedAt: new Date().toISOString(),
-      } as SharedTask,
+      applyInventorySessionOnSave({
+        task: {
+          ...task,
+          measureData: JSON.parse(JSON.stringify(persistedRows)),
+          currentBultos: hasCapture ? bultos : 0,
+          expectedWeight: weight > 0 ? roundUpMeasure(weight) : task.expectedWeight,
+          expectedCbm:
+            cbm > 0 ? roundMeasureNearest(cbm) : task.expectedCbm,
+          originalExpectedBultos: originalExpected,
+          manualTotalWeight: task.manualTotalWeight ?? 0,
+        } as SharedTask,
+        hasCapture,
+        isCompleted,
+        workStatusWhenActive: "partial",
+        forceResume: task.status === "paused",
+      }),
       {
         userKey: presenceUserKey,
         userLabel: presenceUserLabel,
@@ -819,17 +940,21 @@ export function DetailedInventoryEntry({
     }
 
     const updatedTask = applyInventoryAttribution(
-      {
-        ...selectedTask,
-        measureData: JSON.parse(JSON.stringify(persistedRows)),
-        currentBultos: hasCapture ? bultos : 0,
-        expectedWeight: weight > 0 ? weight : selectedTask.expectedWeight,
-        expectedCbm: parseFloat(cbm) > 0 ? parseFloat(cbm) : selectedTask.expectedCbm,
-        status: isCompleted ? "completed" : hasCapture ? "partial" : "pending",
-        originalExpectedBultos: originalExpected,
-        manualTotalWeight: selectedTask.manualTotalWeight ?? 0,
-        updatedAt: new Date().toISOString(),
-      } as SharedTask,
+      applyInventorySessionOnSave({
+        task: {
+          ...selectedTask,
+          measureData: JSON.parse(JSON.stringify(persistedRows)),
+          currentBultos: hasCapture ? bultos : 0,
+          expectedWeight: weight > 0 ? weight : selectedTask.expectedWeight,
+          expectedCbm: parseFloat(cbm) > 0 ? parseFloat(cbm) : selectedTask.expectedCbm,
+          originalExpectedBultos: originalExpected,
+          manualTotalWeight: selectedTask.manualTotalWeight ?? 0,
+        } as SharedTask,
+        hasCapture,
+        isCompleted,
+        workStatusWhenActive: "partial",
+        forceResume: selectedTask.status === "paused",
+      }),
       {
         userKey: presenceUserKey,
         userLabel: presenceUserLabel,
@@ -967,10 +1092,14 @@ export function DetailedInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
+                  const liveOp = resolveLiveInventoryOperator(liveWorkers);
                   const activeInventariador = resolveActiveInventoryOperatorLabel(
                     t,
                     liveWorkers,
                   );
+                  const pausedInventariador = resolvePausedInventoryOperatorLabel(t);
+                  const showPaused =
+                    t.status === "paused" && !liveOp && !!pausedInventariador;
                   return (
                   <div
                     key={t.id}
@@ -1046,7 +1175,14 @@ export function DetailedInventoryEntry({
                           >
                             RA: {t.ra}
                           </h3>
-                        {activeInventariador ? (
+                        {showPaused ? (
+                          <span
+                            className="px-2 py-1 rounded-md bg-slate-200 text-slate-700 text-[9px] font-black uppercase tracking-widest dark:bg-slate-700 dark:text-slate-200"
+                            title={`Inventario en pausa · ${pausedInventariador}`}
+                          >
+                            En pausa · {pausedInventariador}
+                          </span>
+                        ) : activeInventariador ? (
                           <span
                             className="px-2 py-1 rounded-md bg-amber-100 text-amber-700 text-[9px] font-black uppercase tracking-widest"
                             title={`Inventario en curso por ${activeInventariador}`}
@@ -1125,7 +1261,7 @@ export function DetailedInventoryEntry({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={clearTask}
+              onClick={requestLeave}
               className="text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 md:bg-transparent px-4 py-2 md:px-0 md:py-0 rounded-lg md:rounded-none shadow-sm md:shadow-none font-bold hover:text-[#16263F] dark:text-slate-100 flex items-center gap-2 uppercase text-[10px] tracking-widest"
             >
               <ArrowLeft className="w-4 h-4" />{" "}
@@ -1533,18 +1669,80 @@ export function DetailedInventoryEntry({
                   IMPORTAR REFERENCIAS (EXCEL)
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={saveOrder}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f172a] py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-all hover:bg-black active:scale-95 md:rounded-full md:py-4 md:text-sm"
-              >
-                GUARDAR ORDEN DETALLADA <Box className="w-5 h-5" />
-              </button>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                {canPauseInventory && t.status === "paused" ? (
+                  <button
+                    type="button"
+                    onClick={resumePausedInventory}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 py-3 text-xs font-black uppercase tracking-widest text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 md:rounded-full md:py-4 md:text-sm"
+                  >
+                    <Play className="w-5 h-5" /> Reanudar
+                  </button>
+                ) : canPauseInventory &&
+                  detailedRowsHaveAnyCapture(measureRows) &&
+                  t.status !== "completed" ? (
+                  <button
+                    type="button"
+                    onClick={pauseAndExit}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-100 py-3 text-xs font-black uppercase tracking-widest text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 md:rounded-full md:py-4 md:text-sm"
+                  >
+                    <Pause className="w-5 h-5" /> Pausar
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={saveOrder}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0f172a] py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-all hover:bg-black active:scale-95 md:rounded-full md:py-4 md:text-sm"
+                >
+                  GUARDAR ORDEN DETALLADA <Box className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+    {leavePromptOpen ? (
+      <div
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+          <h3 className="text-base font-black text-[#16263F] dark:text-slate-100">
+            ¿Pausar inventario?
+          </h3>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            Hay captura a medias. Si lo dejas en curso, seguirá apareciendo como
+            activo en la lista.
+          </p>
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={pauseAndExit}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white"
+            >
+              <Pause className="h-4 w-4" />
+              Pausar y salir
+            </button>
+            <button
+              type="button"
+              onClick={clearTask}
+              className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+            >
+              Salir sin pausar
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeavePromptOpen(false)}
+              className="flex w-full items-center justify-center rounded-xl py-2 text-sm font-semibold text-slate-500"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     <InventoryCsvExportModal
       open={csvExportOpen}
       raLabel={String(t.ra ?? "")}

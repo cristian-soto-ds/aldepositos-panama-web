@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import "./reports-print.css";
 import { downloadReportExcel } from "@/lib/exportReportExcel";
 import { downloadReportPdfFromExcel } from "@/lib/exportReportPdfFromExcel";
+import { openReportPrintWindow } from "@/lib/buildReportPrintHtml";
 import type { Task as TaskModel } from "@/lib/types/task";
 import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
 import {
@@ -137,6 +138,16 @@ export function CompletedReportsModule({
     }
   };
 
+  const handlePrintReport = () => {
+    if (tasksToPrint.length === 0) return;
+    const currentDate = new Date().toLocaleDateString("es-PA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    openReportPrintWindow(tasksToPrint as TaskModel[], currentDate);
+  };
+
   const clients = [
     ...new Set(completedTasks.map((t) => t.mainClient || "Sin Cliente")),
   ];
@@ -191,7 +202,7 @@ export function CompletedReportsModule({
           >
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap justify-end gap-2 sm:gap-3">
             <button
               type="button"
               disabled={isDownloadingExcel}
@@ -204,6 +215,15 @@ export function CompletedReportsModule({
                 <FileSpreadsheet className="w-4 h-4" />
               )}
               Descargar Excel
+            </button>
+            <button
+              type="button"
+              onClick={handlePrintReport}
+              className="bg-[#16263F] text-white px-4 md:px-6 py-2.5 rounded-lg font-black shadow-md hover:bg-[#0f1b2e] transition-colors flex items-center gap-2 uppercase text-[10px] md:text-xs tracking-widest dark:bg-blue-600 dark:hover:bg-blue-500"
+              title="En el diálogo de impresión: Más opciones → desactivá Encabezados y pies de página"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir
             </button>
             <button
               type="button"
@@ -235,7 +255,10 @@ export function CompletedReportsModule({
           className="custom-scrollbar flex flex-1 flex-col items-center gap-8 overflow-y-auto bg-[var(--panel-bg)] p-4 md:p-8"
         >
           {tasksToPrint.map((t) => (
-            <div key={t.id} className="report-preview-frame w-full max-w-[8.5in]">
+            <div
+              key={t.id}
+              className="report-preview-frame print-container w-full max-w-[8.5in]"
+            >
               <ReportPdfExportLayout
                 task={t as TaskModel}
                 currentDate={currentDate}

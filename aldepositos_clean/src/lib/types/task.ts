@@ -40,6 +40,15 @@ export type Task = {
   date?: string;
   /** ISO de la última vez que se guardó el inventario de este RA (para "última actualización"). */
   updatedAt?: string;
+  /**
+   * ISO de la primera captura con datos en este RA.
+   * No se sobrescribe; base del KPI de tiempo activo.
+   */
+  inventoryStartedAt?: string;
+  /** ISO si el inventario está pausado ahora (`status === "paused"`). */
+  inventoryPausedAt?: string;
+  /** Ms de pausa acumulados en pausas ya cerradas (excluye la pausa abierta). */
+  inventoryPausedMs?: number;
   /** Email (minúsculas) del operador que creó/importó el RA por primera vez. */
   createdByEmail?: string;
   createdByName?: string;

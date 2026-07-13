@@ -14,6 +14,8 @@ import {
   Download,
   LayoutGrid,
   Loader2,
+  Pause,
+  Play,
   Plus,
   Recycle,
   Ruler,
@@ -67,11 +69,21 @@ import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
 import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
-import { resolveActiveInventoryOperatorLabel } from "@/lib/inventoryOperatorsAllowlist";
+import {
+  canManageInventoryPause,
+  resolveActiveInventoryOperatorLabel,
+  resolveLiveInventoryOperator,
+  resolvePausedInventoryOperatorLabel,
+} from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
 } from "@/lib/taskContributors";
+import {
+  applyInventorySessionOnSave,
+  pauseInventory,
+  resumeInventory,
+} from "@/lib/inventorySessionTiming";
 import {
   cubicajeM3FromDims,
   formatCubicaje2,
@@ -604,6 +616,10 @@ export function QuickInventoryEntry({
   >("pending");
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
   const presenceByRa = useInventoryPresenceByRa();
+  const canPauseInventory = canManageInventoryPause(
+    presenceUserKey,
+    presenceUserLabel,
+  );
 
   useEffect(() => {
     const closeTransfer = () => setTransferOpenId(null);
@@ -626,7 +642,9 @@ export function QuickInventoryEntry({
         );
       }
       return (
-        (t.status === "pending" || t.status === "in_progress") &&
+        (t.status === "pending" ||
+          t.status === "in_progress" ||
+          t.status === "paused") &&
         !t.containerDraft &&
         !t.dispatched
       );
@@ -639,6 +657,7 @@ export function QuickInventoryEntry({
   }, [tasks, viewMode]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
   const [clientFilter, setClientFilter] = useState<string>("Todos");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
@@ -780,16 +799,20 @@ export function QuickInventoryEntry({
         hasCapture &&
         totalsBultos >= expected &&
         hasQuickRequiredData(rows);
+      const base = selectedTask ?? ({ status: "pending" } as Task);
+      const withSession = applyInventorySessionOnSave({
+        task: base,
+        hasCapture,
+        isCompleted,
+        workStatusWhenActive: "in_progress",
+        forceResume: false,
+      });
       return {
         currentBultos: hasCapture ? totalsBultos : 0,
-        status: isCompleted
-          ? "completed"
-          : hasCapture
-            ? "in_progress"
-            : "pending",
+        status: withSession.status,
       };
     },
-    [selectedTask?.expectedBultos],
+    [selectedTask],
   );
 
   const {
@@ -1095,6 +1118,7 @@ export function QuickInventoryEntry({
     // Persiste de inmediato cualquier cambio pendiente antes de abandonar la RA,
     // en vez de descartar el guardado debounced (evita perder la última medida).
     flushAutosaveRef.current();
+    setLeavePromptOpen(false);
     setSelectedTask(null);
     activeTaskIdRef.current = null;
     withModeRowsSnapshotRef.current = null;
@@ -1102,6 +1126,116 @@ export function QuickInventoryEntry({
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
+    }
+  };
+
+  const requestLeave = () => {
+    if (!selectedTask) return;
+    if (!canPauseInventory) {
+      clearTask();
+      return;
+    }
+    const hasCapture = quickRowsHaveAnyCapture(measureRows);
+    const totalsBultos = measureRows.reduce(
+      (a, row) => a + (parseFloat(String(row.bultos)) || 0),
+      0,
+    );
+    const isCompleted =
+      hasCapture &&
+      totalsBultos >= selectedTask.expectedBultos &&
+      hasQuickRequiredData(measureRows);
+    const needsPausePrompt =
+      hasCapture &&
+      !isCompleted &&
+      selectedTask.status !== "paused";
+    if (needsPausePrompt) {
+      setLeavePromptOpen(true);
+      return;
+    }
+    clearTask();
+  };
+
+  const pauseAndExit = async () => {
+    if (!selectedTask) return;
+    const task = selectedTask;
+    const rows = latestRowsRef.current;
+    const hasCapture = quickRowsHaveAnyCapture(rows);
+    const totalsBultos = rows.reduce(
+      (a, row) => a + (parseFloat(String(row.bultos)) || 0),
+      0,
+    );
+    const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
+    const withData: Task = {
+      ...task,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? totalsBultos : 0,
+      weightMode: QUICK_WEIGHT_MODE,
+      referenceMode: referenceModeRef.current,
+      originalExpectedBultos: task.originalExpectedBultos || task.expectedBultos,
+      manualTotalWeight:
+        task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+    };
+    const paused = pauseInventory(
+      applyInventorySessionOnSave({
+        task: withData,
+        hasCapture,
+        isCompleted: false,
+        workStatusWhenActive: "in_progress",
+        forceResume: false,
+      }),
+    );
+    const updatedTask = applyInventoryAttribution(paused, {
+      userKey: presenceUserKey,
+      userLabel: presenceUserLabel,
+      hasCapture,
+      isCompleted: false,
+    });
+    const currentHash = JSON.stringify({
+      rows,
+      referenceMode: referenceModeRef.current,
+      captureLayout,
+    });
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    pendingAutosaveHashRef.current = currentHash;
+    setAutosaveState("saving");
+    try {
+      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+      lastSavedHashRef.current = currentHash;
+      setLastSavedAt(Date.now());
+      setPendingCount(0);
+      setAutosaveState("saved");
+      setLeavePromptOpen(false);
+      setSelectedTask(null);
+      activeTaskIdRef.current = null;
+      withModeRowsSnapshotRef.current = null;
+      sourceReferencesRef.current = {};
+    } catch {
+      setAutosaveState("error");
+      scheduleAutosaveRetry();
+    }
+  };
+
+  const resumePausedInventory = async () => {
+    if (!selectedTask || selectedTask.status !== "paused") return;
+    const next = resumeInventory(selectedTask, "in_progress");
+    const updatedTask = applyInventoryAttribution(
+      { ...next, updatedAt: new Date().toISOString() },
+      {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture: quickRowsHaveAnyCapture(measureRows),
+        isCompleted: false,
+      },
+    );
+    setSelectedTask(updatedTask);
+    latestTaskRef.current = updatedTask;
+    try {
+      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+    } catch {
+      setAutosaveState("error");
     }
   };
 
@@ -1598,26 +1732,31 @@ export function QuickInventoryEntry({
       window.localStorage.removeItem(inventoryDraftKey(task.id, taskDraftKind(task)));
     }
 
-    const updatedTask: Task = applyInventoryAttribution(
-      {
-        ...task,
-        measureData: JSON.parse(JSON.stringify(persistedRows)),
-        currentBultos: hasCapture ? totalsBultos : 0,
-        weightMode: QUICK_WEIGHT_MODE,
-        referenceMode: referenceModeRef.current,
-        status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
-        originalExpectedBultos: originalExpected,
-        manualTotalWeight:
-          task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        userKey: presenceUserKey,
-        userLabel: presenceUserLabel,
-        hasCapture,
-        isCompleted,
-      },
-    );
+    const withData: Task = {
+      ...task,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? totalsBultos : 0,
+      weightMode: QUICK_WEIGHT_MODE,
+      referenceMode: referenceModeRef.current,
+      originalExpectedBultos: originalExpected,
+      manualTotalWeight:
+        task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+    };
+    const withSession = applyInventorySessionOnSave({
+      task: withData,
+      hasCapture,
+      isCompleted,
+      workStatusWhenActive: "in_progress",
+      // Cualquier autosave con cambios mientras está pausado = reanudar trabajo.
+      forceResume: task.status === "paused",
+    });
+
+    const updatedTask: Task = applyInventoryAttribution(withSession, {
+      userKey: presenceUserKey,
+      userLabel: presenceUserLabel,
+      hasCapture,
+      isCompleted,
+    });
 
     let failed = false;
     try {
@@ -1772,28 +1911,32 @@ export function QuickInventoryEntry({
       );
     }
 
-    const updatedTask: Task = applyInventoryAttribution(
-      {
-        ...selectedTask,
-        measureData: JSON.parse(JSON.stringify(persistedRows)),
-        currentBultos: hasCapture ? totals.bultos : 0,
-        weightMode: QUICK_WEIGHT_MODE,
-        referenceMode: referenceModeRef.current,
-        status: isCompleted ? "completed" : hasCapture ? "in_progress" : "pending",
-        originalExpectedBultos: originalExpected,
-        manualTotalWeight:
-          selectedTask.manualTotalWeight !== undefined
-            ? selectedTask.manualTotalWeight
-            : 0,
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        userKey: presenceUserKey,
-        userLabel: presenceUserLabel,
-        hasCapture,
-        isCompleted,
-      },
-    );
+    const withData: Task = {
+      ...selectedTask,
+      measureData: JSON.parse(JSON.stringify(persistedRows)),
+      currentBultos: hasCapture ? totals.bultos : 0,
+      weightMode: QUICK_WEIGHT_MODE,
+      referenceMode: referenceModeRef.current,
+      originalExpectedBultos: originalExpected,
+      manualTotalWeight:
+        selectedTask.manualTotalWeight !== undefined
+          ? selectedTask.manualTotalWeight
+          : 0,
+    };
+    const withSession = applyInventorySessionOnSave({
+      task: withData,
+      hasCapture,
+      isCompleted,
+      workStatusWhenActive: "in_progress",
+      forceResume: selectedTask.status === "paused",
+    });
+
+    const updatedTask: Task = applyInventoryAttribution(withSession, {
+      userKey: presenceUserKey,
+      userLabel: presenceUserLabel,
+      hasCapture,
+      isCompleted,
+    });
 
     const currentHash = JSON.stringify({
       rows: measureRows,
@@ -1934,11 +2077,15 @@ export function QuickInventoryEntry({
               ) : (
                 displayedTasks.map((t) => {
                   const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
+                  const liveOp = resolveLiveInventoryOperator(liveWorkers);
                   const activeInventariador = resolveActiveInventoryOperatorLabel(
                     t,
                     liveWorkers,
                   );
+                  const pausedInventariador = resolvePausedInventoryOperatorLabel(t);
                   const completedBy = inventoryCompletedByLabel(t);
+                  const showPaused =
+                    t.status === "paused" && !liveOp && !!pausedInventariador;
 
                   return (
               <div
@@ -1969,7 +2116,14 @@ export function QuickInventoryEntry({
                     >
                       RA {t.ra}
                     </h3>
-                    {activeInventariador ? (
+                    {showPaused ? (
+                      <span
+                        className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                        title={`Inventario en pausa · ${pausedInventariador}`}
+                      >
+                        En pausa · {pausedInventariador}
+                      </span>
+                    ) : activeInventariador ? (
                       <span
                         className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
                         title={`Inventario en curso por ${activeInventariador}`}
@@ -2189,9 +2343,17 @@ export function QuickInventoryEntry({
           totalCbm={totals.cbm}
           totalWeight={totals.weight}
           completedCount={completedRows}
-          onBack={clearTask}
+          onBack={requestLeave}
           onSwitchToTable={() => setCaptureLayoutWithPersist("table")}
           onSave={saveOrder}
+          onPause={canPauseInventory ? () => void pauseAndExit() : undefined}
+          onResume={canPauseInventory ? () => void resumePausedInventory() : undefined}
+          isPaused={t.status === "paused"}
+          canPause={
+            canPauseInventory &&
+            quickRowsHaveAnyCapture(measureRows) &&
+            t.status !== "completed"
+          }
           autosaveState={autosaveState}
           isSaving={autosaveState === "saving"}
           syncStatus={{
@@ -2201,6 +2363,51 @@ export function QuickInventoryEntry({
             isOnline,
           }}
         />
+        {leavePromptOpen ? (
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="leave-pause-title-reekon"
+          >
+            <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+              <h3
+                id="leave-pause-title-reekon"
+                className="text-base font-black text-[#16263F] dark:text-slate-100"
+              >
+                ¿Pausar inventario?
+              </h3>
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                Hay captura a medias. Si lo dejas en curso, seguirá apareciendo
+                como activo en la lista.
+              </p>
+              <div className="mt-4 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => void pauseAndExit()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white"
+                >
+                  <Pause className="h-4 w-4" />
+                  Pausar y salir
+                </button>
+                <button
+                  type="button"
+                  onClick={clearTask}
+                  className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  Salir sin pausar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeavePromptOpen(false)}
+                  className="flex w-full items-center justify-center rounded-xl py-2 text-sm font-semibold text-slate-500"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         <InventoryCsvExportModal
           open={csvExportOpen}
           raLabel={String(t.ra ?? "")}
@@ -2239,7 +2446,7 @@ export function QuickInventoryEntry({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={clearTask}
+            onClick={requestLeave}
             className="inline-flex touch-target items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-[#16263F] dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-slate-100 sm:gap-2 sm:px-3"
           >
             <ArrowLeft className="icon-sm" />
@@ -2554,14 +2761,37 @@ export function QuickInventoryEntry({
                 <Plus className="icon-sm" /> Agregar
               </button>
             )}
-            <button
-              type="button"
-              onClick={saveOrder}
-              className="flex w-full touch-target items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#0f172a] active:scale-[0.99] sm:py-3 md:py-4"
-            >
-              <Check className="icon-md" />
-              Guardar orden
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {canPauseInventory && t.status === "paused" ? (
+                <button
+                  type="button"
+                  onClick={() => void resumePausedInventory()}
+                  className="flex w-full touch-target items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-sm font-bold text-emerald-800 transition-all hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 sm:py-3"
+                >
+                  <Play className="icon-md" />
+                  Reanudar
+                </button>
+              ) : canPauseInventory &&
+                quickRowsHaveAnyCapture(measureRows) &&
+                t.status !== "completed" ? (
+                <button
+                  type="button"
+                  onClick={() => void pauseAndExit()}
+                  className="flex w-full touch-target items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-100 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 sm:py-3"
+                >
+                  <Pause className="icon-md" />
+                  Pausar
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={saveOrder}
+                className="flex w-full touch-target items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#0f172a] active:scale-[0.99] sm:py-3 md:py-4"
+              >
+                <Check className="icon-md" />
+                Guardar orden
+              </button>
+            </div>
             <p className="hidden text-center text-[11px] text-slate-400 dark:text-slate-500 sm:block">
               Los cambios se guardan automáticamente mientras capturas
             </p>
@@ -2569,6 +2799,51 @@ export function QuickInventoryEntry({
         </div>
       )}
     </div>
+    {leavePromptOpen ? (
+      <div
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="leave-pause-title"
+      >
+        <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+          <h3
+            id="leave-pause-title"
+            className="text-base font-black text-[#16263F] dark:text-slate-100"
+          >
+            ¿Pausar inventario?
+          </h3>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+            Hay captura a medias. Si lo dejas en curso, seguirá apareciendo como
+            activo en la lista.
+          </p>
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => void pauseAndExit()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] py-2.5 text-sm font-bold text-white"
+            >
+              <Pause className="h-4 w-4" />
+              Pausar y salir
+            </button>
+            <button
+              type="button"
+              onClick={clearTask}
+              className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+            >
+              Salir sin pausar
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeavePromptOpen(false)}
+              className="flex w-full items-center justify-center rounded-xl py-2 text-sm font-semibold text-slate-500"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
     <InventoryCsvExportModal
       open={csvExportOpen}
       raLabel={String(t.ra ?? "")}

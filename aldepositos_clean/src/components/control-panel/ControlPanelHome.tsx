@@ -65,6 +65,7 @@ function statusLabel(status: string): string {
   if (status === "completed") return "Completado";
   if (status === "in_progress") return "En proceso";
   if (status === "partial") return "En proceso";
+  if (status === "paused") return "En pausa";
   if (status === "pending") return "Pendiente";
   return status || "—";
 }

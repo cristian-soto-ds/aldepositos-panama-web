@@ -9,12 +9,19 @@ import {
   ClipboardCheck,
   Clock3,
   Crown,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Activity,
+  Zap,
+  BarChart3,
 } from "lucide-react";
 
 import type { Task } from "@/lib/types/task";
 import {
   computeInventoryLeaderboard,
   isCurrentUserInventariador,
+  LEADERBOARD_PERIOD_OPTIONS,
   type LeaderboardPeriod,
   type InventariadorStats,
 } from "@/lib/inventoryLeaderboard";
@@ -30,6 +37,12 @@ function formatNumber(n: number): string {
   return new Intl.NumberFormat("es-PA").format(Math.round(n));
 }
 
+function formatDelta(n: number): string {
+  if (n > 0) return `+${formatNumber(n)}`;
+  if (n < 0) return formatNumber(n);
+  return "0";
+}
+
 const AVATAR_PALETTES = [
   "bg-[#16263F] text-white",
   "bg-blue-600 text-white",
@@ -41,15 +54,10 @@ const AVATAR_PALETTES = [
 
 function paletteForKey(key: string): string {
   let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h + key.charCodeAt(i) * (i + 1)) % AVATAR_PALETTES.length;
+  for (let i = 0; i < key.length; i++)
+    h = (h + key.charCodeAt(i) * (i + 1)) % AVATAR_PALETTES.length;
   return AVATAR_PALETTES[h]!;
 }
-
-const PERIOD_OPTIONS: { id: LeaderboardPeriod; label: string }[] = [
-  { id: "day", label: "Hoy" },
-  { id: "week", label: "Semana" },
-  { id: "month", label: "Mes" },
-];
 
 const PODIUM_ORDER = [1, 0, 2] as const;
 const PODIUM_HEIGHTS = ["h-28 sm:h-32", "h-36 sm:h-44", "h-24 sm:h-28"] as const;
@@ -78,6 +86,92 @@ function ProgressBar({
         style={{ width: `${pct}%` }}
       />
     </div>
+  );
+}
+
+function TrendBadge({
+  delta,
+  compact = false,
+}: {
+  delta: number;
+  compact?: boolean;
+}) {
+  if (delta === 0) {
+    return (
+      <span
+        className={`inline-flex items-center gap-0.5 rounded-full bg-slate-100 font-black text-slate-500 dark:bg-slate-800 dark:text-slate-400 ${
+          compact ? "px-1.5 py-0.5 text-[8px]" : "px-2 py-0.5 text-[9px]"
+        }`}
+      >
+        <Minus className="h-3 w-3" aria-hidden />
+        Igual
+      </span>
+    );
+  }
+  const up = delta > 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full font-black ${
+        up
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+          : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"
+      } ${compact ? "px-1.5 py-0.5 text-[8px]" : "px-2 py-0.5 text-[9px]"}`}
+    >
+      {up ? (
+        <TrendingUp className="h-3 w-3" aria-hidden />
+      ) : (
+        <TrendingDown className="h-3 w-3" aria-hidden />
+      )}
+      {formatDelta(delta)}
+    </span>
+  );
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const max = Math.max(1, ...values);
+  return (
+    <div
+      className="flex h-8 items-end gap-0.5"
+      title="Actividad en el período"
+      aria-hidden
+    >
+      {values.map((v, i) => (
+        <div
+          key={i}
+          className="w-1.5 rounded-t-sm bg-gradient-to-t from-blue-600/40 to-blue-500 dark:from-sky-700/50 dark:to-sky-400"
+          style={{ height: `${Math.max(12, Math.round((v / max) * 100))}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MixChip({
+  label,
+  count,
+  tone,
+}: {
+  label: string;
+  count: number;
+  tone: "slate" | "blue" | "violet" | "amber" | "emerald";
+}) {
+  if (count <= 0) return null;
+  const tones = {
+    slate: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+    blue: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",
+    violet:
+      "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300",
+    amber:
+      "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+    emerald:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  };
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${tones[tone]}`}
+    >
+      {label} {count}
+    </span>
   );
 }
 
@@ -131,6 +225,12 @@ function PodiumCard({
         <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
           inventarios
         </p>
+        <p className="mt-1 text-[10px] font-black tabular-nums text-amber-600 dark:text-amber-400">
+          {formatNumber(stat.score)} pts
+        </p>
+        <div className="mt-1.5">
+          <TrendBadge delta={stat.deltaInventarios} compact />
+        </div>
         <div className="mt-2 flex gap-3 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
           <span>{formatNumber(stat.filas)} filas</span>
           <span>{formatNumber(stat.bultos)} bultos</span>
@@ -147,18 +247,117 @@ function PodiumCard({
   );
 }
 
+function CompareChart({
+  stats,
+  maxInventarios,
+  maxFilas,
+  maxBultos,
+}: {
+  stats: InventariadorStats[];
+  maxInventarios: number;
+  maxFilas: number;
+  maxBultos: number;
+}) {
+  return (
+    <section
+      className="mb-8 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5"
+      aria-label="Comparativa"
+    >
+      <div className="mb-4 flex items-center gap-2">
+        <BarChart3 className="h-4 w-4 text-blue-600 dark:text-blue-400" aria-hidden />
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+          Comparativa del período
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {stats.map((stat) => (
+          <div key={stat.id} className="min-w-0">
+            <p className="mb-2 truncate text-xs font-black text-[#16263F] dark:text-slate-100">
+              {stat.name}
+            </p>
+            <div className="flex h-28 items-end justify-center gap-2">
+              {(
+                [
+                  {
+                    key: "inv",
+                    value: stat.inventarios,
+                    max: maxInventarios,
+                    label: "Inv",
+                    className: "from-[#16263F] to-blue-500",
+                  },
+                  {
+                    key: "filas",
+                    value: stat.filas,
+                    max: maxFilas,
+                    label: "Filas",
+                    className: "from-amber-500 to-amber-300",
+                  },
+                  {
+                    key: "bultos",
+                    value: stat.bultos,
+                    max: maxBultos,
+                    label: "Bultos",
+                    className: "from-emerald-600 to-emerald-400",
+                  },
+                ] as const
+              ).map((bar) => {
+                const pct =
+                  bar.max > 0 ? Math.round((bar.value / bar.max) * 100) : 0;
+                return (
+                  <div
+                    key={bar.key}
+                    className="flex w-10 flex-col items-center gap-1"
+                  >
+                    <span className="text-[9px] font-black tabular-nums text-slate-500">
+                      {formatNumber(bar.value)}
+                    </span>
+                    <div className="flex h-20 w-full items-end rounded-md bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className={`w-full rounded-md bg-gradient-to-t ${bar.className} transition-all duration-500`}
+                        style={{
+                          height: `${Math.max(bar.value > 0 ? 8 : 0, pct)}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                      {bar.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap justify-center gap-3 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-[#16263F]" /> Inventarios
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-amber-400" /> Filas
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-sm bg-emerald-500" /> Bultos
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function StatRow({
   stat,
   maxInventarios,
   maxFilas,
   maxBultos,
   isCurrentUser,
+  prevPeriodLabel,
 }: {
   stat: InventariadorStats;
   maxInventarios: number;
   maxFilas: number;
   maxBultos: number;
   isCurrentUser: boolean;
+  prevPeriodLabel: string;
 }) {
   return (
     <div
@@ -190,20 +389,83 @@ function StatRow({
                 Tú
               </span>
             )}
+            <TrendBadge delta={stat.deltaInventarios} />
           </div>
-          {stat.lastActivityAt && (
-            <p className="mt-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-              Última actividad:{" "}
-              {new Intl.DateTimeFormat("es-PA", {
-                dateStyle: "short",
-                timeStyle: "short",
-              }).format(new Date(stat.lastActivityAt))}
-            </p>
-          )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+            {stat.lastActivityAt && (
+              <span>
+                Última actividad:{" "}
+                {new Intl.DateTimeFormat("es-PA", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                }).format(new Date(stat.lastActivityAt))}
+              </span>
+            )}
+            <span className="tabular-nums text-amber-600 dark:text-amber-400">
+              {formatNumber(stat.score)} pts
+            </span>
+            {stat.enProceso > 0 && (
+              <span className="text-sky-600 dark:text-sky-400">
+                {formatNumber(stat.enProceso)} en proceso
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="hidden shrink-0 sm:block">
+          <Sparkline values={stat.activityByDay} />
         </div>
         <p className="text-xl font-black tabular-nums text-[#16263F] dark:text-white">
           {formatNumber(stat.inventarios)}
         </p>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <MixChip label="Rápido" count={stat.quickCount} tone="blue" />
+        <MixChip label="Detallado" count={stat.detailedCount} tone="violet" />
+        <MixChip label="Con refs" count={stat.modeWith} tone="emerald" />
+        <MixChip label="Sin refs" count={stat.modeWithout} tone="amber" />
+        <MixChip label="Paletizado" count={stat.modePalletized} tone="slate" />
+      </div>
+
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-xl bg-slate-50 px-2.5 py-2 dark:bg-slate-800/60">
+          <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+            Filas / RA
+          </p>
+          <p className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">
+            {stat.avgFilasPorInventario}
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-2.5 py-2 dark:bg-slate-800/60">
+          <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+            Bultos / RA
+          </p>
+          <p className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">
+            {stat.avgBultosPorInventario}
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-2.5 py-2 dark:bg-slate-800/60">
+          <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+            Tiempo activo prom.
+          </p>
+          <p className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">
+            {stat.avgActiveMinutes != null
+              ? `${stat.avgActiveMinutes} min`
+              : "—"}
+          </p>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-2.5 py-2 dark:bg-slate-800/60">
+          <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+            vs {prevPeriodLabel.split("·")[0]?.trim() || "anterior"}
+          </p>
+          <p className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">
+            {formatDelta(stat.deltaInventarios)} inv
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-3 flex justify-center sm:hidden">
+        <Sparkline values={stat.activityByDay} />
       </div>
 
       <div className="space-y-3">
@@ -213,7 +475,9 @@ function StatRow({
               <ClipboardCheck className="h-3 w-3" aria-hidden />
               Inventarios
             </span>
-            <span>{formatNumber(stat.inventarios)}</span>
+            <span>
+              {formatNumber(stat.inventarios)} · {stat.shareInventarios}%
+            </span>
           </div>
           <ProgressBar value={stat.inventarios} max={maxInventarios} tone="blue" />
         </div>
@@ -223,7 +487,9 @@ function StatRow({
               <Layers className="h-3 w-3" aria-hidden />
               Filas
             </span>
-            <span>{formatNumber(stat.filas)}</span>
+            <span>
+              {formatNumber(stat.filas)} · {stat.shareFilas}%
+            </span>
           </div>
           <ProgressBar value={stat.filas} max={maxFilas} tone="amber" />
         </div>
@@ -233,7 +499,9 @@ function StatRow({
               <Package className="h-3 w-3" aria-hidden />
               Bultos
             </span>
-            <span>{formatNumber(stat.bultos)}</span>
+            <span>
+              {formatNumber(stat.bultos)} · {stat.shareBultos}%
+            </span>
           </div>
           <ProgressBar value={stat.bultos} max={maxBultos} tone="emerald" />
         </div>
@@ -269,7 +537,9 @@ export function InventoryLeaderboardModule({
 
   const podiumStats = useMemo(() => {
     const sorted = [...result.stats].sort((a, b) => a.rank - b.rank);
-    return PODIUM_ORDER.map((idx) => sorted[idx]).filter(Boolean) as InventariadorStats[];
+    return PODIUM_ORDER.map((idx) => sorted[idx]).filter(
+      Boolean,
+    ) as InventariadorStats[];
   }, [result.stats]);
 
   useEffect(() => {
@@ -319,15 +589,18 @@ export function InventoryLeaderboardModule({
             <p className="mt-2 text-sm font-semibold capitalize text-slate-600 dark:text-slate-300">
               {result.periodLabel}
             </p>
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+              Comparado con: {result.prevPeriodLabel}
+            </p>
           </div>
 
           <div className="flex flex-col items-stretch gap-3 sm:items-end">
             <div
-              className="inline-flex rounded-full border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-900/70"
+              className="inline-flex max-w-full flex-wrap justify-end gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-900/70"
               role="group"
               aria-label="Período del ranking"
             >
-              {PERIOD_OPTIONS.map((opt) => {
+              {LEADERBOARD_PERIOD_OPTIONS.map((opt) => {
                 const active = period === opt.id;
                 return (
                   <button
@@ -335,7 +608,7 @@ export function InventoryLeaderboardModule({
                     type="button"
                     onClick={() => setPeriod(opt.id)}
                     aria-pressed={active}
-                    className={`rounded-full px-4 py-1.5 text-[10px] font-black uppercase tracking-wider transition ${
+                    className={`rounded-full px-3 py-1.5 text-[9px] font-black uppercase tracking-wider transition sm:px-3.5 sm:text-[10px] ${
                       active
                         ? "bg-gradient-to-r from-[#16263F] to-blue-600 text-white shadow-sm"
                         : "text-slate-500 hover:text-[#16263F] dark:text-slate-400 dark:hover:text-slate-200"
@@ -360,38 +633,63 @@ export function InventoryLeaderboardModule({
           </div>
         </header>
 
-        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Total inventarios
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              Inventarios
             </p>
-            <p className="mt-1 text-2xl font-black tabular-nums text-[#16263F] dark:text-white">
+            <p className="mt-1 text-xl font-black tabular-nums text-[#16263F] dark:text-white sm:text-2xl">
               {formatNumber(result.teamTotals.inventarios)}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Total filas
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              Filas
             </p>
-            <p className="mt-1 text-2xl font-black tabular-nums text-[#16263F] dark:text-white">
+            <p className="mt-1 text-xl font-black tabular-nums text-[#16263F] dark:text-white sm:text-2xl">
               {formatNumber(result.teamTotals.filas)}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-              Líder del período
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              Bultos
             </p>
-            <p className="mt-1 flex items-center gap-2 text-lg font-black text-[#16263F] dark:text-white">
-              {leader && (leader.inventarios > 0 || leader.filas > 0) ? (
-                <>
-                  <Medal className="h-5 w-5 shrink-0 text-amber-500" aria-hidden />
-                  {leader.name}
-                </>
-              ) : (
-                <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                  Sin actividad aún
-                </span>
-              )}
+            <p className="mt-1 text-xl font-black tabular-nums text-[#16263F] dark:text-white sm:text-2xl">
+              {formatNumber(result.teamTotals.bultos)}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              <Activity className="h-3 w-3" aria-hidden />
+              En proceso
+            </p>
+            <p className="mt-1 text-xl font-black tabular-nums text-[#16263F] dark:text-white sm:text-2xl">
+              {formatNumber(result.teamTotals.enProceso)}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              <Zap className="h-3 w-3" aria-hidden />
+              Score líder
+            </p>
+            <p className="mt-1 text-xl font-black tabular-nums text-amber-600 dark:text-amber-400 sm:text-2xl">
+              {leader ? formatNumber(leader.score) : "0"}
+            </p>
+            <p className="mt-0.5 truncate text-[10px] font-semibold text-slate-400">
+              {leader && (leader.inventarios > 0 || leader.filas > 0)
+                ? leader.name
+                : "Sin actividad"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-4">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+              Variación equipo
+            </p>
+            <div className="mt-1.5">
+              <TrendBadge delta={result.teamTotals.deltaInventarios} />
+            </div>
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              Inv. vs período anterior
             </p>
           </div>
         </div>
@@ -415,6 +713,13 @@ export function InventoryLeaderboardModule({
           </div>
         </section>
 
+        <CompareChart
+          stats={result.stats}
+          maxInventarios={maxInventarios}
+          maxFilas={maxFilas}
+          maxBultos={maxBultos}
+        />
+
         <section className="space-y-4" aria-label="Detalle por inventariador">
           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
             Desglose detallado
@@ -427,14 +732,16 @@ export function InventoryLeaderboardModule({
               maxFilas={maxFilas}
               maxBultos={maxBultos}
               isCurrentUser={stat.id === currentUserId}
+              prevPeriodLabel={result.prevPeriodLabel}
             />
           ))}
         </section>
 
         <p className="mt-8 text-center text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">
-          Solo cuentan RAs donde el operador aparece como colaborador. Datos anteriores
-          al ingreso detallado pueden estar incompletos. En colaboración, todos los
-          participantes suman el crédito completo.
+          Score = inventarios×100 + filas×2 + bultos. El podio sigue ordenado por
+          inventarios (luego filas y bultos). La variación compara con{" "}
+          {result.prevPeriodLabel}. Solo cuentan RAs donde el operador aparece como
+          colaborador; en colaboración todos suman el crédito completo.
         </p>
       </div>
     </div>

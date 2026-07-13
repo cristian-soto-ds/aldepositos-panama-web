@@ -90,6 +90,17 @@ export function isAllowedInventoryOperator(
   ) != null;
 }
 
+/**
+ * Solo inventariadores del roster (Jahir, Claudio, Raul) pueden pausar/reanudar
+ * y recibir el prompt al salir. Monitores salen sin diálogo.
+ */
+export function canManageInventoryPause(
+  email?: string | null,
+  displayName?: string | null,
+): boolean {
+  return isAllowedInventoryOperator(email, displayName);
+}
+
 function toResolved(
   email: string,
   displayName: string | undefined,
@@ -162,21 +173,20 @@ export function resolveLiveInventoryOperator(
 }
 
 /**
- * Etiqueta «En curso» para un RA:
- * 1) inventariador permitido con presencia en vivo en ese RA
- * 2) RA en progreso con captura de un inventariador permitido (contributors / completedBy)
+ * Etiqueta «En curso» solo con presencia en vivo de un inventariador.
+ * No usa contributors: un RA a medias no debe parecer activo si nadie lo tiene abierto.
  */
 export function resolveActiveInventoryOperatorLabel(
-  task: Task,
+  _task: Task,
   operators: LivePresenceIdentity[],
 ): string | null {
   const live = resolveLiveInventoryOperator(operators);
-  if (live?.displayName) return live.displayName;
+  return live?.displayName ?? null;
+}
 
-  const activeStatus =
-    task.status === "in_progress" || task.status === "partial";
-  if (!activeStatus) return null;
-
+/** Nombre para badge «En pausa» (última atribución permitida, sin exigir presencia). */
+export function resolvePausedInventoryOperatorLabel(task: Task): string | null {
+  if (task.status !== "paused") return null;
   return resolveAllowedInventoryOperator(task)?.displayName ?? null;
 }
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  canManageInventoryPause,
   isAllowedInventoryOperator,
   resolveActiveInventoryOperatorLabel,
   resolveAllowedInventoryOperator,
   resolveLiveInventoryOperator,
+  resolvePausedInventoryOperatorLabel,
 } from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
@@ -15,11 +17,38 @@ function baseTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "1",
     ra: "63168",
-    status: "completed",
+    mainClient: "",
+    provider: "",
+    subClient: "",
+    brand: "",
     expectedBultos: 12,
+    originalExpectedBultos: 12,
+    expectedCbm: 0,
+    expectedWeight: 0,
+    notes: "",
+    currentBultos: 0,
+    status: "completed",
+    measureData: [],
+    weightMode: "per_bulto",
+    manualTotalWeight: 0,
     ...overrides,
   };
 }
+
+describe("canManageInventoryPause", () => {
+  it("permite solo a Jahir, Claudio y Raul", () => {
+    expect(canManageInventoryPause(null, "Jahir Jimenez")).toBe(true);
+    expect(canManageInventoryPause(null, "Claudio Guitierrez")).toBe(true);
+    expect(canManageInventoryPause(null, "Raul Lezcano")).toBe(true);
+  });
+
+  it("bloquea a monitores como Cristian Soto", () => {
+    expect(canManageInventoryPause("cristian@example.com", "Cristian Soto")).toBe(
+      false,
+    );
+    expect(canManageInventoryPause(null, "Operador X")).toBe(false);
+  });
+});
 
 describe("isAllowedInventoryOperator", () => {
   it("acepta Jahir, Claudio y Raul por nombre", () => {
@@ -64,7 +93,7 @@ describe("resolveActiveInventoryOperatorLabel", () => {
     expect(label).toBe("Jahir Jimenez");
   });
 
-  it("usa contributor permitido si el RA está en progreso sin presencia", () => {
+  it("no muestra En curso por contributors si nadie está en vivo", () => {
     const label = resolveActiveInventoryOperatorLabel(
       baseTask({
         status: "in_progress",
@@ -78,24 +107,59 @@ describe("resolveActiveInventoryOperatorLabel", () => {
       }),
       [],
     );
-    expect(label).toBe("Claudio Guitierrez");
+    expect(label).toBeNull();
   });
 
-  it("no muestra en curso si el RA está en progreso pero no es inventariador permitido", () => {
+  it("no muestra en curso si la presencia no es inventariador permitido", () => {
     const label = resolveActiveInventoryOperatorLabel(
       baseTask({
         status: "in_progress",
         contributors: [
           {
-            email: "cristian@example.com",
-            displayName: "Cristian Soto",
+            email: "claudio@example.com",
+            displayName: "Claudio",
             at: "2026-01-01T00:00:00Z",
           },
         ],
       }),
-      [],
+      [{ userKey: "cristian@example.com", name: "Cristian Soto" }],
     );
     expect(label).toBeNull();
+  });
+});
+
+describe("resolvePausedInventoryOperatorLabel", () => {
+  it("muestra inventariador atribuido en pausa sin presencia", () => {
+    const label = resolvePausedInventoryOperatorLabel(
+      baseTask({
+        status: "paused",
+        contributors: [
+          {
+            email: "jahir@example.com",
+            displayName: "Jahir",
+            at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
+    );
+    expect(label).toBe("Jahir Jimenez");
+  });
+
+  it("no aplica si el status no es paused", () => {
+    expect(
+      resolvePausedInventoryOperatorLabel(
+        baseTask({
+          status: "in_progress",
+          contributors: [
+            {
+              email: "jahir@example.com",
+              displayName: "Jahir",
+              at: "2026-01-01T00:00:00Z",
+            },
+          ],
+        }),
+      ),
+    ).toBeNull();
   });
 });
 

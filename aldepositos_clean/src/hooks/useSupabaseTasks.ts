@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import {
   isForeignLiveUpdate,
@@ -12,6 +12,12 @@ import {
   type TaskRealtimeChange,
 } from "@/lib/supabase";
 import { patchTasksList } from "@/lib/realtimePatch";
+import {
+  measureDataLooksEmpty,
+  mergeSlimTasksPreservingDetail,
+  tasksListFingerprint,
+  toListTask,
+} from "@/lib/taskListSlim";
 import type { Task } from "@/lib/types/task";
 
 type UseSupabaseTasksOptions = {
@@ -23,63 +29,104 @@ type UseSupabaseTasksOptions = {
 
 /**
  * Estado de tareas sincronizado con `public.tasks`:
- * - carga inicial al habilitar
+ * - lista slim (sin measureData) + detalle hidratado al abrir RA
  * - parche inmediato vía Supabase Realtime
- * - parche en vivo vía Broadcast (~80 ms) mientras otros escriben
+ * - live collab solo actualiza meta de lista (filas completa solo en el editor abierto)
  * - recarga completa debounced como respaldo
  */
 export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+  /** Reportes/despacho necesitan filas; no volver a slim en focus/realtime. */
+  const includeMeasureDataRef = useRef(false);
 
-  const reloadTasks = useCallback(async () => {
-    try {
-      const list = await fetchTasks();
-      setTasks((prev) => {
-        const prevJson = JSON.stringify(prev);
-        const nextJson = JSON.stringify(list);
-        return prevJson === nextJson ? prev : list;
-      });
-    } catch (e) {
-      console.error(e);
-      // eslint-disable-next-line no-alert
-      alert(
-        "No se pudieron cargar las órdenes desde Supabase. Revisa la tabla `tasks` y las políticas RLS.",
-      );
-    } finally {
-      setTasksLoading(false);
-    }
-  }, []);
+  const reloadTasks = useCallback(
+    async (options?: { includeMeasureData?: boolean }) => {
+      if (options?.includeMeasureData !== undefined) {
+        includeMeasureDataRef.current = options.includeMeasureData;
+      }
+      const include = includeMeasureDataRef.current;
+      try {
+        const list = await fetchTasks({ includeMeasureData: include });
+        setTasks((prev) => {
+          if (include) {
+            // Fingerprint no mira measureData: hay que aplicar el payload completo siempre.
+            return list;
+          }
+          const merged = mergeSlimTasksPreservingDetail(prev, list);
+          return tasksListFingerprint(prev) === tasksListFingerprint(merged)
+            ? prev
+            : merged;
+        });
+      } catch (e) {
+        console.error(e);
+        // eslint-disable-next-line no-alert
+        alert(
+          "No se pudieron cargar las órdenes desde Supabase. Revisa la tabla `tasks` y las políticas RLS.",
+        );
+      } finally {
+        setTasksLoading(false);
+      }
+    },
+    [],
+  );
 
   const applyRealtimeChange = useCallback((change: TaskRealtimeChange) => {
     setTasks((prev) => {
-      const patched = patchTasksList(prev, change);
+      let nextChange = change;
+      if (change.task) {
+        const existing = prev.find((t) => t.id === change.id);
+        const incoming = change.task;
+        const keepFull = includeMeasureDataRef.current;
+
+        if (
+          existing &&
+          !measureDataLooksEmpty(existing.measureData) &&
+          measureDataLooksEmpty(incoming.measureData)
+        ) {
+          nextChange = {
+            ...change,
+            task: { ...toListTask(incoming), measureData: existing.measureData },
+          };
+        } else if (keepFull || !measureDataLooksEmpty(incoming.measureData)) {
+          // Módulo que necesita filas, o el UPDATE ya trae measureData.
+          nextChange = { ...change, task: incoming };
+        } else {
+          nextChange = { ...change, task: toListTask(incoming) };
+        }
+      }
+      const patched = patchTasksList(prev, nextChange);
       return patched ?? prev;
     });
   }, []);
 
-  const applyLiveTaskUpdate = useCallback(
+  /** Meta de lista: no inyecta measureData completo en el array global. */
+  const applyLiveTaskMeta = useCallback(
     (update: {
       taskId: string;
-      measureData: unknown[];
       currentBultos: number;
       status: string;
     }) => {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === update.taskId
-            ? {
-                ...t,
-                measureData: update.measureData,
-                currentBultos: update.currentBultos,
-                status: update.status,
-                // Refleja "actualizado hace unos segundos" al instante, aunque el
-                // guardado en BD (que trae su propio updatedAt) llegue después.
-                updatedAt: new Date().toISOString(),
-              }
-            : t,
-        ),
-      );
+      setTasks((prev) => {
+        let changed = false;
+        const next = prev.map((t) => {
+          if (t.id !== update.taskId) return t;
+          if (
+            t.currentBultos === update.currentBultos &&
+            t.status === update.status
+          ) {
+            return t;
+          }
+          changed = true;
+          return {
+            ...t,
+            currentBultos: update.currentBultos,
+            status: update.status,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        return changed ? next : prev;
+      });
     },
     [],
   );
@@ -93,7 +140,9 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
     if (!enabled) return;
     return subscribeTasksRealtime({
       onChange: applyRealtimeChange,
-      onReload: reloadTasks,
+      onReload: () => {
+        void reloadTasks();
+      },
     });
   }, [enabled, reloadTasks, applyRealtimeChange]);
 
@@ -103,9 +152,9 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
     return subscribeLiveUpdates((update) => {
       if (update.type !== "task") return;
       if (!isForeignLiveUpdate(update, tabId)) return;
-      applyLiveTaskUpdate(update);
+      applyLiveTaskMeta(update);
     });
-  }, [enabled, userKey, applyLiveTaskUpdate]);
+  }, [enabled, userKey, applyLiveTaskMeta]);
 
   useEffect(() => {
     if (!enabled) return;

@@ -57,7 +57,7 @@ describe("computeInventoryLeaderboard active time KPI", () => {
     expect(jahir?.timedInventarios).toBe(0);
   });
 
-  it("calcula avgActiveMinutes excluyendo pausas y no cambia el sort por volumen", () => {
+  it("calcula avgActiveMinutes excluyendo pausas y el sort usa score de esfuerzo", () => {
     const result = computeInventoryLeaderboard(
       [
         task({
@@ -89,13 +89,13 @@ describe("computeInventoryLeaderboard active time KPI", () => {
           contributors: [
             {
               email: "claudio@example.com",
-              displayName: "Claudio Gutierrez",
+              displayName: "Claudio Guitierrez",
               at: "2026-07-12T12:00:00.000Z",
             },
           ],
           inventoryCompletedBy: {
             email: "claudio@example.com",
-            displayName: "Claudio Gutierrez",
+            displayName: "Claudio Guitierrez",
             at: "2026-07-12T12:00:00.000Z",
           },
         }),
@@ -104,9 +104,10 @@ describe("computeInventoryLeaderboard active time KPI", () => {
       now,
     );
 
-    // Ambos 1 inventario; Claudio gana por más filas/bultos (sort sin tiempo).
+    // Ambos 1 inventario; Claudio gana por más filas/bultos (mayor score).
     expect(result.stats[0]?.id).toBe("claudio");
     expect(result.stats[1]?.id).toBe("jahir");
+    expect(result.stats[0]!.score).toBeGreaterThan(result.stats[1]!.score);
 
     const jahir = result.stats.find((s) => s.id === "jahir");
     // 10:00 → 12:00 = 120 min wall − 30 min pausa = 90 min

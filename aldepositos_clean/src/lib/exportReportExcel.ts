@@ -1,5 +1,13 @@
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
 import type { Task } from "@/lib/types/task";
+
+type ExcelJSNamespace = typeof import("exceljs");
+
+async function loadExcelJS(): Promise<ExcelJSNamespace> {
+  const mod = await import("exceljs");
+  return ((mod as { default?: ExcelJSNamespace }).default ??
+    mod) as ExcelJSNamespace;
+}
 import logoMark from "@/assets/brand/logo-aldepositos.png";
 import {
   computeReportData,
@@ -816,7 +824,8 @@ export async function buildReportWorkbook(params: {
       day: "2-digit",
     });
 
-  const wb = new ExcelJS.Workbook();
+  const ExcelJSMod = await loadExcelJS();
+  const wb = new ExcelJSMod.Workbook();
   wb.creator = "ALDEPOSITOS";
   wb.created = new Date();
 

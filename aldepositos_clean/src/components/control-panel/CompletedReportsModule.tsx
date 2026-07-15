@@ -1,12 +1,19 @@
 ﻿"use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./reports-print.css";
 import { downloadReportExcel } from "@/lib/exportReportExcel";
 import { downloadReportPdfFromExcel } from "@/lib/exportReportPdfFromExcel";
 import { openReportPrintWindow } from "@/lib/buildReportPrintHtml";
 import type { Task as TaskModel } from "@/lib/types/task";
+import type { ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
 import { ReportPdfExportLayout } from "./ReportPdfExportLayout";
+import {
+  INVENTARIADORES,
+  resolveInventariadorId,
+} from "@/lib/inventariadoresRoster";
+import { getPeriodBounds, type LeaderboardPeriod } from "@/lib/inventoryLeaderboard";
+import { inventoryCompletedByLabel } from "@/lib/taskContributors";
 import {
   ArrowLeft,
   Check,
@@ -15,59 +22,135 @@ import {
   Eye,
   FileText,
   FileSpreadsheet,
+  ListFilter,
   Loader2,
   Printer,
   Search,
   Trash2,
 } from "lucide-react";
 
-type Task = {
-  id: string;
-  ra: string;
-  mainClient: string;
-  provider: string;
-  subClient: string;
-  brand: string;
-  expectedBultos: number;
-  originalExpectedBultos: number;
-  expectedCbm: number;
-  expectedWeight: number;
-  notes: string;
-  currentBultos: number;
-  status: string;
-  measureData: any[];
-  weightMode: string;
-  manualTotalWeight: number;
-  type?: "quick" | "detailed" | "airway";
-};
-
 type CompletedReportsModuleProps = {
-  tasks: Task[];
+  tasks: TaskModel[];
   /** Elimina un reporte/RA (abre el modal de confirmación global). */
   onDeleteTask?: (id: string) => void;
 };
+
+type TypeFilter = "Todos" | "quick" | "detailed";
+type StatusFilter = "Todos" | "completed" | "partial";
+type ModeFilter = "Todos" | ReferenceCaptureMode;
+type PeriodFilter = "Todos" | "day" | "week" | "month";
+type EmployeeFilter = "Todos" | "sin-atribuir" | string;
+
+function normalizeRaQuery(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .replace(/^RA-?/i, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function taskMatchesRa(task: TaskModel, query: string): boolean {
+  const q = normalizeRaQuery(query);
+  if (!q) return true;
+  const ra = normalizeRaQuery(task.ra);
+  return ra.includes(q);
+}
+
+function taskHasAnyAttribution(task: TaskModel): boolean {
+  if (task.inventoryCompletedBy?.email || task.inventoryCompletedBy?.displayName) {
+    return true;
+  }
+  return (task.contributors ?? []).length > 0;
+}
+
+function taskMatchesEmployee(task: TaskModel, employeeId: EmployeeFilter): boolean {
+  if (employeeId === "Todos") return true;
+  if (employeeId === "sin-atribuir") return !taskHasAnyAttribution(task);
+
+  const completedId = resolveInventariadorId(
+    task.inventoryCompletedBy?.displayName,
+    task.inventoryCompletedBy?.email,
+  );
+  if (completedId === employeeId) return true;
+
+  return (task.contributors ?? []).some(
+    (c) => resolveInventariadorId(c.displayName, c.email) === employeeId,
+  );
+}
+
+function taskActivityDate(task: TaskModel): Date | null {
+  const iso = task.inventoryCompletedBy?.at || task.updatedAt;
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function taskMatchesPeriod(task: TaskModel, period: PeriodFilter): boolean {
+  if (period === "Todos") return true;
+  const activity = taskActivityDate(task);
+  if (!activity) return false;
+  const { start, end } = getPeriodBounds(period as LeaderboardPeriod);
+  return activity.getTime() >= start.getTime() && activity.getTime() < end.getTime();
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      <label className="mb-1 ml-1 text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        {label}
+      </label>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="panel-input w-full cursor-pointer appearance-none rounded-xl py-2.5 pl-4 pr-10 text-xs font-bold uppercase sm:w-44"
+        >
+          {children}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+      </div>
+    </div>
+  );
+}
 
 export function CompletedReportsModule({
   tasks,
   onDeleteTask,
 }: CompletedReportsModuleProps) {
-  const completedTasks = tasks.filter(
-    (t) => t.status === "completed" || t.status === "partial",
+  const completedTasks = useMemo(
+    () => tasks.filter((t) => t.status === "completed" || t.status === "partial"),
+    [tasks],
   );
 
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [isViewingReports, setIsViewingReports] = useState(false);
-  const [singleViewTask, setSingleViewTask] = useState<Task | null>(null);
+  const [singleViewTask, setSingleViewTask] = useState<TaskModel | null>(null);
 
+  const [raQuery, setRaQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [clientFilter, setClientFilter] = useState("Todos");
-  const [typeFilter, setTypeFilter] = useState<"Todos" | "quick" | "detailed">(
-    "Todos",
-  );
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("Todos");
+  const [employeeFilter, setEmployeeFilter] = useState<EmployeeFilter>("Todos");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Todos");
+  const [providerFilter, setProviderFilter] = useState("Todos");
+  const [modeFilter, setModeFilter] = useState<ModeFilter>("Todos");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("Todos");
+
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  let tasksToPrint: Task[] = [];
+  let tasksToPrint: TaskModel[] = [];
   if (singleViewTask) {
     tasksToPrint = [singleViewTask];
   } else if (isViewingReports && selectedReportIds.length > 0) {
@@ -102,13 +185,87 @@ export function CompletedReportsModule({
     if (!reportViewId) setExportError(null);
   }, [reportViewId]);
 
+  const clients = useMemo(
+    () => [
+      ...new Set(completedTasks.map((t) => t.mainClient || "Sin Cliente")),
+    ],
+    [completedTasks],
+  );
+
+  const providers = useMemo(
+    () => [
+      ...new Set(
+        completedTasks
+          .map((t) => String(t.provider ?? "").trim() || "Sin proveedor")
+          .filter(Boolean),
+      ),
+    ],
+    [completedTasks],
+  );
+
+  const displayedTasks = useMemo(() => {
+    let list = completedTasks;
+    if (raQuery.trim()) {
+      list = list.filter((t) => taskMatchesRa(t, raQuery));
+    }
+    if (clientFilter !== "Todos") {
+      list = list.filter(
+        (t) => (t.mainClient || "Sin Cliente") === clientFilter,
+      );
+    }
+    if (typeFilter !== "Todos") {
+      list = list.filter((t) =>
+        typeFilter === "quick"
+          ? t.type === "quick" || t.type === "airway" || !t.type
+          : t.type === typeFilter,
+      );
+    }
+    if (employeeFilter !== "Todos") {
+      list = list.filter((t) => taskMatchesEmployee(t, employeeFilter));
+    }
+    if (statusFilter !== "Todos") {
+      list = list.filter((t) => t.status === statusFilter);
+    }
+    if (providerFilter !== "Todos") {
+      list = list.filter(
+        (t) =>
+          (String(t.provider ?? "").trim() || "Sin proveedor") === providerFilter,
+      );
+    }
+    if (modeFilter !== "Todos") {
+      list = list.filter((t) => t.referenceMode === modeFilter);
+    }
+    if (periodFilter !== "Todos") {
+      list = list.filter((t) => taskMatchesPeriod(t, periodFilter));
+    }
+    return list;
+  }, [
+    completedTasks,
+    raQuery,
+    clientFilter,
+    typeFilter,
+    employeeFilter,
+    statusFilter,
+    providerFilter,
+    modeFilter,
+    periodFilter,
+  ]);
+
+  useEffect(() => {
+    const visible = new Set(displayedTasks.map((t) => t.id));
+    setSelectedReportIds((prev) => {
+      const next = prev.filter((id) => visible.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [displayedTasks]);
+
   const handleDownloadPdf = async () => {
     if (tasksToPrint.length === 0) return;
     setExportError(null);
     setIsDownloadingPdf(true);
     try {
       await downloadReportPdfFromExcel({
-        tasks: tasksToPrint as TaskModel[],
+        tasks: tasksToPrint,
       });
     } catch (e) {
       console.error("[Reports PDF] Fallo al generar PDF:", e);
@@ -120,13 +277,13 @@ export function CompletedReportsModule({
     }
   };
 
-  const handleDownloadExcel = async (tasks: Task[]) => {
-    if (tasks.length === 0) return;
+  const handleDownloadExcel = async (reportTasks: TaskModel[]) => {
+    if (reportTasks.length === 0) return;
     setExportError(null);
     setIsDownloadingExcel(true);
     try {
       await downloadReportExcel({
-        tasks: tasks as TaskModel[],
+        tasks: reportTasks,
       });
     } catch (e) {
       console.error("[Reports Excel] Fallo al generar Excel:", e);
@@ -145,26 +302,8 @@ export function CompletedReportsModule({
       month: "2-digit",
       day: "2-digit",
     });
-    openReportPrintWindow(tasksToPrint as TaskModel[], currentDate);
+    openReportPrintWindow(tasksToPrint, currentDate);
   };
-
-  const clients = [
-    ...new Set(completedTasks.map((t) => t.mainClient || "Sin Cliente")),
-  ];
-
-  let displayedTasks = completedTasks;
-  if (clientFilter !== "Todos") {
-    displayedTasks = displayedTasks.filter(
-      (t) => (t.mainClient || "Sin Cliente") === clientFilter,
-    );
-  }
-  if (typeFilter !== "Todos") {
-    displayedTasks = displayedTasks.filter((t) =>
-      typeFilter === "quick"
-        ? t.type === "quick" || t.type === "airway" || !t.type
-        : t.type === typeFilter,
-    );
-  }
 
   const toggleSelection = (id: string) => {
     setSelectedReportIds((prev) =>
@@ -173,7 +312,8 @@ export function CompletedReportsModule({
   };
 
   const isAllSelected =
-    displayedTasks.length > 0 && selectedReportIds.length === displayedTasks.length;
+    displayedTasks.length > 0 &&
+    selectedReportIds.length === displayedTasks.length;
 
   const handleSelectAll = () => {
     if (isAllSelected) {
@@ -181,6 +321,26 @@ export function CompletedReportsModule({
     } else {
       setSelectedReportIds(displayedTasks.map((t) => t.id));
     }
+  };
+
+  const activeFiltersCount = [
+    clientFilter,
+    typeFilter,
+    employeeFilter,
+    statusFilter,
+    providerFilter,
+    modeFilter,
+    periodFilter,
+  ].filter((v) => v !== "Todos").length;
+
+  const clearSelectFilters = () => {
+    setClientFilter("Todos");
+    setTypeFilter("Todos");
+    setEmployeeFilter("Todos");
+    setStatusFilter("Todos");
+    setProviderFilter("Todos");
+    setModeFilter("Todos");
+    setPeriodFilter("Todos");
   };
 
   if (tasksToPrint.length > 0) {
@@ -191,7 +351,7 @@ export function CompletedReportsModule({
     });
 
     return (
-      <div className="relative flex h-full w-full animate-fade flex-col bg-[var(--panel-bg-subtle)]">
+      <div className="relative flex h-full min-h-0 w-full animate-fade flex-col bg-[var(--panel-bg-subtle)]">
         <div className="reports-print-toolbar panel-card sticky top-0 z-50 flex shrink-0 items-center justify-between border-b-0 p-4 md:px-8">
           <button
             type="button"
@@ -252,28 +412,30 @@ export function CompletedReportsModule({
 
         <div
           id="reports-print-root"
-          className="custom-scrollbar flex flex-1 flex-col items-center gap-8 overflow-y-auto bg-[var(--panel-bg)] p-4 md:p-8"
+          className="custom-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-[var(--panel-bg)] p-4 md:p-8"
         >
-          {tasksToPrint.map((t) => (
-            <div
-              key={t.id}
-              className="report-preview-frame print-container w-full max-w-[8.5in]"
-            >
-              <ReportPdfExportLayout
-                task={t as TaskModel}
-                currentDate={currentDate}
-                compact={false}
-              />
-            </div>
-          ))}
+          <div className="mx-auto flex w-full max-w-[210mm] flex-col gap-8 pb-24">
+            {tasksToPrint.map((t) => (
+              <div
+                key={t.id}
+                className="report-preview-frame print-container w-full"
+              >
+                <ReportPdfExportLayout
+                  task={t}
+                  currentDate={currentDate}
+                  compact={false}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full flex flex-col animate-fade relative">
-      <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+    <div className="relative flex h-full min-h-0 w-full flex-col animate-fade">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col">
         {exportError && (
           <div
             role="status"
@@ -288,18 +450,82 @@ export function CompletedReportsModule({
             REPORTES
           </h2>
 
-          <div className="panel-card flex flex-col items-center justify-between gap-4 rounded-[1.5rem] p-4 md:flex-row">
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-              {clients.length > 0 && (
-                <div className="flex flex-col">
-                  <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 ml-1">
-                    Filtrar por Cliente
-                  </label>
-                  <div className="relative">
-                    <select
+          <div className="panel-card flex flex-col gap-3 rounded-[1.5rem] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  aria-hidden
+                />
+                <input
+                  type="search"
+                  value={raQuery}
+                  onChange={(e) => setRaQuery(e.target.value)}
+                  placeholder="Buscar por RA…"
+                  className="panel-input w-full rounded-xl py-2.5 pl-10 pr-4 text-sm font-semibold"
+                  aria-label="Buscar por número de RA"
+                />
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-expanded={filtersOpen}
+                  aria-controls="reports-filters-panel"
+                  title="Filtros"
+                  className={`relative flex h-11 w-11 items-center justify-center rounded-xl border transition-colors ${
+                    filtersOpen || activeFiltersCount > 0
+                      ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700/70 dark:bg-blue-950/50 dark:text-blue-300"
+                      : "border-slate-200 bg-[var(--panel-surface)] text-slate-600 hover:border-slate-300 hover:bg-[var(--panel-surface-muted)] dark:border-slate-600 dark:text-slate-300"
+                  }`}
+                >
+                  <ListFilter className="h-5 w-5" strokeWidth={2.25} />
+                  {activeFiltersCount > 0 ? (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white">
+                      {activeFiltersCount}
+                    </span>
+                  ) : null}
+                </button>
+
+                {displayedTasks.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleSelectAll}
+                    className="flex-1 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/55 dark:text-blue-200 dark:hover:bg-blue-900/45 sm:flex-none"
+                  >
+                    {isAllSelected ? "Desmarcar Resultados" : "Seleccionar Resultados"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {filtersOpen ? (
+              <div
+                id="reports-filters-panel"
+                className="flex flex-col gap-3 border-t border-slate-100 pt-3 dark:border-slate-700/60"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    Filtros
+                  </p>
+                  {activeFiltersCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={clearSelectFilters}
+                      className="text-[10px] font-bold uppercase tracking-widest text-blue-600 transition-colors hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                    >
+                      Limpiar filtros
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {clients.length > 0 && (
+                    <FilterSelect
+                      label="Cliente"
                       value={clientFilter}
-                      onChange={(e) => setClientFilter(e.target.value)}
-                      className="panel-input w-full cursor-pointer appearance-none rounded-xl py-2.5 pl-4 pr-10 text-xs font-bold uppercase sm:w-48"
+                      onChange={setClientFilter}
                     >
                       <option value="Todos">TODOS LOS CLIENTES</option>
                       {clients.map((c) => (
@@ -307,46 +533,86 @@ export function CompletedReportsModule({
                           {c}
                         </option>
                       ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
-                  </div>
-                </div>
-              )}
+                    </FilterSelect>
+                  )}
 
-              <div className="flex flex-col">
-                <label className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-1 ml-1">
-                  Tipo de Ingreso
-                </label>
-                <div className="relative">
-                  <select
+                  <FilterSelect
+                    label="Tipo de Ingreso"
                     value={typeFilter}
-                    onChange={(e) =>
-                      setTypeFilter(e.target.value as typeof typeFilter)
-                    }
-                    className="panel-input w-full cursor-pointer appearance-none rounded-xl py-2.5 pl-4 pr-10 text-xs font-bold uppercase sm:w-48"
+                    onChange={(v) => setTypeFilter(v as TypeFilter)}
                   >
                     <option value="Todos">TODOS LOS MÓDULOS</option>
                     <option value="quick">Ingreso Rápido</option>
                     <option value="detailed">Ingreso Detallado</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+                  </FilterSelect>
+
+                  <FilterSelect
+                    label="Empleado"
+                    value={employeeFilter}
+                    onChange={setEmployeeFilter}
+                  >
+                    <option value="Todos">TODOS</option>
+                    {INVENTARIADORES.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
+                    <option value="sin-atribuir">Sin atribuir</option>
+                  </FilterSelect>
+
+                  <FilterSelect
+                    label="Estado"
+                    value={statusFilter}
+                    onChange={(v) => setStatusFilter(v as StatusFilter)}
+                  >
+                    <option value="Todos">TODOS</option>
+                    <option value="completed">Completado</option>
+                    <option value="partial">Parcial</option>
+                  </FilterSelect>
+
+                  {providers.length > 0 && (
+                    <FilterSelect
+                      label="Proveedor"
+                      value={providerFilter}
+                      onChange={setProviderFilter}
+                    >
+                      <option value="Todos">TODOS</option>
+                      {providers.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </FilterSelect>
+                  )}
+
+                  <FilterSelect
+                    label="Modo captura"
+                    value={modeFilter}
+                    onChange={(v) => setModeFilter(v as ModeFilter)}
+                  >
+                    <option value="Todos">TODOS</option>
+                    <option value="with">Con referencias</option>
+                    <option value="without">Sin referencias</option>
+                    <option value="palletized">Paletizado</option>
+                  </FilterSelect>
+
+                  <FilterSelect
+                    label="Período"
+                    value={periodFilter}
+                    onChange={(v) => setPeriodFilter(v as PeriodFilter)}
+                  >
+                    <option value="Todos">TODOS</option>
+                    <option value="day">Hoy</option>
+                    <option value="week">Esta semana</option>
+                    <option value="month">Este mes</option>
+                  </FilterSelect>
                 </div>
               </div>
-            </div>
-
-            {displayedTasks.length > 0 && (
-              <button
-                type="button"
-                onClick={handleSelectAll}
-                className="w-full shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800/60 dark:bg-blue-950/55 dark:text-blue-200 dark:hover:bg-blue-900/45 md:w-auto"
-              >
-                {isAllSelected ? "Desmarcar Resultados" : "Seleccionar Resultados"}
-              </button>
-            )}
+            ) : null}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-24">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2 pb-24">
           <div className="grid grid-cols-1 gap-3 md:gap-4 px-2 md:px-0">
             {displayedTasks.length === 0 ? (
               <div className="panel-card flex flex-col items-center rounded-[2rem] p-8 text-center font-bold text-slate-400 dark:text-slate-500 md:p-16">
@@ -362,6 +628,7 @@ export function CompletedReportsModule({
                     : t.type === "detailed"
                       ? "DETALLADO"
                       : "AÉREA";
+                const completedBy = inventoryCompletedByLabel(t);
 
                 return (
                   <div
@@ -428,6 +695,11 @@ export function CompletedReportsModule({
                           {t.provider}
                           {t.brand ? ` — ${t.brand}` : ""}
                         </p>
+                        {completedBy ? (
+                          <p className="mt-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                            Por {completedBy}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="text-left md:text-right flex items-center gap-2 md:gap-4 justify-end mt-2 md:mt-0">
                         <button
@@ -484,9 +756,11 @@ export function CompletedReportsModule({
             <div className="h-6 w-[1px] bg-slate-600" />
             <button
               type="button"
-              onClick={() => void handleDownloadExcel(
-                completedTasks.filter((t) => selectedReportIds.includes(t.id)),
-              )}
+              onClick={() =>
+                void handleDownloadExcel(
+                  completedTasks.filter((t) => selectedReportIds.includes(t.id)),
+                )
+              }
               disabled={isDownloadingExcel}
               className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-colors shadow-lg shadow-emerald-500/30 disabled:opacity-70"
             >

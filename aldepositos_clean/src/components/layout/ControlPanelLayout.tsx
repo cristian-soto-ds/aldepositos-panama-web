@@ -7,12 +7,12 @@ import {
   Truck,
   LayoutDashboard,
   Box,
-  FileText,
   X,
   ClipboardList,
   PackageSearch,
   Settings,
   UserRound,
+  UserCheck,
   BookMarked,
   HandHelping,
   MoreHorizontal,
@@ -149,15 +149,6 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<NavIcon Icon={FileText} />}
-            text="Ingreso Detallado"
-            active={currentView === "detailed-entry"}
-            onClick={() => {
-              setCurrentView("detailed-entry");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
             icon={<NavIcon Icon={HandHelping} />}
             text="Orden de Recolección"
             active={currentView === "collection-orders"}
@@ -167,7 +158,7 @@ export function ControlPanelLayout({
             }}
           />
           <NavItem
-            icon={<NavIcon Icon={ClipboardList} />}
+            icon={<NavIcon Icon={UserCheck} />}
             text="Recepcionista"
             active={currentView === "receptionist"}
             onClick={() => {

@@ -107,7 +107,7 @@ export function ReportPdfExportLayout({
             fontSize: fs,
             lineHeight: 1.45,
             padding: `${padY}px ${padX}px`,
-            marginBottom: compact ? 20 : 0,
+            marginBottom: compact ? 20 : 24,
             border: "none",
             position: "relative",
             overflow: "visible",

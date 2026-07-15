@@ -84,6 +84,52 @@ export type LeaderboardResult = {
 
 const TZ = "America/Panama";
 
+/**
+ * Pesos del ranking por esfuerzo de captura.
+ * - Con refs: medir 1 caja/referencia cuenta; bultos iguales aportan poco.
+ * - Sin refs: cada fila ≈ una caja medida (más esfuerzo).
+ * - Paletizado: intermedio.
+ */
+export const LEADERBOARD_WEIGHTS = {
+  inventariosCompleted: 40,
+  modes: {
+    with: { fila: 12, bulto: 0.25 },
+    without: { fila: 15, bulto: 0.5 },
+    palletized: { fila: 10, bulto: 0.4 },
+    default: { fila: 10, bulto: 0.5 },
+  },
+} as const;
+
+export type EffortModeKey = keyof typeof LEADERBOARD_WEIGHTS.modes;
+
+export function effortWeightsForTask(task: Pick<Task, "referenceMode">): {
+  fila: number;
+  bulto: number;
+} {
+  const mode = task.referenceMode;
+  if (mode === "with") return LEADERBOARD_WEIGHTS.modes.with;
+  if (mode === "without") return LEADERBOARD_WEIGHTS.modes.without;
+  if (mode === "palletized") return LEADERBOARD_WEIGHTS.modes.palletized;
+  return LEADERBOARD_WEIGHTS.modes.default;
+}
+
+/** Esfuerzo de un RA: filas×wFila + bultos×wBulto según modo. */
+export function effortForTask(
+  filas: number,
+  bultos: number,
+  task: Pick<Task, "referenceMode">,
+): number {
+  const w = effortWeightsForTask(task);
+  return filas * w.fila + bultos * w.bulto;
+}
+
+/** Score total = inventarios×40 + esfuerzo acumulado. */
+export function computeScore(inventarios: number, esfuerzo: number): number {
+  const raw =
+    inventarios * LEADERBOARD_WEIGHTS.inventariosCompleted + esfuerzo;
+  return Math.round(raw * 10) / 10;
+}
+
 function hasAnyRowData(row: Record<string, unknown>): boolean {
   const keys = [
     "referencia",
@@ -302,10 +348,6 @@ function isInPeriod(date: Date, start: Date, end: Date): boolean {
   return date.getTime() >= start.getTime() && date.getTime() < end.getTime();
 }
 
-function computeScore(inventarios: number, filas: number, bultos: number): number {
-  return inventarios * 100 + filas * 2 + bultos;
-}
-
 function pctShare(part: number, total: number): number {
   if (total <= 0) return 0;
   return Math.round((part / total) * 1000) / 10;
@@ -342,6 +384,8 @@ type MutableStats = {
   inventarios: number;
   filas: number;
   bultos: number;
+  /** Suma de esfuerzo por RA (filas/bultos ponderados por modo). */
+  esfuerzo: number;
   enProceso: number;
   activeMsSum: number;
   timedInventarios: number;
@@ -361,6 +405,7 @@ function emptyStatsMap(bucketCount: number): Map<string, MutableStats> {
       inventarios: 0,
       filas: 0,
       bultos: 0,
+      esfuerzo: 0,
       enProceso: 0,
       activeMsSum: 0,
       timedInventarios: 0,
@@ -401,6 +446,7 @@ function creditTaskToMap(
 
     const filas = countTaskRows(task);
     const bultos = task.currentBultos ?? 0;
+    const esfuerzo = effortForTask(filas, bultos, task);
     const isCompleted = task.status === "completed";
     const inProgress = isInProgressStatus(task.status);
     const isQuick = task.type === "quick" || task.type === "airway" || !task.type;
@@ -423,6 +469,7 @@ function creditTaskToMap(
       const stats = map.get(invId)!;
       stats.filas += filas;
       stats.bultos += bultos;
+      stats.esfuerzo += esfuerzo;
       if (isCompleted) {
         stats.inventarios += 1;
         if (isQuick) stats.quickCount += 1;
@@ -460,6 +507,7 @@ type RawCounts = {
   inventarios: number;
   filas: number;
   bultos: number;
+  esfuerzo: number;
   enProceso: number;
   activeMsSum: number;
   timedInventarios: number;
@@ -528,16 +576,17 @@ export function computeInventoryLeaderboard(
       deltaInventarios: s.inventarios - p.inventarios,
       deltaFilas: s.filas - p.filas,
       deltaBultos: s.bultos - p.bultos,
-      score: computeScore(s.inventarios, s.filas, s.bultos),
+      score: computeScore(s.inventarios, s.esfuerzo),
     };
   }).sort((a, b) => {
-    if (b.inventarios !== a.inventarios) return b.inventarios - a.inventarios;
+    if (b.score !== a.score) return b.score - a.score;
     if (b.filas !== a.filas) return b.filas - a.filas;
+    if (b.inventarios !== a.inventarios) return b.inventarios - a.inventarios;
     return b.bultos - a.bultos;
   });
 
   const leaderId =
-    sorted[0] && (sorted[0].inventarios > 0 || sorted[0].filas > 0)
+    sorted[0] && sorted[0].score > 0
       ? sorted[0].id
       : null;
 

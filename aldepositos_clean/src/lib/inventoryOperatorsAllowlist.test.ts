@@ -297,6 +297,7 @@ describe("applyInventoryAttribution", () => {
 
   it("no muta contributors si el usuario no está en la allowlist", () => {
     const task = baseTask({
+      status: "in_progress",
       contributors: [
         {
           email: "jahir@example.com",
@@ -314,5 +315,80 @@ describe("applyInventoryAttribution", () => {
     expect(next.contributors).toHaveLength(1);
     expect(next.contributors?.[0]?.displayName).toBe("Jahir");
     expect(next.inventoryCompletedBy).toBeUndefined();
+  });
+
+  it("inventariador B no pisa atribución al corregir RA ya completado por A", () => {
+    const task = baseTask({
+      status: "completed",
+      contributors: [
+        {
+          email: "raul@example.com",
+          displayName: "Raul Lezcano",
+          at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      inventoryCompletedBy: {
+        email: "raul@example.com",
+        displayName: "Raul Lezcano",
+        at: "2026-01-01T00:00:00Z",
+      },
+    });
+    const next = applyInventoryAttribution(task, {
+      userKey: "jahir@example.com",
+      userLabel: "Jahir Jimenez",
+      hasCapture: true,
+      isCompleted: true,
+      priorStatus: "completed",
+    });
+    expect(next.inventoryCompletedBy?.displayName).toBe("Raul Lezcano");
+    expect(next.contributors).toHaveLength(1);
+    expect(next.contributors?.[0]?.displayName).toBe("Raul Lezcano");
+    expect(inventoryCompletedByLabel(next)).toBe("Raul Lezcano");
+  });
+
+  it("supervisor corrige medidas sin alterar atribución (status ya completed en withSession)", () => {
+    const task = baseTask({
+      status: "completed",
+      currentBultos: 30,
+      contributors: [
+        {
+          email: "claudio@example.com",
+          displayName: "Claudio Guitierrez",
+          at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      inventoryCompletedBy: {
+        email: "claudio@example.com",
+        displayName: "Claudio Guitierrez",
+        at: "2026-01-01T00:00:00Z",
+      },
+    });
+    const next = applyInventoryAttribution(task, {
+      userKey: "cristian@example.com",
+      userLabel: "Cristian Soto",
+      hasCapture: true,
+      isCompleted: true,
+      priorStatus: "completed",
+    });
+    expect(next.inventoryCompletedBy?.displayName).toBe("Claudio Guitierrez");
+    expect(next.contributors).toHaveLength(1);
+    expect(inventoryCompletedByLabel(next)).toBe("Claudio Guitierrez");
+  });
+
+  it("aún atribuye al completar por primera vez aunque withSession ya sea completed", () => {
+    const task = baseTask({
+      status: "completed",
+      contributors: undefined,
+      inventoryCompletedBy: undefined,
+    });
+    const next = applyInventoryAttribution(task, {
+      userKey: "jahir@example.com",
+      userLabel: "Jahir Jimenez",
+      hasCapture: true,
+      isCompleted: true,
+      priorStatus: "in_progress",
+    });
+    expect(next.inventoryCompletedBy?.displayName).toBe("Jahir Jimenez");
+    expect(next.contributors).toHaveLength(1);
   });
 });

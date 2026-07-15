@@ -77,6 +77,11 @@ export function ManualEntryModal({
     const ra = formData.ra.toString().trim();
     if (!ra) return;
 
+    const moduleType =
+      formData.module === "detailed" || defaultModule === "detailed"
+        ? "quick"
+        : ((formData.module || defaultModule || "quick") as Task["type"]);
+
     const taskData: Task = isEditing && initialData
       ? {
           // Preservar inventario, atribución, fotos y metadatos no editables en el modal.
@@ -93,7 +98,7 @@ export function ManualEntryModal({
           expectedCbm: parseFloat(formData.expectedCbm) || 0,
           expectedWeight: parseFloat(formData.expectedWeight) || 0,
           notes: formData.notes.trim() || "",
-          type: formData.module as Task["type"],
+          type: moduleType,
         }
       : (() => {
           const emptyFields = emptyManualRaTaskFields();
@@ -109,7 +114,7 @@ export function ManualEntryModal({
             expectedCbm: emptyFields.expectedCbm,
             expectedWeight: emptyFields.expectedWeight,
             notes: emptyFields.notes,
-            type: defaultModule as Task["type"],
+            type: moduleType,
             currentBultos: 0,
             status: "pending",
             measureData: [],
@@ -213,12 +218,11 @@ export function ManualEntryModal({
                   </label>
                   <select
                     name="module"
-                    value={formData.module}
+                    value={formData.module === "detailed" ? "quick" : formData.module}
                     onChange={handleChange}
                     className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100 cursor-pointer"
                   >
                     <option value="quick">Ingreso Rápido</option>
-                    <option value="detailed">Ingreso Detallado</option>
                   </select>
                 </div>
               </div>

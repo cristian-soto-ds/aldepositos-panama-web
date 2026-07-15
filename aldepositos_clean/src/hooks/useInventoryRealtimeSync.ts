@@ -9,6 +9,7 @@ import {
   type TaskLiveUpdate,
 } from "@/lib/liveCollaboration";
 import type { Task } from "@/lib/types/task";
+import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 
 type InventoryRealtimeSyncOptions<TRow> = {
   tasks: Task[];
@@ -191,6 +192,29 @@ export function useInventoryRealtimeSync<TRow>({
     const remote = tasks.find((t) => t.id === selectedId);
     if (!remote) {
       onTaskRemoved?.();
+      return;
+    }
+
+    // Lista slim (sin measureData): no pisar filas locales del editor abierto.
+    if (measureDataLooksEmpty(remote.measureData)) {
+      setSelectedTask((prev) => {
+        if (!prev || prev.id !== remote.id) return prev;
+        if (
+          prev.status === remote.status &&
+          prev.currentBultos === remote.currentBultos &&
+          prev.expectedBultos === remote.expectedBultos &&
+          prev.updatedAt === remote.updatedAt
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          status: remote.status,
+          currentBultos: remote.currentBultos,
+          expectedBultos: remote.expectedBultos,
+          updatedAt: remote.updatedAt,
+        };
+      });
       return;
     }
 

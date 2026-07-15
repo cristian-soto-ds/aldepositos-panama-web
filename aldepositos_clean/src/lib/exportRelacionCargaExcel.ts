@@ -1,4 +1,12 @@
-import ExcelJS from "exceljs";
+import type ExcelJS from "exceljs";
+
+type ExcelJSNamespace = typeof import("exceljs");
+
+async function loadExcelJS(): Promise<ExcelJSNamespace> {
+  const mod = await import("exceljs");
+  return ((mod as { default?: ExcelJSNamespace }).default ??
+    mod) as ExcelJSNamespace;
+}
 
 const COLS = 11;
 const HEADER_BLUE = "FF16263F";
@@ -109,7 +117,8 @@ export async function downloadRelacionCargaExcel(params: {
     fileBaseName,
   } = params;
 
-  const wb = new ExcelJS.Workbook();
+  const ExcelJSMod = await loadExcelJS();
+  const wb = new ExcelJSMod.Workbook();
   wb.creator = "ALDEPOSITOS";
   wb.created = new Date();
 

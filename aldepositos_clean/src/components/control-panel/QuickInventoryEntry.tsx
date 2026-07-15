@@ -1,15 +1,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowRightLeft,
   Box,
   Check,
   CheckCircle2,
   Circle,
-  Clock,
   Edit,
   Download,
   LayoutGrid,
@@ -22,7 +21,23 @@ import {
   Smartphone,
   Trash2,
 } from "lucide-react";
-import { ReekonCaptureView } from "@/components/control-panel/ReekonCaptureView";
+import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
+import { useSharedNow } from "@/hooks/useSharedNow";
+
+const ReekonCaptureView = dynamic(
+  () =>
+    import("@/components/control-panel/ReekonCaptureView").then(
+      (m) => m.ReekonCaptureView,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 text-sm font-semibold text-slate-500">
+        Cargando Reekon…
+      </div>
+    ),
+  },
+);
 import {
   SyncStatusBadge,
   type AutosaveState,
@@ -68,17 +83,13 @@ import {
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
-import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
-import {
-  canManageInventoryPause,
-  resolveActiveInventoryOperatorLabel,
-  resolveLiveInventoryOperator,
-  resolvePausedInventoryOperatorLabel,
-} from "@/lib/inventoryOperatorsAllowlist";
+import { canManageInventoryPause } from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
 } from "@/lib/taskContributors";
+import { fetchTaskById } from "@/lib/supabase";
+import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 import {
   applyInventorySessionOnSave,
   pauseInventory,
@@ -100,8 +111,7 @@ import {
   normalizePartNumber,
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
-import { formatRaFieldLabel, raClientGroupLabel } from "@/lib/collectionOrderToTask";
-import { formatRelativeTime } from "@/lib/relativeTime";
+import { raClientGroupLabel } from "@/lib/collectionOrderToTask";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -112,6 +122,8 @@ type QuickInventoryEntryProps = {
   onTransferTask: (task: Task, newType: "quick" | "detailed") => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
+  /** Fusiona el detalle hidratado (measureData) en el estado del panel. */
+  onHydrateTask?: (task: Task) => void;
   /** Si se envía, el panel principal puede mostrar quién tiene un RA abierto (pestañas mismo equipo). */
   presenceUserKey?: string | null;
   presenceUserLabel?: string | null;
@@ -224,9 +236,14 @@ type QuickDraft = {
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
   `${kind}_inventory_draft_v1_${taskId}`;
 
-/** Ingreso rápido incluye RAs legacy tipo `airway` (módulo eliminado). */
+/** Ingreso rápido incluye RAs legacy tipo `airway` / `detailed` (módulos eliminados). */
 function isQuickInventoryTask(t: Task): boolean {
-  return !t.type || t.type === "quick" || t.type === "airway";
+  return (
+    !t.type ||
+    t.type === "quick" ||
+    t.type === "airway" ||
+    t.type === "detailed"
+  );
 }
 
 function taskDraftKind(task: Pick<Task, "type"> | null | undefined): "quick" | "airway" {
@@ -252,10 +269,15 @@ function createEmptyMeasureRow(): MeasureRow {
   };
 }
 const CATALOG_DEBOUNCE_MS = 500;
-const QUICK_AUTOSAVE_MS = 200;
+const QUICK_AUTOSAVE_MS = 1100;
+/** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
+const QUICK_DRAFT_PERSIST_MS = 2500;
+const QUICK_PRESENCE_HEARTBEAT_MS = 28_000;
 // Reintentos con backoff cuando el guardado en el servidor falla (red caída, etc.).
 const AUTOSAVE_RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000];
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
+const RA_LIST_VIRTUALIZE_THRESHOLD = 80;
+const RA_LIST_PAGE_SIZE = 60;
 
 function CaptureLayoutToggle({
   layout,
@@ -291,27 +313,6 @@ function CaptureLayoutToggle({
         Reekon
       </button>
     </div>
-  );
-}
-
-/** Etiqueta "hace X" con la última actualización de la RA (se refresca sola). */
-function LastUpdatedLabel({ at }: { at?: string }) {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (!at) return;
-    const id = setInterval(() => tick((v) => v + 1), 30000);
-    return () => clearInterval(id);
-  }, [at]);
-  const rel = formatRelativeTime(at);
-  if (!rel) return null;
-  return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400 dark:text-slate-500"
-      title={`Última actualización ${rel}`}
-    >
-      <Clock className="h-3 w-3" />
-      {rel}
-    </span>
   );
 }
 
@@ -607,6 +608,7 @@ export function QuickInventoryEntry({
   onTransferTask,
   openManualModal,
   openEditModal,
+  onHydrateTask,
   presenceUserKey = null,
   presenceUserLabel = null,
   presenceAvatarUrl = null,
@@ -615,7 +617,11 @@ export function QuickInventoryEntry({
     "pending" | "completed" | "priority"
   >("pending");
   const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
+  const [listVisibleCount, setListVisibleCount] = useState(RA_LIST_PAGE_SIZE);
+  const sharedNowMs = useSharedNow(30_000);
   const presenceByRa = useInventoryPresenceByRa();
+  const pendingSelectIdRef = useRef<string | null>(null);
+  const lastDraftPersistAtRef = useRef(0);
   const canPauseInventory = canManageInventoryPause(
     presenceUserKey,
     presenceUserLabel,
@@ -795,10 +801,12 @@ export function QuickInventoryEntry({
         0,
       );
       const expected = selectedTask?.expectedBultos ?? 0;
+      const requiredOk = hasCapture && hasQuickRequiredData(rows);
+      // Correcciones: un RA ya completado no pierde ese estado al ajustar bultos.
       const isCompleted =
-        hasCapture &&
-        totalsBultos >= expected &&
-        hasQuickRequiredData(rows);
+        selectedTask?.status === "completed"
+          ? requiredOk
+          : requiredOk && totalsBultos >= expected;
       const base = selectedTask ?? ({ status: "pending" } as Task);
       const withSession = applyInventorySessionOnSave({
         task: base,
@@ -887,7 +895,7 @@ export function QuickInventoryEntry({
       });
     };
     send();
-    const interval = window.setInterval(send, 12000);
+    const interval = window.setInterval(send, QUICK_PRESENCE_HEARTBEAT_MS);
     return () => {
       window.clearInterval(interval);
       void clearWorkPresence(tabId);
@@ -919,6 +927,46 @@ export function QuickInventoryEntry({
     }
     return moduleTasks;
   }, [moduleTasks, groupedTasks, clientFilter, clients]);
+
+  useEffect(() => {
+    setListVisibleCount(RA_LIST_PAGE_SIZE);
+  }, [viewMode, clientFilter]);
+
+  const visibleListTasks = useMemo(() => {
+    if (displayedTasks.length <= RA_LIST_VIRTUALIZE_THRESHOLD) {
+      return displayedTasks;
+    }
+    return displayedTasks.slice(0, listVisibleCount);
+  }, [displayedTasks, listVisibleCount]);
+
+  const onToggleTransfer = useCallback((taskId: string) => {
+    setTransferOpenId((prev) => (prev === taskId ? null : taskId));
+  }, []);
+
+  const onTransferToQuick = useCallback(
+    (task: Task) => {
+      onTransferTask(task, "quick");
+      setTransferOpenId(null);
+    },
+    [onTransferTask],
+  );
+
+  const selectTaskRef = useRef<(task: Task) => void>(() => {});
+
+  const onSelectRaCard = useCallback((task: Task) => {
+    selectTaskRef.current(task);
+  }, []);
+
+  const onEditRaCard = useCallback(
+    (task: Task) => {
+      if (viewMode === "completed") {
+        selectTaskRef.current(task);
+      } else {
+        openEditModal(task);
+      }
+    },
+    [viewMode, openEditModal],
+  );
 
   const calculateTotals = () => {
     if (!selectedTask) return { bultos: 0, cbm: 0, weight: 0 };
@@ -971,7 +1019,25 @@ export function QuickInventoryEntry({
     [],
   );
 
-  const handleSelectTask = (task: Task) => {
+  const handleSelectTask = (listTask: Task) => {
+    void (async () => {
+    pendingSelectIdRef.current = listTask.id;
+    let task = listTask;
+    if (measureDataLooksEmpty(listTask.measureData)) {
+      try {
+        const loaded = await fetchTaskById(listTask.id);
+        if (pendingSelectIdRef.current !== listTask.id) return;
+        if (loaded) {
+          task = loaded;
+          onHydrateTask?.(loaded);
+        }
+      } catch (e) {
+        console.error(e);
+        if (pendingSelectIdRef.current !== listTask.id) return;
+      }
+    }
+    if (pendingSelectIdRef.current !== listTask.id) return;
+
     setSelectedTask(task);
     activeTaskIdRef.current = task.id;
     withModeRowsSnapshotRef.current = null;
@@ -1112,7 +1178,9 @@ export function QuickInventoryEntry({
       captureLayout: layoutToUse,
     });
     setAutosaveState("idle");
+    })();
   };
+  selectTaskRef.current = handleSelectTask;
 
   const clearTask = () => {
     // Persiste de inmediato cualquier cambio pendiente antes de abandonar la RA,
@@ -1145,12 +1213,14 @@ export function QuickInventoryEntry({
       (a, row) => a + (parseFloat(String(row.bultos)) || 0),
       0,
     );
+    const requiredOk = hasCapture && hasQuickRequiredData(measureRows);
     const isCompleted =
-      hasCapture &&
-      totalsBultos >= selectedTask.expectedBultos &&
-      hasQuickRequiredData(measureRows);
+      selectedTask.status === "completed"
+        ? requiredOk
+        : requiredOk && totalsBultos >= selectedTask.expectedBultos;
     // Inventariador con trabajo abierto (no pausado): pedir pausa al volver.
-    if (hasCapture && !isCompleted) {
+    // Correcciones de completados: salir sin pedir pausa.
+    if (selectedTask.status !== "completed" && hasCapture && !isCompleted) {
       setLeavePromptOpen(true);
       return;
     }
@@ -1661,10 +1731,19 @@ export function QuickInventoryEntry({
     rows: MeasureRow[],
     refMode: ReferenceCaptureMode,
     layout: CaptureLayout,
+    opts?: { force?: boolean },
   ) => {
     if (typeof window === "undefined") return;
+    const now = Date.now();
+    if (
+      !opts?.force &&
+      now - lastDraftPersistAtRef.current < QUICK_DRAFT_PERSIST_MS
+    ) {
+      return;
+    }
+    lastDraftPersistAtRef.current = now;
     const draft: QuickDraft = {
-      updatedAt: Date.now(),
+      updatedAt: now,
       rows: JSON.parse(JSON.stringify(stripQuickRowsForPersist(rows))) as MeasureRow[],
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: refMode,
@@ -1735,10 +1814,12 @@ export function QuickInventoryEntry({
       0,
     );
     const originalExpected = task.originalExpectedBultos || task.expectedBultos;
+    const requiredOk = hasCapture && hasQuickRequiredData(rows);
+    const priorStatus = task.status;
     const isCompleted =
-      hasCapture &&
-      totalsBultos >= task.expectedBultos &&
-      hasQuickRequiredData(rows);
+      priorStatus === "completed"
+        ? requiredOk
+        : requiredOk && totalsBultos >= task.expectedBultos;
 
     const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
     if (!hasCapture && typeof window !== "undefined") {
@@ -1785,6 +1866,7 @@ export function QuickInventoryEntry({
       userLabel: presenceUserLabel,
       hasCapture,
       isCompleted,
+      priorStatus,
     });
 
     let failed = false;
@@ -1837,6 +1919,15 @@ export function QuickInventoryEntry({
       autosaveTimerRef.current = null;
     }
     const task = latestTaskRef.current;
+    if (task) {
+      persistQuickDraft(
+        task.id,
+        latestRowsRef.current,
+        referenceModeRef.current,
+        captureLayout,
+        { force: true },
+      );
+    }
     const hash = pendingAutosaveHashRef.current;
     if (task && hash && hash !== lastSavedHashRef.current) {
       void runAutosave(task, latestRowsRef.current, hash);
@@ -1932,10 +2023,12 @@ export function QuickInventoryEntry({
     const hasCapture = quickRowsHaveAnyCapture(measureRows);
     const originalExpected =
       selectedTask.originalExpectedBultos || selectedTask.expectedBultos;
+    const requiredOk = hasCapture && hasQuickRequiredData(measureRows);
+    const priorStatus = selectedTask.status;
     const isCompleted =
-      hasCapture &&
-      totals.bultos >= selectedTask.expectedBultos &&
-      hasQuickRequiredData(measureRows);
+      priorStatus === "completed"
+        ? requiredOk
+        : requiredOk && totals.bultos >= selectedTask.expectedBultos;
 
     const persistedRows = hasCapture ? stripQuickRowsForPersist(measureRows) : [];
     if (!hasCapture && typeof window !== "undefined") {
@@ -1972,6 +2065,7 @@ export function QuickInventoryEntry({
       userLabel: presenceUserLabel,
       hasCapture,
       isCompleted,
+      priorStatus,
     });
 
     const currentHash = JSON.stringify({
@@ -2111,181 +2205,42 @@ export function QuickInventoryEntry({
                   .
                 </div>
               ) : (
-                displayedTasks.map((t) => {
-                  const liveWorkers = liveOperatorsForRa(presenceByRa, t.ra);
-                  const liveOp = resolveLiveInventoryOperator(liveWorkers);
-                  const activeInventariador = resolveActiveInventoryOperatorLabel(
-                    t,
-                    liveWorkers,
-                  );
-                  const pausedInventariador = resolvePausedInventoryOperatorLabel(t);
-                  const completedBy = inventoryCompletedByLabel(t);
-                  const showPaused =
-                    t.status === "paused" && !liveOp && !!pausedInventariador;
-
-                  return (
-              <div
-                key={t.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleSelectTask(t)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    handleSelectTask(t);
-                  }
-                }}
-                className={`group flex cursor-pointer flex-col gap-2 rounded-xl border p-3 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:p-4 ${
-                  viewMode === "priority"
-                    ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
-                    : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                    <h3
-                      className={`shrink-0 text-lg font-black tabular-nums leading-none sm:text-xl ${
-                        viewMode === "priority"
-                          ? "text-red-700 dark:text-red-300"
-                          : "text-[#16263F] dark:text-slate-100"
-                      }`}
+                <>
+                  {visibleListTasks.map((t) => (
+                    <div
+                      key={t.id}
+                      style={{
+                        contentVisibility: "auto",
+                        containIntrinsicSize: "0 140px",
+                      }}
                     >
-                      RA {t.ra}
-                    </h3>
-                    {showPaused ? (
-                      <span
-                        className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-200"
-                        title={`Inventario en pausa · ${pausedInventariador}`}
-                      >
-                        En pausa · {pausedInventariador}
-                      </span>
-                    ) : activeInventariador ? (
-                      <span
-                        className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200"
-                        title={`Inventario en curso por ${activeInventariador}`}
-                      >
-                        En curso · {activeInventariador}
-                      </span>
-                    ) : null}
-                    {viewMode === "completed" && completedBy ? (
-                      <span
-                        className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-semibold text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200"
-                        title="Inventariador que capturó medidas y peso"
-                      >
-                        Por {completedBy}
-                      </span>
-                    ) : null}
-                    <LastUpdatedLabel at={t.updatedAt} />
-                  </div>
-                  <div
-                    className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-1 text-center ${
-                      viewMode === "priority"
-                        ? "border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
-                        : "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
-                    }`}
-                  >
-                    <span className="text-[9px] font-semibold leading-none">Bultos</span>
-                    <span className="text-lg font-bold tabular-nums leading-tight">
-                      {t.expectedBultos > 0 ? t.expectedBultos : "—"}
-                    </span>
-                  </div>
-                </div>
-
-                <InventoryLiveOperators operators={liveWorkers} />
-
-                <div
-                  className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-700"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                >
-                  <div className="grid min-w-0 flex-1 grid-cols-1 gap-1 sm:grid-cols-2 sm:gap-4">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                        Proveedor
-                      </p>
-                      <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
-                        {formatRaFieldLabel(t.provider)}
-                      </p>
+                      <RaTaskCard
+                        task={t}
+                        viewMode={viewMode}
+                        liveWorkers={liveOperatorsForRa(presenceByRa, t.ra)}
+                        nowMs={sharedNowMs}
+                        transferOpen={transferOpenId === t.id}
+                        onSelect={onSelectRaCard}
+                        onToggleTransfer={onToggleTransfer}
+                        onTransferToQuick={onTransferToQuick}
+                        onEdit={onEditRaCard}
+                        onDelete={onDeleteTask}
+                      />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                        Marca
-                      </p>
-                      <p className="truncate text-xs font-semibold text-[#16263F] dark:text-slate-100 sm:text-sm">
-                        {formatRaFieldLabel(t.brand)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTransferOpenId((prev) => (prev === t.id ? null : t.id));
-                        }}
-                        className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
-                        title="Transferir a otro módulo"
-                      >
-                        <ArrowRightLeft className="h-4 w-4" />
-                      </button>
-                    {transferOpenId === t.id && (
-                      <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
-                        {t.type === "airway" ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onTransferTask(t, "quick");
-                              setTransferOpenId(null);
-                            }}
-                            className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                          >
-                            → Ingreso Rápido
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTransferTask(t, "detailed");
-                            setTransferOpenId(null);
-                          }}
-                          className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                        >
-                          → Ingreso Detallado
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(t);
-                    }}
-                    className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
-                  >
-                    <Edit className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteTask(t.id);
-                    }}
-                    className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                  <span className="hidden items-center justify-center rounded-lg bg-slate-50 p-1.5 text-slate-400 group-hover:text-blue-500 sm:flex dark:bg-slate-800/60">
-                    <ArrowRight className="h-4 w-4" />
-                  </span>
-                </div>
-                </div>
-              </div>
-                  );
-                })
+                  ))}
+                  {displayedTasks.length > visibleListTasks.length ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setListVisibleCount((n) => n + RA_LIST_PAGE_SIZE)
+                      }
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Mostrar más (
+                      {displayedTasks.length - visibleListTasks.length} restantes)
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           </div>
@@ -2321,6 +2276,21 @@ export function QuickInventoryEntry({
     1;
   const completedRows = measureRows.filter((row) => isQuickRowComplete(row)).length;
 
+  const completedByLabel =
+    t?.status === "completed" ? inventoryCompletedByLabel(t) : null;
+  const correctionBanner =
+    t?.status === "completed" ? (
+      <div
+        role="status"
+        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-100"
+      >
+        Corrección de medidas
+        {completedByLabel ? (
+          <span className="font-bold"> · se mantiene Por {completedByLabel}</span>
+        ) : null}
+      </div>
+    ) : null;
+
   if (captureLayout === "reekon") {
     return (
       <>
@@ -2340,7 +2310,11 @@ export function QuickInventoryEntry({
             if (file) void runAiRefExtract(file);
           }}
         />
-        <ReekonCaptureView
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col">
+          {correctionBanner ? (
+            <div className="shrink-0 px-2 pt-2 sm:px-3">{correctionBanner}</div>
+          ) : null}
+          <ReekonCaptureView
           measureRows={measureRows}
           referenceMode={referenceMode}
           onSwitchReferenceMode={switchReferenceMode}
@@ -2399,6 +2373,7 @@ export function QuickInventoryEntry({
             isOnline,
           }}
         />
+        </div>
         {leavePromptOpen ? (
           <div
             className="fixed inset-0 z-[100000] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
@@ -2531,6 +2506,8 @@ export function QuickInventoryEntry({
             Usar vista Reekon — mejor para celular
           </button>
         )}
+
+        {correctionBanner}
       </div>
 
       {t && (

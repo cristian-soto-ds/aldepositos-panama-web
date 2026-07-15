@@ -1,6 +1,6 @@
 /**
  * Estilos de impresión exclusivos del módulo REPORTES.
- * Formato Carta (Letter). Importar solo desde CompletedReportsModule.tsx
+ * A4 (igual que el Excel). Importar solo desde CompletedReportsModule.tsx
  *
  * Nota: fecha, URL y título en el borde del papel los controla el navegador.
  * En Chrome: Más opciones → desactivar "Encabezados y pies de página".
@@ -9,7 +9,8 @@
 /* Vista previa en pantalla (tema oscuro: marco alrededor del documento blanco) */
 .report-preview-frame {
   border-radius: 0.75rem;
-  overflow: hidden;
+  /* visible: no recortar páginas/filas debajo; el scroll lo maneja #reports-print-root */
+  overflow: visible;
 }
 
 :root.panel-dark .report-preview-frame {
@@ -22,14 +23,16 @@
 
 @media print {
   @page {
-    size: letter portrait;
-    margin: 10mm 12mm;
+    size: A4 portrait;
+    margin: 10mm 9mm;
   }
 
   html,
   body {
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
     background: #fff !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -53,7 +56,8 @@
     top: 0 !important;
     width: 100% !important;
     max-width: none !important;
-    min-height: 100% !important;
+    min-height: 0 !important;
+    height: auto !important;
     padding: 0 !important;
     margin: 0 !important;
     background: #fff !important;
@@ -86,7 +90,7 @@
     border-radius: 0 !important;
     max-width: 100% !important;
     width: 100% !important;
-    min-height: 100% !important;
+    min-height: 0 !important;
     height: auto !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -99,17 +103,20 @@
     break-after: auto;
   }
 
-  /* Páginas del layout ReportPdfExportLayout (mismo look que Excel/PDF) */
+  /*
+   * Anular el width fijo en px del layout (evita columna angosta centrada).
+   * Sin min-height forzado: si sobra alto, Chrome achica TODO el documento.
+   */
   #reports-print-root [data-report-export-page] {
     width: 100% !important;
     max-width: 100% !important;
-    min-height: auto !important;
+    min-height: 0 !important;
     height: auto !important;
     margin: 0 !important;
     margin-bottom: 0 !important;
-    padding: 8mm 6mm !important;
+    padding: 6mm 4mm !important;
     box-shadow: none !important;
-    border: none !important;
+    border: 1px solid #0f172a !important;
     border-radius: 0 !important;
     background: #fff !important;
     overflow: visible !important;
@@ -125,7 +132,6 @@
     break-after: auto;
   }
 
-  /* Tablas: cabecera de marca y fondos de celdas */
   #reports-print-root table,
   #reports-print-root th,
   #reports-print-root td,
@@ -140,20 +146,19 @@
     -webkit-print-color-adjust: exact !important;
   }
 
-  /* Carta 8.5" × 11": contenido al ancho útil, sin “tarjeta” centrada */
   .report-document-sheet {
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
     margin: 0 !important;
     width: 100% !important;
-    max-width: 8.5in !important;
-    min-height: calc(11in - 24mm) !important;
+    max-width: none !important;
+    min-height: 0 !important;
     background: #fff !important;
   }
 
   .report-letter-inner {
-    padding: 10mm 12mm !important;
+    padding: 0 !important;
     box-sizing: border-box !important;
   }
 }

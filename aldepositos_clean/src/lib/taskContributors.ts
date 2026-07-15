@@ -55,6 +55,11 @@ export function applyInventoryAttribution(
     userLabel: string | null | undefined;
     hasCapture: boolean;
     isCompleted: boolean;
+    /**
+     * Status antes del guardado. Necesario porque `applyInventorySessionOnSave`
+     * puede marcar `completed` en el mismo task que se pasa aquí.
+     */
+    priorStatus?: Task["status"];
   },
 ): Task {
   const identity = resolveAttributionIdentity(
@@ -63,13 +68,24 @@ export function applyInventoryAttribution(
   );
   if (!identity) return task;
 
+  // Corrección de un RA ya cerrado: no alterar inventariador ni colaboradores.
+  const priorStatus = options.priorStatus ?? task.status;
+  if (priorStatus === "completed") {
+    return task;
+  }
+
   const { email, displayName } = identity;
+  const existingCompletedBy = task.inventoryCompletedBy;
 
   let next = task;
   if (options.hasCapture) {
     next = mergeContributor(next, email, displayName);
   }
   if (options.isCompleted) {
+    // Una vez atribuido el cierre, no se pisa (correcciones / ayudas).
+    if (existingCompletedBy?.email || existingCompletedBy?.displayName) {
+      return next;
+    }
     next = {
       ...next,
       inventoryCompletedBy: {

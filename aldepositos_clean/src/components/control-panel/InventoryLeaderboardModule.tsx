@@ -721,9 +721,16 @@ export function InventoryLeaderboardModule({
         />
 
         <section className="space-y-4" aria-label="Detalle por inventariador">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-            Desglose detallado
-          </p>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
+              Desglose detallado
+            </p>
+            <p className="mt-1 text-[11px] font-medium leading-snug text-slate-500 dark:text-slate-400">
+              Con refs / Sin refs / Paletizado pesan distinto en el score: medir caja
+              a caja (sin refs) vale más que muchos bultos iguales de pocas
+              referencias.
+            </p>
+          </div>
           {result.stats.map((stat) => (
             <StatRow
               key={stat.id}
@@ -738,8 +745,9 @@ export function InventoryLeaderboardModule({
         </section>
 
         <p className="mt-8 text-center text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">
-          Score = inventarios×100 + filas×2 + bultos. El podio sigue ordenado por
-          inventarios (luego filas y bultos). La variación compara con{" "}
+          Score = inventarios×40 + esfuerzo (filas y bultos según modo: con refs,
+          sin refs o paletizado). El podio ordena por score de esfuerzo (luego
+          filas, inventarios y bultos). La variación compara con{" "}
           {result.prevPeriodLabel}. Solo cuentan RAs donde el operador aparece como
           colaborador; en colaboración todos suman el crédito completo.
         </p>

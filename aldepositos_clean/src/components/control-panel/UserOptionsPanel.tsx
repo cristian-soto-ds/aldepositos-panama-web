@@ -216,7 +216,6 @@ export function UserOptionsPanel({
           >
             <option value="dashboard">Panel principal</option>
             <option value="quick-entry">Ingreso rápido</option>
-            <option value="detailed-entry">Ingreso detallado</option>
             <option value="reports">Reportes</option>
             <option value="options">Opciones de usuario</option>
           </select>

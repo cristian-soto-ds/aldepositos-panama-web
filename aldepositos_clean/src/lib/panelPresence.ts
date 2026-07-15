@@ -46,8 +46,24 @@ const listeners = new Set<(entries: WorkPresenceEntry[]) => void>();
 let realtimeChannel: RealtimeChannel | null = null;
 let subscribePromise: Promise<void> | null = null;
 let lastPayload: Omit<WorkPresenceEntry, "updatedAt"> | null = null;
+/** Snapshot de membership para no emitir si solo cambia el timestamp. */
+let lastMembershipKey = "";
+
+function membershipKey(entries: WorkPresenceEntry[]): string {
+  if (entries.length === 0) return "";
+  return entries
+    .map(
+      (e) =>
+        `${e.tabId}\t${e.userKey}\t${e.ra}\t${e.module}\t${e.avatarUrl ?? ""}\t${e.userLabel}`,
+    )
+    .sort()
+    .join("|");
+}
 
 function emit(entries: WorkPresenceEntry[]) {
+  const key = membershipKey(entries);
+  if (key === lastMembershipKey) return;
+  lastMembershipKey = key;
   for (const fn of listeners) {
     fn(entries);
   }
@@ -191,6 +207,7 @@ export async function clearWorkPresence(tabId: string): Promise<void> {
   if (tabId !== getSharedWorkPresenceTabId()) return;
 
   lastPayload = null;
+  // No resetear lastMembershipKey a "": emit([]) debe notificar ("" === "" lo saltaría).
 
   const ch = realtimeChannel;
   if (ch) {

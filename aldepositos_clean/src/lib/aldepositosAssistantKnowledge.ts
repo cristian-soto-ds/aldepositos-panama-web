@@ -7,8 +7,7 @@ Aplicación: ALDEPOSITOS — panel web para operación de almacén (Warehouse OS
 
 Navegación lateral (menú principal):
 - Panel Principal: listado de RAs (tareas de inventario), progreso, filtros, creación/edición de RAs, importación, presencia de otros operadores.
-- Ingreso Rápido: captura simplificada de medidas por referencia (RA tipo rápido).
-- Ingreso Detallado: tabla extendida (reempaque, contenedor, más campos por línea).
+- Ingreso Rápido: captura simplificada de medidas por referencia (también abre RAs legacy de ingreso detallado).
 - Orden de recolección: borradores de pedido antes del almacén; número de orden; líneas con bultos, unidades, peso, medidas; totales por orden; exportación CSV y CSV Magaya (18 columnas: modelo, país, tejido, talla, forro, género…; columnas UNI/COMPOSICION vacías en export; columna Magaya PESO = mismo valor que «Peso por Piezas» del CSV Descargar, es decir peso por bulto). Botón "Pasar al RA" para volcar medidas a un RA elegible; Alde.IA interpreta facturas/packing lists importados (dz, dozen, gross, dúzia, etc.) y lleva cantidades a piezas enteras para und/bulto. Modos por bulto vs totales.
 - Catálogo de referencias: catálogo maestro de piezas para autocompletar y validar referencias.
 - Reportes: informes de trabajos completados.

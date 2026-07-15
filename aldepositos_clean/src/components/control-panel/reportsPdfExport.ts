@@ -6,8 +6,7 @@
  * dentro del área útil (object-fit: contain, sin deformar).
  */
 
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
+import type { jsPDF } from "jspdf";
 import { buildReportDownloadFilename } from "@/lib/reportDownloadFilename";
 
 const MAX_CANVAS_EDGE = 4096;
@@ -61,6 +60,7 @@ function computeCaptureScale(el: HTMLElement): number {
 
 export async function capturePdfExportRoot(el: HTMLElement): Promise<HTMLCanvasElement> {
   const scale = computeCaptureScale(el);
+  const html2canvas = (await import("html2canvas")).default;
 
   const canvas = await html2canvas(el, {
     scale,
@@ -131,6 +131,7 @@ export async function savePdfLetterFromPages(
     throw new Error("[Reports PDF] No hay paginas para exportar.");
   }
 
+  const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({
     orientation: "portrait",
     unit: "mm",

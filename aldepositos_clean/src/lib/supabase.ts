@@ -7,6 +7,7 @@ import {
   type TaskRealtimeChange,
 } from "@/lib/realtimePatch";
 import type { Task } from "@/lib/types/task";
+import { toListTask } from "@/lib/taskListSlim";
 
 export type { TaskRealtimeChange };
 
@@ -27,10 +28,21 @@ export const supabase = createBrowserClient(
   BROWSER_SUPABASE_ANON_KEY,
 );
 
+export type FetchTasksOptions = {
+  /**
+   * true: payload completo (Despacho / Reportes).
+   * false/omitido: sin measureData (lista del panel; detalle vía fetchTaskById).
+   */
+  includeMeasureData?: boolean;
+};
+
 /**
- * Lee todas las filas de public.tasks y devuelve los Task del JSON payload.
+ * Lista de tasks. Por defecto sin `measureData` (estado del panel más barato).
+ * Abrir un RA usa `fetchTaskById`; Despacho/Reportes piden `includeMeasureData`.
  */
-export async function fetchTasks(): Promise<Task[]> {
+export async function fetchTasks(
+  options?: FetchTasksOptions,
+): Promise<Task[]> {
   const { data, error } = await supabase
     .from("tasks")
     .select("id, payload, updated_at")
@@ -39,7 +51,21 @@ export async function fetchTasks(): Promise<Task[]> {
   if (error) throw error;
 
   const rows = (data ?? []) as { payload: unknown }[];
-  return rows.map((r) => r.payload).filter(isTaskPayload);
+  const tasks = rows.map((r) => r.payload).filter(isTaskPayload);
+  return options?.includeMeasureData ? tasks : tasks.map(toListTask);
+}
+
+/** Carga el payload completo de un RA (incluye measureData). */
+export async function fetchTaskById(id: string): Promise<Task | null> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id, payload, updated_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data?.payload || !isTaskPayload(data.payload)) return null;
+  return data.payload;
 }
 
 /**

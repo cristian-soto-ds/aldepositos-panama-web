@@ -2,7 +2,6 @@ export type PanelTheme = "light" | "dark";
 export type StartView =
   | "dashboard"
   | "quick-entry"
-  | "detailed-entry"
   | "reports"
   | "options";
 export type TimeFormat = "24h" | "12h";
@@ -41,7 +40,6 @@ export function sanitizeUserPreferences(raw: unknown): UserPreferences {
         : null,
     startView:
       value.startView === "quick-entry" ||
-      value.startView === "detailed-entry" ||
       value.startView === "reports" ||
       value.startView === "options"
         ? value.startView

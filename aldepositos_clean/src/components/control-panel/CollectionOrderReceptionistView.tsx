@@ -4,7 +4,6 @@ import React, { useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
-  ClipboardList,
   Loader2,
   Minus,
   MoreHorizontal,
@@ -13,6 +12,7 @@ import {
   Rows3,
   Truck,
   Undo2,
+  UserCheck,
   X,
 } from "lucide-react";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
@@ -166,7 +166,7 @@ export function CollectionOrderReceptionistView({
 
       <header className="mb-4 shrink-0 rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-lg md:p-5">
         <div className="flex items-center gap-2 text-indigo-100">
-          <ClipboardList className="h-5 w-5" aria-hidden />
+          <UserCheck className="h-5 w-5" aria-hidden />
           <span className="text-[10px] font-black uppercase tracking-[0.2em]">
             {standalone ? "Recepcionista" : "Recepción"}
           </span>

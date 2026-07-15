@@ -9,8 +9,10 @@ import {
   insertTasks,
   updateTask,
   deleteTaskById,
+  fetchTaskById,
 } from "@/lib/supabase";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
+import { measureDataLooksEmpty, toListTask } from "@/lib/taskListSlim";
 import type { Task } from "@/lib/types/task";
 import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
@@ -46,13 +48,6 @@ const QuickInventoryEntry = dynamic(
   () =>
     import("@/components/control-panel/QuickInventoryEntry").then(
       (m) => m.QuickInventoryEntry,
-    ),
-  { loading: () => <PanelModuleLoader /> },
-);
-const DetailedInventoryEntry = dynamic(
-  () =>
-    import("@/components/control-panel/DetailedInventoryEntry").then(
-      (m) => m.DetailedInventoryEntry,
     ),
   { loading: () => <PanelModuleLoader /> },
 );
@@ -124,6 +119,7 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "collection-orders",
   "receptionist",
   "truck-direction",
+  "reports",
 ]);
 
 export default function PanelPage() {
@@ -391,7 +387,7 @@ export default function PanelPage() {
     }
   };
 
-  const handleUpdateTask = async (updatedTask: Task) => {
+  const handleUpdateTask = useCallback(async (updatedTask: Task) => {
     // Actualización optimista: no se revierte ante un fallo puntual de red.
     setTasks((prev) =>
       prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
@@ -404,11 +400,25 @@ export default function PanelPage() {
       console.error(e);
       throw e;
     }
-  };
+  }, [setTasks]);
 
-  const handleDeleteTask = (idToRemove: string) => {
+  const handleHydrateTask = useCallback(
+    (task: Task) => {
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id === task.id) return task;
+          // LRU mínimo: solo un RA hidratado a la vez en memoria de lista.
+          if (!measureDataLooksEmpty(t.measureData)) return toListTask(t);
+          return t;
+        }),
+      );
+    },
+    [setTasks],
+  );
+
+  const handleDeleteTask = useCallback((idToRemove: string) => {
     setDeleteRaId(idToRemove);
-  };
+  }, []);
 
   const closeDeleteRaModal = () => {
     if (deleteRaBusy) return;
@@ -434,29 +444,38 @@ export default function PanelPage() {
   const taskPendingDelete =
     deleteRaId != null ? tasks.find((t) => t.id === deleteRaId) : undefined;
 
-  const handleTransferTask = async (
-    task: Task,
-    newType: "quick" | "detailed",
-  ) => {
-    const fromType = (task.type as string) || "quick";
-    const adaptedMeasureData = adaptMeasureDataForModule(
-      (task.measureData || []) as Record<string, unknown>[],
-      fromType,
-      newType,
-    );
-    const updated: Task = {
-      ...task,
-      type: newType,
-      measureData: adaptedMeasureData as unknown[],
-    };
-    try {
-      await handleUpdateTask(updated);
-    } catch (e) {
-      console.error(e);
-      // eslint-disable-next-line no-alert
-      alert("No se pudo transferir la orden en Supabase.");
-    }
-  };
+  const handleTransferTask = useCallback(
+    async (task: Task, newType: "quick" | "detailed") => {
+      let full = task;
+      if (measureDataLooksEmpty(task.measureData)) {
+        try {
+          const loaded = await fetchTaskById(task.id);
+          if (loaded) full = loaded;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      const fromType = (full.type as string) || "quick";
+      const adaptedMeasureData = adaptMeasureDataForModule(
+        (full.measureData || []) as Record<string, unknown>[],
+        fromType,
+        newType,
+      );
+      const updated: Task = {
+        ...full,
+        type: newType,
+        measureData: adaptedMeasureData as unknown[],
+      };
+      try {
+        await handleUpdateTask(updated);
+      } catch (e) {
+        console.error(e);
+        // eslint-disable-next-line no-alert
+        alert("No se pudo transferir la orden en Supabase.");
+      }
+    },
+    [handleUpdateTask],
+  );
 
   const openManualModal = useCallback(
     (defaultModule: "quick" | "detailed" = "quick") => {
@@ -473,16 +492,11 @@ export default function PanelPage() {
     () => openManualModal("quick"),
     [openManualModal],
   );
-  const openDetailedManualModal = useCallback(
-    () => openManualModal("detailed"),
-    [openManualModal],
-  );
   const openEditModal = useCallback((task: Task) => {
     setModalState({
       isOpen: true,
       editingTask: task,
-      defaultModule:
-        task.type === "detailed" ? "detailed" : "quick",
+      defaultModule: "quick",
     });
   }, []);
 
@@ -586,6 +600,28 @@ export default function PanelPage() {
     }
   };
 
+  // Despacho / reportes / ranking: payload completo. Ingreso rápido: lista slim.
+  useEffect(() => {
+    if (!userEmail) return;
+    const needsFull =
+      currentView === "dispatch" ||
+      currentView === "reports" ||
+      currentView === "container-reports" ||
+      currentView === "inventory-leaderboard";
+    if (needsFull) {
+      void reloadTasks({ includeMeasureData: true });
+      return;
+    }
+    if (
+      currentView === "quick-entry" ||
+      currentView === "detailed-entry" ||
+      currentView === "dashboard" ||
+      currentView === "collection-orders"
+    ) {
+      void reloadTasks({ includeMeasureData: false });
+    }
+  }, [currentView, userEmail, reloadTasks]);
+
   if (loading || !userEmail) {
     return null;
   }
@@ -639,20 +675,7 @@ export default function PanelPage() {
             onTransferTask={handleTransferTask}
             openManualModal={openQuickManualModal}
             openEditModal={openEditModal}
-            presenceUserKey={userEmail}
-            presenceUserLabel={userDisplayName}
-            presenceAvatarUrl={presenceBroadcastAvatarUrl}
-          />
-        )}
-
-        {visibleView === "detailed-entry" && (
-          <DetailedInventoryEntry
-            tasks={tasks}
-            onUpdateTask={handleUpdateTask}
-            onDeleteTask={handleDeleteTask}
-            onTransferTask={handleTransferTask}
-            openManualModal={openDetailedManualModal}
-            openEditModal={openEditModal}
+            onHydrateTask={handleHydrateTask}
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
             presenceAvatarUrl={presenceBroadcastAvatarUrl}

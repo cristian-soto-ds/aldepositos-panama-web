@@ -415,6 +415,47 @@ export function buildMeasurePatchFromCatalog(
 }
 
 /**
+ * Busca varias claves normalizadas en un solo query (`.in`).
+ */
+export async function getReferenceCatalogItemsByKeys(
+  keys: string[],
+): Promise<Map<string, ReferenceCatalogItem>> {
+  const unique = Array.from(
+    new Set(keys.map((k) => normalizePartNumber(k)).filter(Boolean)),
+  );
+  const byKey = new Map<string, ReferenceCatalogItem>();
+  if (unique.length === 0) return byKey;
+
+  const chunkSize = 100;
+  try {
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from("reference_catalog")
+        .select(
+          "numero_parte, numero_parte_normalizado, descripcion, piezas, longitud_cm, altura_cm, ancho_cm, peso_por_pieza_kg, volumen_m3, unidad",
+        )
+        .in("numero_parte_normalizado", chunk);
+
+      if (error) {
+        console.warn(
+          "[reference_catalog] getReferenceCatalogItemsByKeys:",
+          error.message,
+        );
+        continue;
+      }
+      for (const row of data ?? []) {
+        const item = mapRow(row as ReferenceCatalogRow);
+        byKey.set(item.numero_parte_normalizado, item);
+      }
+    }
+  } catch (e) {
+    console.warn("[reference_catalog] getReferenceCatalogItemsByKeys:", e);
+  }
+  return byKey;
+}
+
+/**
  * Tras importar referencias desde Excel: resuelve cada código en el catálogo
  * y rellena medidas / descripción como al escribir la referencia a mano.
  * Conserva `bultos` si el archivo ya los traía en esa fila.
@@ -423,22 +464,25 @@ export async function mergeCatalogIntoImportedRows<T extends { referencia?: stri
   moduleType: InventoryCatalogModule,
   rows: T[],
 ): Promise<{ rows: T[]; catalogMatched: number }> {
+  const keys = rows
+    .map((row) => String(row.referencia ?? "").trim())
+    .filter(Boolean);
+  const byKey = await getReferenceCatalogItemsByKeys(keys);
+
   let catalogMatched = 0;
-  const out = await Promise.all(
-    rows.map(async (row) => {
-      const ref = String(row.referencia ?? "").trim();
-      if (!ref) return row;
-      const item = await getReferenceCatalogItem(ref);
-      if (!item) return row;
-      catalogMatched += 1;
-      const patch = buildMeasurePatchFromCatalog(moduleType, item);
-      const excelBultos = row.bultos;
-      const merged = { ...row, ...patch } as T;
-      if (excelBultos !== undefined && String(excelBultos).trim() !== "") {
-        merged.bultos = excelBultos;
-      }
-      return merged;
-    }),
-  );
+  const out = rows.map((row) => {
+    const ref = String(row.referencia ?? "").trim();
+    if (!ref) return row;
+    const item = byKey.get(normalizePartNumber(ref));
+    if (!item) return row;
+    catalogMatched += 1;
+    const patch = buildMeasurePatchFromCatalog(moduleType, item);
+    const excelBultos = row.bultos;
+    const merged = { ...row, ...patch } as T;
+    if (excelBultos !== undefined && String(excelBultos).trim() !== "") {
+      merged.bultos = excelBultos;
+    }
+    return merged;
+  });
   return { rows: out, catalogMatched };
 }

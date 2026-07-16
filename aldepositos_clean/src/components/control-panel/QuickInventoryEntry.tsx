@@ -65,6 +65,7 @@ import {
   taskHasImportedReferences,
   nextConsecutiveReference,
   stripQuickRowsForPersist,
+  mergeReempaqueFlagsOntoRows,
   type CaptureLayout,
   type QuickMeasureRow,
   type ReferenceCaptureMode,
@@ -452,7 +453,12 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
     >
       <td className="px-2 py-1.5 text-center">
         {isReempaque ? (
-          <Recycle className="mx-auto h-4 w-4 text-violet-500" aria-label="Reempaque" />
+          <div className="flex flex-col items-center gap-0.5" title="Reempaque: no capturar bultos, peso ni medidas">
+            <Recycle className="h-4 w-4 text-violet-500" aria-hidden />
+            <span className="text-[8px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">
+              Reemp.
+            </span>
+          </div>
         ) : rowComplete ? (
           <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-500" aria-label="Línea completa" />
         ) : rowPartial ? (
@@ -1643,13 +1649,12 @@ export function QuickInventoryEntry({
   );
 
   /** Marca/desmarca una fila como reempaque (sin bultos, peso ni medidas). */
-  const toggleReempaque = useCallback(
-    (id: string) =>
-    setMeasureRows((prev) =>
-      prev.map((row) => {
+  const toggleReempaque = useCallback((id: string) => {
+    setMeasureRows((prev) => {
+      const next = prev.map((row) => {
         if (row.id !== id) return row;
-        const next = !row.reempaque;
-        if (next) {
+        const nextFlag = !row.reempaque;
+        if (nextFlag) {
           return {
             ...row,
             reempaque: true,
@@ -1661,10 +1666,15 @@ export function QuickInventoryEntry({
           };
         }
         return { ...row, reempaque: false };
-      }),
-    ),
-    [],
-  );
+      });
+      // Persistir de inmediato para que inventariadores vean la marca en vivo.
+      latestRowsRef.current = next;
+      queueMicrotask(() => {
+        flushAutosaveRef.current();
+      });
+      return next;
+    });
+  }, []);
 
   const runCatalogLookup = useCallback(
     async (rowId: string, rawReferencia: string) => {
@@ -1796,12 +1806,82 @@ export function QuickInventoryEntry({
       return;
     }
 
-    // Monitores: no escribir al servidor (no deben pisar updatedAt ni el estado que dejó el inventariador).
+    // Monitores: no deben pisar medidas del inventariador, pero sí pueden
+    // sincronizar marcas de reempaque para que el equipo las vea en vivo.
     if (!canPauseInventory) {
-      lastSavedHashRef.current = hash;
-      pendingAutosaveHashRef.current = hash;
-      setPendingCount(0);
-      setAutosaveState("saved");
+      const serverRows = (Array.isArray(task.measureData) ? task.measureData : []) as MeasureRow[];
+      const localPersisted = stripQuickRowsForPersist(rows);
+      const { rows: merged, changed: reempaqueChanged } =
+        mergeReempaqueFlagsOntoRows(serverRows, localPersisted);
+
+      if (!reempaqueChanged) {
+        lastSavedHashRef.current = hash;
+        pendingAutosaveHashRef.current = hash;
+        setPendingCount(0);
+        setAutosaveState("saved");
+        return;
+      }
+
+      isSavingRef.current = true;
+      setAutosaveState("saving");
+      const updatedTask: Task = {
+        ...task,
+        measureData: JSON.parse(
+          JSON.stringify(stripQuickRowsForPersist(merged)),
+        ),
+      };
+
+      let failed = false;
+      try {
+        await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
+        if (activeTaskIdRef.current === task.id) {
+          setSelectedTask(updatedTask);
+          // Mantener marcas de reempaque visibles sin perder edición local.
+          setMeasureRows((prev) => {
+            const byId = new Map(
+              merged.map((r) => [String(r.id ?? ""), r] as const),
+            );
+            return prev.map((row) => {
+              const m = byId.get(String(row.id ?? ""));
+              if (!m) return row;
+              const want = m.reempaque === true;
+              if ((row.reempaque === true) === want) return row;
+              if (want) {
+                return {
+                  ...row,
+                  reempaque: true,
+                  bultos: "",
+                  weight: "",
+                  l: "",
+                  w: "",
+                  h: "",
+                };
+              }
+              return { ...row, reempaque: false };
+            });
+          });
+        }
+        lastSavedHashRef.current = hash;
+        retryAttemptsRef.current = 0;
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+        setLastSavedAt(Date.now());
+        setAutosaveState("saved");
+        setPendingCount(0);
+        onLocalSaveCompletedRef.current();
+      } catch (e) {
+        console.error(e);
+        failed = true;
+        setAutosaveState("error");
+      } finally {
+        isSavingRef.current = false;
+      }
+
+      if (failed) {
+        scheduleAutosaveRetry();
+      }
       return;
     }
 

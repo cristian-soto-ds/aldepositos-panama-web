@@ -303,3 +303,67 @@ export function stripQuickMeasureRow<T extends QuickMeasureRow>(row: T): T {
 export function stripQuickRowsForPersist<T extends QuickMeasureRow>(rows: T[]): T[] {
   return rows.map(stripQuickMeasureRow);
 }
+
+/**
+ * Aplica solo cambios de `reempaque` locales sobre las filas del servidor.
+ * Permite que monitores (u otros no inventariadores) marquen reempaques sin
+ * pisar medidas/peso que ya capturó el inventariador en otras líneas.
+ */
+export function mergeReempaqueFlagsOntoRows<T extends QuickMeasureRow>(
+  serverRows: T[],
+  localRows: T[],
+): { rows: T[]; changed: boolean } {
+  const localById = new Map(
+    localRows.map((r) => [String(r.id ?? ""), r] as const),
+  );
+
+  if (serverRows.length === 0) {
+    const hasReempaque = localRows.some((r) => r.reempaque === true);
+    if (!hasReempaque) {
+      return { rows: serverRows, changed: false };
+    }
+    return {
+      rows: stripQuickRowsForPersist(localRows) as T[],
+      changed: true,
+    };
+  }
+
+  let changed = false;
+  const next = serverRows.map((serverRow) => {
+    const id = String(serverRow.id ?? "");
+    const local = localById.get(id);
+    if (!local) return serverRow;
+
+    const want = local.reempaque === true;
+    const have = serverRow.reempaque === true;
+    if (want === have) return serverRow;
+
+    changed = true;
+    if (want) {
+      return stripQuickMeasureRow({
+        ...serverRow,
+        reempaque: true,
+        bultos: "",
+        weight: "",
+        l: "",
+        w: "",
+        h: "",
+      } as T);
+    }
+    return stripQuickMeasureRow({
+      ...serverRow,
+      reempaque: false,
+    } as T);
+  });
+
+  // Filas nuevas solo en local marcadas como reempaque (p. ej. línea agregada).
+  for (const local of localRows) {
+    const id = String(local.id ?? "");
+    if (!id || next.some((r) => String(r.id ?? "") === id)) continue;
+    if (local.reempaque !== true) continue;
+    changed = true;
+    next.push(stripQuickMeasureRow(local) as T);
+  }
+
+  return { rows: next, changed };
+}

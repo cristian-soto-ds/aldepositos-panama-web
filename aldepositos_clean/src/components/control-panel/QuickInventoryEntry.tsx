@@ -120,7 +120,6 @@ type QuickInventoryEntryProps = {
   tasks: Task[];
   onUpdateTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
-  onTransferTask: (task: Task, newType: "quick" | "detailed") => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
   /** Fusiona el detalle hidratado (measureData) en el estado del panel. */
@@ -611,7 +610,6 @@ export function QuickInventoryEntry({
   tasks,
   onUpdateTask,
   onDeleteTask,
-  onTransferTask,
   openManualModal,
   openEditModal,
   onHydrateTask,
@@ -622,7 +620,6 @@ export function QuickInventoryEntry({
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority"
   >("pending");
-  const [transferOpenId, setTransferOpenId] = useState<string | null>(null);
   const [listVisibleCount, setListVisibleCount] = useState(RA_LIST_PAGE_SIZE);
   const sharedNowMs = useSharedNow(30_000);
   const presenceByRa = useInventoryPresenceByRa();
@@ -632,14 +629,6 @@ export function QuickInventoryEntry({
     presenceUserKey,
     presenceUserLabel,
   );
-
-  useEffect(() => {
-    const closeTransfer = () => setTransferOpenId(null);
-    if (transferOpenId) {
-      document.addEventListener("click", closeTransfer);
-      return () => document.removeEventListener("click", closeTransfer);
-    }
-  }, [transferOpenId]);
 
   const moduleTasks = useMemo(() => {
     const filtered = tasks.filter((t) => {
@@ -944,18 +933,6 @@ export function QuickInventoryEntry({
     }
     return displayedTasks.slice(0, listVisibleCount);
   }, [displayedTasks, listVisibleCount]);
-
-  const onToggleTransfer = useCallback((taskId: string) => {
-    setTransferOpenId((prev) => (prev === taskId ? null : taskId));
-  }, []);
-
-  const onTransferToQuick = useCallback(
-    (task: Task) => {
-      onTransferTask(task, "quick");
-      setTransferOpenId(null);
-    },
-    [onTransferTask],
-  );
 
   const selectTaskRef = useRef<(task: Task) => void>(() => {});
 
@@ -2299,10 +2276,7 @@ export function QuickInventoryEntry({
                         viewMode={viewMode}
                         liveWorkers={liveOperatorsForRa(presenceByRa, t.ra)}
                         nowMs={sharedNowMs}
-                        transferOpen={transferOpenId === t.id}
                         onSelect={onSelectRaCard}
-                        onToggleTransfer={onToggleTransfer}
-                        onTransferToQuick={onTransferToQuick}
                         onEdit={onEditRaCard}
                         onDelete={onDeleteTask}
                       />

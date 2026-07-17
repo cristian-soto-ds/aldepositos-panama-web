@@ -32,7 +32,15 @@ import {
   generateAndDownloadDailyReceptionReport,
 } from "@/lib/receptionLogistics/generateDailyReceptionReport";
 import { ReceptionReportExportModal } from "@/components/modals/ReceptionReportExportModal";
-import type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
+import {
+  formatDateInputPanama,
+  panamaDayBounds,
+  parseDateInputPanama,
+  presetDateRange,
+  isIsoInPanamaRange,
+  type ReceptionReportFilter,
+  type ReceptionReportPreset,
+} from "@/lib/receptionLogistics/receptionReportFilter";
 import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
 import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
 import { ReceptionKanbanCardContent } from "@/components/truck-direction/ReceptionKanbanCardContent";
@@ -50,6 +58,42 @@ function queueDensity(count: number): ReceptionCardDensity {
   return "normal";
 }
 
+type CompletedColumnFilter = ReceptionReportPreset | "all";
+
+const COMPLETED_FILTER_OPTIONS: { id: CompletedColumnFilter; label: string }[] = [
+  { id: "today", label: "Hoy" },
+  { id: "yesterday", label: "Ayer" },
+  { id: "this_week", label: "Esta semana" },
+  { id: "this_month", label: "Este mes" },
+  { id: "custom", label: "Fecha exacta" },
+  { id: "all", label: "Todos" },
+];
+
+function completedAtIso(truck: ReceptionTruck): string | undefined {
+  return truck.completedAt ?? truck.updatedAt;
+}
+
+function filterCompletedTrucks(
+  trucks: ReceptionTruck[],
+  filter: CompletedColumnFilter,
+  customDate: string,
+): ReceptionTruck[] {
+  if (filter === "all") return trucks;
+  let from: Date;
+  let to: Date;
+  if (filter === "custom") {
+    from = parseDateInputPanama(customDate);
+    to = from;
+  } else {
+    ({ from, to } = presetDateRange(filter));
+  }
+  const rangeStart = panamaDayBounds(from).start;
+  const rangeEndExclusive = panamaDayBounds(to).endExclusive;
+  return trucks.filter((t) =>
+    isIsoInPanamaRange(completedAtIso(t), rangeStart, rangeEndExclusive),
+  );
+}
+
 export function TruckDirectionModule() {
   const { trucks, loading, reload } = useReceptionQueue();
   const { occupancy: rampOccupancy } = useRampOccupancy();
@@ -57,6 +101,11 @@ export function TruckDirectionModule() {
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
+  const [completedFilter, setCompletedFilter] =
+    useState<CompletedColumnFilter>("today");
+  const [completedFilterDate, setCompletedFilterDate] = useState(() =>
+    formatDateInputPanama(new Date()),
+  );
   const dragTruckId = useRef<string | null>(null);
 
   const filtered = trucks;
@@ -75,8 +124,17 @@ export function TruckDirectionModule() {
         .filter((t) => t.status === col)
         .sort((a, b) => a.sortOrder - b.sortOrder);
     }
+    map.COMPLETADO = filterCompletedTrucks(
+      map.COMPLETADO,
+      completedFilter,
+      completedFilterDate,
+    ).sort((a, b) => {
+      const ta = Date.parse(completedAtIso(a) ?? "") || 0;
+      const tb = Date.parse(completedAtIso(b) ?? "") || 0;
+      return tb - ta;
+    });
     return map;
-  }, [filtered]);
+  }, [filtered, completedFilter, completedFilterDate]);
 
   const visibleColumns = useMemo(
     () =>
@@ -235,6 +293,39 @@ export function TruckDirectionModule() {
                     <p className="mt-1 text-[9px] font-bold normal-case tracking-wide text-white/90">
                       {RAMP_OCCUPANCY_COPY.operatorBadge}
                     </p>
+                  ) : null}
+                  {statusId === RECEPTION_STATUS.COMPLETADO ? (
+                    <div className="mt-2 flex flex-col gap-1.5">
+                      <select
+                        value={completedFilter}
+                        onChange={(e) =>
+                          setCompletedFilter(
+                            e.target.value as CompletedColumnFilter,
+                          )
+                        }
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="w-full cursor-pointer rounded-lg border border-white/30 bg-white/15 px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-white outline-none transition hover:bg-white/25 focus:border-white/60 [&>option]:text-slate-900"
+                        aria-label="Filtrar completados por período"
+                      >
+                        {COMPLETED_FILTER_OPTIONS.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      {completedFilter === "custom" ? (
+                        <input
+                          type="date"
+                          value={completedFilterDate}
+                          onChange={(e) =>
+                            setCompletedFilterDate(e.target.value)
+                          }
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-full rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-[10px] font-bold text-white outline-none [color-scheme:dark] focus:border-white/60"
+                          aria-label="Fecha exacta de completados"
+                        />
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
 

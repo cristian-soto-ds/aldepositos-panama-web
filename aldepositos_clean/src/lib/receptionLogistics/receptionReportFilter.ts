@@ -4,7 +4,12 @@
 
 export type ReceptionReportDateField = "arrival" | "completed";
 export type ReceptionReportStatusScope = "all" | "completed_only";
-export type ReceptionReportPreset = "today" | "yesterday" | "this_week" | "custom";
+export type ReceptionReportPreset =
+  | "today"
+  | "yesterday"
+  | "this_week"
+  | "this_month"
+  | "custom";
 
 export type ReceptionReportFilter = {
   from: Date;
@@ -137,6 +142,10 @@ export function presetDateRange(
       todayStart.getTime() - daysFromMonday * 24 * 60 * 60 * 1000,
     );
     return { from: weekStart, to: new Date(todayStart) };
+  }
+  if (preset === "this_month") {
+    const monthStart = panamaMidnightUtc(y, m, 1);
+    return { from: monthStart, to: new Date(todayStart) };
   }
   return { from: new Date(todayStart), to: new Date(todayStart) };
 }

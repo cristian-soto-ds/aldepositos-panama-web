@@ -9,7 +9,6 @@ import {
   insertTasks,
   updateTask,
   deleteTaskById,
-  fetchTaskById,
 } from "@/lib/supabase";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
 import { measureDataLooksEmpty, toListTask } from "@/lib/taskListSlim";
@@ -18,7 +17,6 @@ import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { ManualEntryModal } from "@/components/modals/ManualEntryModal";
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
-import { adaptMeasureDataForModule } from "@/lib/taskUtils";
 import {
   DEFAULT_USER_PREFERENCES,
   LAST_THEME_STORAGE_KEY,
@@ -444,39 +442,6 @@ export default function PanelPage() {
   const taskPendingDelete =
     deleteRaId != null ? tasks.find((t) => t.id === deleteRaId) : undefined;
 
-  const handleTransferTask = useCallback(
-    async (task: Task, newType: "quick" | "detailed") => {
-      let full = task;
-      if (measureDataLooksEmpty(task.measureData)) {
-        try {
-          const loaded = await fetchTaskById(task.id);
-          if (loaded) full = loaded;
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      const fromType = (full.type as string) || "quick";
-      const adaptedMeasureData = adaptMeasureDataForModule(
-        (full.measureData || []) as Record<string, unknown>[],
-        fromType,
-        newType,
-      );
-      const updated: Task = {
-        ...full,
-        type: newType,
-        measureData: adaptedMeasureData as unknown[],
-      };
-      try {
-        await handleUpdateTask(updated);
-      } catch (e) {
-        console.error(e);
-        // eslint-disable-next-line no-alert
-        alert("No se pudo transferir la orden en Supabase.");
-      }
-    },
-    [handleUpdateTask],
-  );
-
   const openManualModal = useCallback(
     (defaultModule: "quick" | "detailed" = "quick") => {
       setModalState({
@@ -672,7 +637,6 @@ export default function PanelPage() {
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
             onDeleteTask={handleDeleteTask}
-            onTransferTask={handleTransferTask}
             openManualModal={openQuickManualModal}
             openEditModal={openEditModal}
             onHydrateTask={handleHydrateTask}

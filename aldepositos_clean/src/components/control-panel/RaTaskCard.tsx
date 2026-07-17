@@ -3,7 +3,6 @@
 import React, { memo } from "react";
 import {
   ArrowRight,
-  ArrowRightLeft,
   Clock,
   Edit,
   Trash2,
@@ -26,10 +25,7 @@ export type RaTaskCardProps = {
   liveWorkers: LiveOperatorOnRa[];
   /** Epoch ms del reloj compartido (fuerza refresh de "hace X"). */
   nowMs: number;
-  transferOpen: boolean;
   onSelect: (task: Task) => void;
-  onToggleTransfer: (taskId: string) => void;
-  onTransferToQuick: (task: Task) => void;
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
 };
@@ -59,10 +55,7 @@ function RaTaskCardInner({
   viewMode,
   liveWorkers,
   nowMs,
-  transferOpen,
   onSelect,
-  onToggleTransfer,
-  onTransferToQuick,
   onEdit,
   onDelete,
 }: RaTaskCardProps) {
@@ -165,39 +158,6 @@ function RaTaskCardInner({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleTransfer(t.id);
-              }}
-              className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/30"
-              title="Transferir a otro módulo"
-            >
-              <ArrowRightLeft className="h-4 w-4" />
-            </button>
-            {transferOpen && (
-              <div className="absolute bottom-full right-0 z-30 mb-1 min-w-[180px] rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-900">
-                {t.type === "airway" || t.type === "detailed" ? (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTransferToQuick(t);
-                    }}
-                    className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800/60"
-                  >
-                    → Ingreso Rápido
-                  </button>
-                ) : (
-                  <p className="px-4 py-2.5 text-xs font-semibold text-slate-400">
-                    Ya está en Ingreso Rápido
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
           <button
             type="button"
             onClick={(e) => {
@@ -238,10 +198,7 @@ export const RaTaskCard = memo(RaTaskCardInner, (prev, next) => {
     prev.task === next.task &&
     prev.viewMode === next.viewMode &&
     prev.nowMs === next.nowMs &&
-    prev.transferOpen === next.transferOpen &&
     prev.onSelect === next.onSelect &&
-    prev.onToggleTransfer === next.onToggleTransfer &&
-    prev.onTransferToQuick === next.onTransferToQuick &&
     prev.onEdit === next.onEdit &&
     prev.onDelete === next.onDelete &&
     liveWorkersKey(prev.liveWorkers) === liveWorkersKey(next.liveWorkers)

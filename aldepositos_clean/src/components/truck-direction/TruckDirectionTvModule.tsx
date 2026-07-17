@@ -34,6 +34,13 @@ function queueDensity(count: number): ReceptionCardDensity {
   return "normal";
 }
 
+/** Columnas de rampa/carretillado: tarjetas grandes, se compactan antes. */
+function rampDensity(count: number): ReceptionCardDensity {
+  if (count >= 6) return "dense";
+  if (count >= 3) return "compact";
+  return "normal";
+}
+
 const TV_QUEUE_SCROLL_SPEED_PX = 0.55;
 const TV_QUEUE_SCROLL_PAUSE_MS = 2800;
 
@@ -237,7 +244,7 @@ function TruckTvCard({
   const isDense = density === "dense";
   return (
     <li
-      className={`group relative overflow-hidden border border-slate-200/90 ring-1 ring-slate-100 transition duration-150 hover:bg-slate-50/80 ${
+      className={`group relative shrink-0 overflow-hidden border border-slate-200/90 ring-1 ring-slate-100 transition duration-150 hover:bg-slate-50/80 ${
         isDense
           ? `rounded-lg px-2.5 py-2 shadow-sm ${zebra ? "bg-slate-50/90" : "bg-white"}`
           : density === "compact"
@@ -285,7 +292,9 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
   const isRampColumn = isRampOccupancyRampId(statusId);
   const rampRetiroOccupied =
     isRampColumn && rampOccupancy?.[statusId]?.occupied === true;
-  const density = isQueueColumn ? queueDensity(trucks.length) : "normal";
+  const density = isQueueColumn
+    ? queueDensity(trucks.length)
+    : rampDensity(trucks.length);
   const isDense = density === "dense";
   const columnSubtitle = isQueueColumn
     ? "Esperando rampa"
@@ -325,18 +334,21 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
         </div>
       </header>
 
-      {isQueueColumn && trucks.length > 0 ? (
+      {trucks.length > 0 ? (
         <TvAutoScrollQueueList
-          itemCount={trucks.length}
+          itemCount={trucks.length + (rampRetiroOccupied && isRampColumn ? 1 : 0)}
           className={`flex min-h-0 flex-1 flex-col p-2 md:p-3 ${
             isDense ? "gap-1" : density === "compact" ? "gap-1.5" : "gap-2.5"
           }`}
         >
+          {rampRetiroOccupied && isRampColumn ? (
+            <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
+          ) : null}
           {trucks.map((truck, index) => (
             <TruckTvCard
               key={truck.id}
               truck={truck}
-              queuePosition={index + 1}
+              queuePosition={isQueueColumn ? index + 1 : undefined}
               density={density}
               stripeClass={ui.stripe}
               zebra={isDense && index % 2 === 1}
@@ -349,7 +361,7 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
             isDense ? "gap-1" : density === "compact" ? "gap-1.5" : "gap-2.5"
           }`}
         >
-          {trucks.length === 0 && !(rampRetiroOccupied && isRampColumn) ? (
+          {!(rampRetiroOccupied && isRampColumn) ? (
             <div
               className="pointer-events-none absolute inset-2 flex items-center justify-center md:inset-3"
               aria-hidden
@@ -363,28 +375,10 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
               />
             </div>
           ) : null}
-          {trucks.length === 0 ? (
-            rampRetiroOccupied && isRampColumn ? (
-              <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
-            ) : (
-              <TvColumnEmptyState emptyIconClass={ui.emptyIcon} />
-            )
+          {rampRetiroOccupied && isRampColumn ? (
+            <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
           ) : (
-            <>
-              {rampRetiroOccupied && isRampColumn ? (
-                <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
-              ) : null}
-              {trucks.map((truck, index) => (
-                <TruckTvCard
-                  key={truck.id}
-                  truck={truck}
-                  queuePosition={isQueueColumn ? index + 1 : undefined}
-                  density={density}
-                  stripeClass={ui.stripe}
-                  zebra={isDense && index % 2 === 1}
-                />
-              ))}
-            </>
+            <TvColumnEmptyState emptyIconClass={ui.emptyIcon} />
           )}
         </ul>
       )}

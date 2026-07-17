@@ -1241,6 +1241,7 @@ export function CollectionOrderModule({
     const generalCount = countOrdersForCollectionListTab(orders, "general");
     const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
     const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
+    const noInventoryCount = countOrdersForCollectionListTab(orders, "noInventory");
     const displayedListOrders = ordersForCollectionListTab(orders, listTab);
     const listDominantCliente = (() => {
       const freq = new Map<string, number>();
@@ -1317,6 +1318,7 @@ export function CollectionOrderModule({
           generalCount={generalCount}
           warehouseCount={warehouseCount}
           linkedRaCount={linkedRaCount}
+          noInventoryCount={noInventoryCount}
           onChange={setListTab}
         />
 
@@ -1335,7 +1337,9 @@ export function CollectionOrderModule({
                 ? "No hay órdenes en recepción."
                 : listTab === "warehouse"
                   ? "No hay órdenes en bodega pendientes de RA."
-                  : "No hay órdenes con RA asignado."}
+                  : listTab === "linkedRa"
+                    ? "No hay órdenes con RA asignado."
+                    : "No hay órdenes sin inventario en bodega."}
             </p>
           </div>
         ) : (
@@ -1739,14 +1743,14 @@ export function CollectionOrderModule({
         cartonesFooter: onlyRefsBultos ? undefined : data.processing?.cartonesFooter,
       });
     } catch (err) {
-      const text =
+      const errText =
         err instanceof DOMException && err.name === "TimeoutError"
           ? err.message
           : err instanceof Error
             ? err.message
             : "Error de red (revisa tu conexión).";
       patchGeminiJob(orderId, {
-        errorBanner: { text },
+        errorBanner: { text: errText },
         busy: false,
       });
     }

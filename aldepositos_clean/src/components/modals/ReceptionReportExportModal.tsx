@@ -25,7 +25,8 @@ const PRESETS: { id: ReceptionReportPreset; label: string }[] = [
   { id: "today", label: "Hoy" },
   { id: "yesterday", label: "Ayer" },
   { id: "this_week", label: "Esta semana" },
-  { id: "custom", label: "Personalizado" },
+  { id: "this_month", label: "Este mes" },
+  { id: "custom", label: "Fecha exacta" },
 ];
 
 function buildFilterFromState(

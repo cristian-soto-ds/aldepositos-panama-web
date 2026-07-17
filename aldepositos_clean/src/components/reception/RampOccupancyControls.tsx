@@ -47,6 +47,7 @@ function RampStatusCard({
   disabled,
   updatedAt,
   onToggle,
+  dense = false,
 }: {
   rampId: RampOccupancyRampId;
   occupied: boolean;
@@ -54,6 +55,7 @@ function RampStatusCard({
   disabled: boolean;
   updatedAt: string | null;
   onToggle: () => void;
+  dense?: boolean;
 }) {
   const rampName = RECEPTION_STATUS_LABELS[rampId] ?? rampButtonLabel(rampId);
   const since = occupied ? formatOccupiedSince(updatedAt) : null;
@@ -74,14 +76,18 @@ function RampStatusCard({
             : `Retiro en curso. Tocá para liberar ${rampName}.`
           : `${rampName} disponible. Tocá si hay retiro de mercancía.`
       }
-      className={`group inline-flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2 text-left transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:min-w-[9.5rem] ${
+      className={`group inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border text-left transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 sm:min-w-[9.5rem] sm:gap-2 sm:rounded-xl ${
+        dense ? "px-2 py-1.5" : "px-3 py-2"
+      } ${
         occupied
           ? "border-orange-400 bg-orange-500 text-white shadow-sm hover:bg-orange-600"
           : "border-emerald-200 bg-emerald-50 text-emerald-950 hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-50 dark:hover:bg-emerald-900/50"
       }`}
     >
       <span
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
+        className={`flex shrink-0 items-center justify-center rounded-lg ${
+          dense ? "h-6 w-6" : "h-7 w-7"
+        } ${
           occupied
             ? "bg-white/20 text-white"
             : "bg-white text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300"
@@ -103,7 +109,9 @@ function RampStatusCard({
           {rampName}
         </span>
         <span
-          className={`block truncate text-sm font-black leading-tight ${
+          className={`block truncate font-black leading-tight ${
+            dense ? "text-xs" : "text-sm"
+          } ${
             occupied ? "text-white" : "text-emerald-900 dark:text-emerald-100"
           }`}
         >
@@ -139,7 +147,7 @@ export function RampOccupancyControls({
 
   if (compact) {
     return (
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-1.5">
         {RAMP_OCCUPANCY_RAMPS.map((rampId) => {
           const entry = occupancy[rampId];
           return (
@@ -151,6 +159,7 @@ export function RampOccupancyControls({
               disabled={busyRamp != null}
               updatedAt={entry.updatedAt}
               onToggle={() => onToggle(rampId)}
+              dense
             />
           );
         })}

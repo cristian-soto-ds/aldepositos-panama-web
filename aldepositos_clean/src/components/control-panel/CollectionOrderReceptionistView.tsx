@@ -94,7 +94,7 @@ function orderDisplayBultos(order: CollectionOrder): number {
 function receptionButtonClass(status: ReceptionStatusId, active: boolean): string {
   const theme = RECEPTION_COLUMN_THEME[status];
   const base =
-    "inline-flex min-h-[2.75rem] w-full flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 py-1 text-center text-[7px] font-black uppercase leading-[1.1] tracking-tight transition-all disabled:opacity-50 sm:text-[8px]";
+    "inline-flex min-h-9 w-full flex-col items-center justify-center gap-0 rounded-lg px-0.5 py-0.5 text-center text-[7px] font-black uppercase leading-[1.05] tracking-tight transition-all disabled:opacity-50 sm:min-h-[2.75rem] sm:gap-0.5 sm:py-1 sm:text-[8px]";
   return `${base} ${active ? theme.actionActive : theme.actionIdle}`;
 }
 
@@ -146,51 +146,61 @@ export function CollectionOrderReceptionistView({
   const generalCount = countOrdersForCollectionListTab(orders, "general");
   const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
   const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
+  const noInventoryCount = countOrdersForCollectionListTab(orders, "noInventory");
   const displayedOrders = useMemo(
     () => ordersForCollectionListTab(orders, activeTab),
     [orders, activeTab],
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col px-2 py-4 md:px-0 md:py-6">
+    <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col px-2 py-2 sm:py-4 md:px-0 md:py-6">
       {!standalone && onBack ? (
         <button
           type="button"
           onClick={onBack}
-          className="mb-4 inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+          className="mb-2 inline-flex w-fit items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:mb-4"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden />
           Volver a órdenes
         </button>
       ) : null}
 
-      <header className="mb-4 shrink-0 rounded-2xl border border-indigo-200/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-4 text-white shadow-lg md:p-5">
-        <div className="flex items-center gap-2 text-indigo-100">
-          <UserCheck className="h-5 w-5" aria-hidden />
-          <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-            {standalone ? "Recepcionista" : "Recepción"}
-          </span>
+      <header className="mb-2 shrink-0 rounded-xl border border-indigo-200/70 bg-gradient-to-r from-[#1e2a5a] via-[#24356d] to-[#1e4f86] p-2.5 text-white shadow-lg sm:mb-4 sm:rounded-2xl sm:p-4 md:p-5">
+        <div className="flex items-center gap-2">
+          <UserCheck className="h-4 w-4 shrink-0 sm:h-5 sm:w-5" aria-hidden />
+          <h2 className="text-base font-black sm:text-lg md:text-xl">
+            {standalone ? "Recepcionista" : "Vista recepcionista"}
+          </h2>
         </div>
-        <h2 className="mt-1 text-lg font-black md:text-xl">
-          {standalone ? "Recepcionista" : "Vista recepcionista"}
-        </h2>
-        <p className="mt-1 text-sm font-medium text-indigo-100/90">
+        <p className="mt-1 hidden text-sm font-medium text-indigo-100/90 sm:block">
           {activeTab === "general"
             ? "Asigná una ubicación a cada orden. «Quitar» la saca del tablero."
             : activeTab === "warehouse"
               ? "Mercancía en bodega. El operador debe asignar un RA a cada orden."
-              : "Órdenes que ya tienen un RA asignado en almacén."}
+              : activeTab === "linkedRa"
+                ? "Órdenes que ya tienen un RA asignado en almacén."
+                : "Clientes sin inventario: mercancía ya recibida, sin proceso de RA."}
         </p>
       </header>
 
       {onToggleRampOccupancy ? (
-        <div className="mb-4 shrink-0">
-          <RampOccupancyControls
-            occupancy={rampOccupancy}
-            busyRamp={rampBusy}
-            onToggle={onToggleRampOccupancy}
-          />
-        </div>
+        <>
+          <div className="mb-2 shrink-0 sm:hidden">
+            <RampOccupancyControls
+              occupancy={rampOccupancy}
+              busyRamp={rampBusy}
+              onToggle={onToggleRampOccupancy}
+              compact
+            />
+          </div>
+          <div className="mb-2 hidden shrink-0 sm:mb-4 sm:block">
+            <RampOccupancyControls
+              occupancy={rampOccupancy}
+              busyRamp={rampBusy}
+              onToggle={onToggleRampOccupancy}
+            />
+          </div>
+        </>
       ) : null}
 
       <CollectionOrderListTabs
@@ -198,6 +208,7 @@ export function CollectionOrderReceptionistView({
         generalCount={generalCount}
         warehouseCount={warehouseCount}
         linkedRaCount={linkedRaCount}
+        noInventoryCount={noInventoryCount}
         onChange={setActiveTab}
       />
 
@@ -216,11 +227,13 @@ export function CollectionOrderReceptionistView({
               ? "No hay órdenes en recepción."
               : activeTab === "warehouse"
                 ? "No hay órdenes en bodega pendientes de RA."
-                : "No hay órdenes con RA asignado."}
+                : activeTab === "linkedRa"
+                  ? "No hay órdenes con RA asignado."
+                  : "No hay órdenes sin inventario en bodega."}
           </p>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 sm:space-y-2">
           {displayedOrders.map((o) => {
             const bultosTot = orderDisplayBultos(o);
             const currentStatus = o.receptionStatus;
@@ -256,14 +269,14 @@ export function CollectionOrderReceptionistView({
                 >
                   {rampBadge ? (
                     <span
-                      className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-black leading-none ${
+                      className={`flex h-3.5 w-3.5 items-center justify-center rounded-full text-[9px] font-black leading-none sm:h-4 sm:w-4 sm:text-[10px] ${
                         active ? "bg-white/25 text-white" : "bg-current/15"
                       }`}
                     >
                       {rampBadge}
                     </span>
                   ) : (
-                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" aria-hidden />
                   )}
                   <span>{label}</span>
                 </button>
@@ -273,7 +286,7 @@ export function CollectionOrderReceptionistView({
             return (
               <div
                 key={o.id}
-                className={`relative flex flex-col gap-2 overflow-hidden rounded-xl border py-2 pl-3 pr-2.5 text-left shadow-sm ring-1 ring-slate-900/[0.03] dark:ring-white/[0.04] sm:flex-row sm:items-center sm:gap-3 ${
+                className={`relative flex flex-col gap-1.5 overflow-hidden rounded-xl border py-1.5 pl-2.5 pr-2 text-left shadow-sm ring-1 ring-slate-900/[0.03] dark:ring-white/[0.04] sm:flex-row sm:items-center sm:gap-3 sm:py-2 sm:pl-3 sm:pr-2.5 ${
                   currentStatus
                     ? RECEPTION_COLUMN_THEME[currentStatus].card
                     : "border-slate-200/90 bg-white dark:border-slate-600/80 dark:bg-slate-900"
@@ -288,49 +301,46 @@ export function CollectionOrderReceptionistView({
                 />
 
                 <div className="min-w-0 flex-1 pl-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:gap-x-2">
                     <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100 sm:text-[15px]">
                       Orden #{String(o.numero ?? "S/N")}
                     </p>
+                    <span className="inline-flex shrink-0 items-baseline gap-0.5 rounded-md bg-violet-50 px-1 py-0.5 dark:bg-violet-950/40 sm:gap-1 sm:px-1.5">
+                      <span className="text-[8px] font-black uppercase tracking-wide text-violet-500 dark:text-violet-300 sm:text-[9px]">
+                        Bultos
+                      </span>
+                      <span className="text-xs font-black tabular-nums leading-none text-violet-600 dark:text-violet-200 sm:text-sm">
+                        {bultosTot}
+                      </span>
+                    </span>
                     {inWarehouse ? (
-                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300 sm:px-2 sm:text-[9px]">
                         ● En bodega
                       </span>
                     ) : currentStatus ? (
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${RECEPTION_COLUMN_THEME[currentStatus].badge}`}
+                        className={`rounded-full px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide sm:px-2 sm:text-[9px] ${RECEPTION_COLUMN_THEME[currentStatus].badge}`}
                       >
                         ● {RECEPTION_STATUS_LABELS[currentStatus]}
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] sm:gap-x-2 sm:text-[11px]">
                     {o.proveedor?.trim() ? (
-                      <span className="min-w-0 max-w-full truncate">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      <span className="min-w-0 max-w-full truncate font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 sm:text-[9px]">
                           Prov.{" "}
                         </span>
-                        <span className="font-semibold text-slate-600 dark:text-slate-300">
-                          {o.proveedor}
-                        </span>
+                        {o.proveedor}
                       </span>
                     ) : null}
-                    <span className="text-slate-300 dark:text-slate-600">·</span>
-                    <span className="inline-flex items-baseline gap-1 whitespace-nowrap rounded-md bg-violet-50 px-1.5 py-0.5 dark:bg-violet-950/40">
-                      <span className="text-[9px] font-black uppercase tracking-wide text-violet-500 dark:text-violet-300">
-                        Bultos
-                      </span>
-                      <span className="text-sm font-black tabular-nums leading-none text-violet-600 dark:text-violet-200">
-                        {bultosTot}
-                      </span>
-                    </span>
                     {inWarehouse ? (
                       hasRa ? (
-                        <span className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+                        <span className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300 sm:text-[9px]">
                           RA: {o.linkedRaNumbers!.join(", ")}
                         </span>
                       ) : (
-                        <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                        <span className="rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300 sm:text-[9px]">
                           Pendiente RA
                         </span>
                       )
@@ -372,7 +382,7 @@ export function CollectionOrderReceptionistView({
                             onClick={() => toggleExtras(o.id)}
                             aria-expanded={isExpanded}
                             title="Rampa extra y carretillado"
-                            className="inline-flex min-h-[2.75rem] w-full flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-slate-200 bg-slate-50 px-0.5 py-1 text-center text-[7px] font-black uppercase leading-[1.1] tracking-tight text-slate-500 transition hover:border-slate-300 hover:bg-slate-100 sm:text-[8px] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                            className="inline-flex min-h-9 w-full flex-col items-center justify-center gap-0 rounded-lg border-2 border-slate-200 bg-slate-50 px-0.5 py-0.5 text-center text-[7px] font-black uppercase leading-[1.05] tracking-tight text-slate-500 transition hover:border-slate-300 hover:bg-slate-100 sm:min-h-[2.75rem] sm:gap-0.5 sm:py-1 sm:text-[8px] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
                           >
                             {isExpanded ? (
                               <Minus className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -400,17 +410,18 @@ export function CollectionOrderReceptionistView({
                             disabled={isBusy}
                             onClick={() => onClearReceptionStatus(o.id)}
                             title="Quitar de fila, rampa y tablero de camiones"
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50/70 px-3 py-1 text-[9px] font-black uppercase tracking-wide text-red-600 transition hover:border-red-300 hover:bg-red-100 hover:text-red-700 active:scale-[0.98] disabled:opacity-50 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
+                            className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 bg-red-50/70 px-2 py-0.5 text-[8px] font-black uppercase tracking-wide text-red-600 transition hover:border-red-300 hover:bg-red-100 hover:text-red-700 active:scale-[0.98] disabled:opacity-50 sm:gap-1.5 sm:px-3 sm:py-1 sm:text-[9px] dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50"
                           >
                             {isBusy ? (
                               <Loader2
-                                className="h-3.5 w-3.5 shrink-0 animate-spin"
+                                className="h-3 w-3 shrink-0 animate-spin sm:h-3.5 sm:w-3.5"
                                 aria-hidden
                               />
                             ) : (
-                              <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              <X className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" aria-hidden />
                             )}
-                            <span>Quitar del tablero</span>
+                            <span className="sm:hidden">Quitar</span>
+                            <span className="hidden sm:inline">Quitar del tablero</span>
                           </button>
                         ) : isBusy ? (
                           <div className="flex items-center justify-center py-1">

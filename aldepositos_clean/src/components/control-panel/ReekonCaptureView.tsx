@@ -92,6 +92,10 @@ function strVal(v: string | number | undefined): string {
 }
 
 /**
+ * Enfoca un input de la cinta sin abrir el teclado virtual (Android/iOS).
+ * `inputMode="none"` no basta en muchos celulares (Gboard/SwiftKey); hace falta
+ * `readOnly` antes del focus. La REEKON sigue enviando teclas HID.
+ *
  * Campo numérico (peso o dimensión) con BORRADOR LOCAL: lo tecleado vive en un
  * estado propio y no se escribe al estado global en cada tecla. Solo se sincroniza
  * desde `value` cuando el campo NO tiene foco, y se confirma (normalizado) al salir
@@ -102,6 +106,15 @@ function strVal(v: string | number | undefined): string {
  * Para dimensiones (cinta REEKON): al pulsar Enter se confirma el borrador ANTES
  * de avanzar de campo/línea, para no perder la última medida (el Alto).
  */
+function focusTapeField(el: HTMLInputElement) {
+  el.readOnly = true;
+  el.focus({ preventScroll: true });
+  el.select();
+  const vk = (navigator as Navigator & { virtualKeyboard?: { hide?: () => void } })
+    .virtualKeyboard;
+  vk?.hide?.();
+}
+
 const ReekonMeasureInput = memo(function ReekonMeasureInput({
   rowId,
   field,
@@ -119,13 +132,19 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
 }) {
   const [draft, setDraft] = useState(value);
   const focusedRef = useRef(false);
+  const draftRef = useRef(value);
+  const replaceOnTypeRef = useRef(false);
 
   useEffect(() => {
-    if (!focusedRef.current) setDraft(value);
+    if (!focusedRef.current) {
+      draftRef.current = value;
+      setDraft(value);
+    }
   }, [value]);
 
   const commit = (raw: string) => {
     const norm = normalizeMeasureField(raw);
+    draftRef.current = norm;
     setDraft(norm);
     onCommit(rowId, field, norm);
   };
@@ -136,28 +155,87 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
     <input
       type="text"
       inputMode={isDimension ? "none" : "decimal"}
+      readOnly={isDimension}
+      autoComplete="off"
+      autoCorrect="off"
+      spellCheck={false}
+      enterKeyHint="done"
       {...(isDimension ? { "data-reekon-field": field } : {})}
       className={`reekon-input reekon-input-immersive w-full text-center ${
         isDimension && filled ? "reekon-input-filled" : ""
       }`}
       value={draft}
       placeholder="0.00"
+      onTouchStart={
+        isDimension
+          ? (e) => {
+              // Android: marcar readOnly ANTES del focus del toque evita Gboard/SwiftKey.
+              e.currentTarget.readOnly = true;
+            }
+          : undefined
+      }
       onFocus={(e) => {
         focusedRef.current = true;
+        if (isDimension) {
+          // Mantener readOnly y cerrar teclado si venía de Bultos/Peso.
+          e.currentTarget.readOnly = true;
+          replaceOnTypeRef.current = true;
+          e.currentTarget.select();
+          const vk = (navigator as Navigator & { virtualKeyboard?: { hide?: () => void } })
+            .virtualKeyboard;
+          vk?.hide?.();
+          return;
+        }
         e.currentTarget.select();
       }}
-      onChange={(e) => setDraft(sanitizeMeasureTyping(e.target.value))}
+      onChange={
+        isDimension
+          ? undefined
+          : (e) => {
+              const next = sanitizeMeasureTyping(e.target.value);
+              draftRef.current = next;
+              setDraft(next);
+            }
+      }
       onBlur={() => {
         focusedRef.current = false;
-        commit(draft);
+        replaceOnTypeRef.current = false;
+        commit(draftRef.current);
       }}
       onKeyDown={
-        isDimension && onTapeKeyDown
+        isDimension
           ? (e) => {
-              // La cinta confirma con Enter: guarda el borrador ANTES de avanzar
-              // (así el Alto se confirma aunque el input se desmonte al saltar línea).
-              if (e.key === "Enter") commit(draft);
-              onTapeKeyDown(e);
+              // HID de la cinta: readOnly bloquea onChange; aplicamos teclas a mano.
+              if (e.key === "Backspace") {
+                e.preventDefault();
+                replaceOnTypeRef.current = false;
+                const next = draftRef.current.slice(0, -1);
+                draftRef.current = next;
+                setDraft(next);
+                return;
+              }
+              if (e.key === "Delete") {
+                e.preventDefault();
+                replaceOnTypeRef.current = false;
+                draftRef.current = "";
+                setDraft("");
+                return;
+              }
+              if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                e.preventDefault();
+                const next = sanitizeMeasureTyping(
+                  replaceOnTypeRef.current ? e.key : draftRef.current + e.key,
+                );
+                replaceOnTypeRef.current = false;
+                draftRef.current = next;
+                setDraft(next);
+                return;
+              }
+              if (e.key === "Enter" && onTapeKeyDown) {
+                // Confirmar borrador ANTES de avanzar (no perder el Alto).
+                commit(draftRef.current);
+                onTapeKeyDown(e);
+              }
             }
           : undefined
       }
@@ -370,10 +448,19 @@ export function ReekonCaptureView({
     const el = formRef.current?.querySelector<HTMLInputElement>(
       `input[data-reekon-field="${field}"]`,
     );
-    if (el) {
-      el.focus();
-      el.select();
+    if (!el) return;
+    // Si el foco venía de Bultos/Peso, blur primero para cerrar el teclado virtual.
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLInputElement &&
+      active !== el &&
+      !active.dataset.reekonField
+    ) {
+      active.blur();
+      window.setTimeout(() => focusTapeField(el), 30);
+      return;
     }
+    focusTapeField(el);
   }, []);
 
   // Tras cambiar de línea con la cinta, enfocar Largo automáticamente.

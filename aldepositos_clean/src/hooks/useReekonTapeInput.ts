@@ -49,8 +49,14 @@ export function useReekonTapeInput() {
           `input[data-reekon-field="${nextField}"]`,
         );
         if (next) {
-          next.focus();
+          // readOnly + focus: recibe HID de la cinta sin teclado virtual.
+          next.readOnly = true;
+          next.focus({ preventScroll: true });
           next.select();
+          const vk = (
+            navigator as Navigator & { virtualKeyboard?: { hide?: () => void } }
+          ).virtualKeyboard;
+          vk?.hide?.();
           return;
         }
       }
@@ -65,10 +71,13 @@ export function useReekonTapeInput() {
     const first = rowContainer.querySelector<HTMLInputElement>(
       'input[data-reekon-field="l"]',
     );
-    if (first) {
-      first.focus();
-      first.select();
-    }
+    if (!first) return;
+    first.readOnly = true;
+    first.focus({ preventScroll: true });
+    first.select();
+    const vk = (navigator as Navigator & { virtualKeyboard?: { hide?: () => void } })
+      .virtualKeyboard;
+    vk?.hide?.();
   }, []);
 
   return { handleDimensionKeyDown, focusFirstDimension, vibrate, flashInput };

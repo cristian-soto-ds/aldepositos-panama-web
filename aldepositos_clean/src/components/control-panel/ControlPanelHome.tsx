@@ -36,6 +36,7 @@ import {
   avatarInitialsFromName,
   peerPresenceVisibleName,
 } from "@/lib/viewerIdentity";
+import { isAllowedInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
 
 type ControlPanelHomeProps = {
   tasks: Task[];
@@ -369,6 +370,8 @@ export function ControlPanelHome({
       { entries: WorkPresenceEntry[]; uniqueUsers: Set<string> }
     >();
     for (const e of presenceList) {
+      // Solo inventariadores en «En captura ahora» (correctores no cuentan).
+      if (!isAllowedInventoryOperator(e.userKey, e.userLabel)) continue;
       const raKey = String(e.ra || "").trim().toUpperCase();
       if (!raKey) continue;
       if (!map.has(raKey)) {

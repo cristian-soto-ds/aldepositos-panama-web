@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import {
+  flushTaskLivePublish,
   isForeignLiveUpdate,
   scheduleTaskLivePublish,
   subscribeLiveUpdates,
@@ -10,6 +11,10 @@ import {
 } from "@/lib/liveCollaboration";
 import type { Task } from "@/lib/types/task";
 import { measureDataLooksEmpty } from "@/lib/taskListSlim";
+import {
+  rowHasCapturedMeasures,
+  type QuickMeasureRow,
+} from "@/lib/quickInventoryTypes";
 
 type InventoryRealtimeSyncOptions<TRow> = {
   tasks: Task[];
@@ -101,29 +106,42 @@ export function useInventoryRealtimeSync<TRow>({
   const applyRemote = useCallback(
     (remote: Task, fromLive = false) => {
       const remoteRows = prepareRowsFromRemote(remote);
-      // Solo el estado persistido avanza el baseline (no el broadcast efímero).
-      if (!fromLive) {
-        onServerSnapshot?.(remoteRows);
-      }
       const localRows = latestRowsRef.current;
       const localHash = buildHash(localRows);
       const isDirty = localHash !== lastSavedHashRef.current;
 
-      // Colaboración: si hay cambios locales (u otro usuario midiendo), fusionar
-      // en vez de reemplazar — así no se pierde la medida de nadie.
+      // Colaboración: fusionar con el baseline ANTERIOR al snapshot remoto.
+      // Si actualizamos el baseline antes del merge, los borrados remotos se
+      // reinsertan como «filas locales nuevas» y los conteos divergen.
       const shouldMerge =
         Boolean(mergeRowsWithRemote) &&
         (isDirty || fromLive || preferRemoteUpdates) &&
         localRows.length > 0;
 
-      const newRows =
+      let newRows =
         shouldMerge && mergeRowsWithRemote
           ? mergeRowsWithRemote(localRows, remoteRows)
           : remoteRows;
 
+      // Tras merge con BD: descartar cáscaras vacías solo-locales (altas
+      // concurrentes en otros celulares). Conservar filas con medidas reales.
+      if (!fromLive && shouldMerge && mergeRowsWithRemote) {
+        const remoteIds = new Set(
+          remoteRows.map((r) => String((r as { id?: string }).id ?? "")),
+        );
+        newRows = newRows.filter((r) => {
+          const id = String((r as { id?: string }).id ?? "");
+          if (!id || remoteIds.has(id)) return true;
+          return rowHasCapturedMeasures(r as QuickMeasureRow);
+        });
+      }
+
+      // Snapshot persistido DESPUÉS del merge.
+      if (!fromLive) {
+        onServerSnapshot?.(remoteRows);
+      }
+
       // Sin merge (legado): eco de BD con menos filas y altas locales → no pisar UI.
-      // Con merge a 3 vías NO se corta: un borrado remoto (25→24) debe aplicarse
-      // aunque el otro inventariador tenga ediciones locales / filas nuevas.
       if (
         !mergeRowsWithRemote &&
         isDirty &&
@@ -383,15 +401,30 @@ export function useInventoryRealtimeSync<TRow>({
     });
   }, [selectedId, userKey, applyLiveUpdate]);
 
+  const prevLiveStructureKeyRef = useRef("");
+
+  useEffect(() => {
+    prevLiveStructureKeyRef.current = "";
+  }, [selectedId]);
+
   useEffect(() => {
     const key = (userKey ?? "").trim();
     if (!selectedId || !key) return;
+    const structureKey = measureRows
+      .map((r) => String((r as { id?: string }).id ?? ""))
+      .join("\0");
     const hash = buildHash(measureRows);
-    if (hash === lastSavedHashRef.current) return;
+    if (hash === lastSavedHashRef.current) {
+      // Ancla IDs al estado guardado para detectar el próximo alta/baja.
+      prevLiveStructureKeyRef.current = structureKey;
+      return;
+    }
     if (hash === lastLivePublishedHashRef.current) return;
     const meta = getLiveTaskMeta(measureRows);
     lastLivePublishedHashRef.current = hash;
-    scheduleTaskLivePublish({
+    const structureChanged = structureKey !== prevLiveStructureKeyRef.current;
+    prevLiveStructureKeyRef.current = structureKey;
+    const payload = {
       taskId: selectedId,
       userKey: key,
       measureData: measureRows as unknown[],
@@ -401,7 +434,11 @@ export function useInventoryRealtimeSync<TRow>({
       rowCount: meta.rowCount,
       completeRowCount: meta.completeRowCount,
       referenceMode: liveReferenceMode,
-    });
+    };
+    // Alta/baja de filas: publicar al instante para que el conteo no quede
+    // desfasado ~1s entre celulares.
+    if (structureChanged) flushTaskLivePublish(payload);
+    else scheduleTaskLivePublish(payload);
   }, [
     measureRows,
     selectedId,

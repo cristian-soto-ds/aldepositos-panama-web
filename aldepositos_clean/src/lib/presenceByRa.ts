@@ -1,3 +1,4 @@
+import { isAllowedInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
 import type { WorkPresenceEntry, WorkPresenceModule } from "@/lib/panelPresence";
 import { peerPresenceVisibleName } from "@/lib/viewerIdentity";
 
@@ -19,7 +20,7 @@ export const PRESENCE_MODULE_LABELS: Record<WorkPresenceModule, string> = {
   none: "Panel",
 };
 
-/** Agrupa operadores activos por RA (todas las modalidades de inventario). */
+/** Agrupa inventariadores activos por RA (correctores/monitores no cuentan). */
 export function buildPresenceByRa(
   presenceList: WorkPresenceEntry[],
 ): Map<string, LiveOperatorOnRa[]> {
@@ -27,6 +28,7 @@ export function buildPresenceByRa(
 
   for (const entry of presenceList) {
     if (!INVENTORY_MODULES.includes(entry.module)) continue;
+    if (!isAllowedInventoryOperator(entry.userKey, entry.userLabel)) continue;
     const raKey = String(entry.ra ?? "").trim().toUpperCase();
     if (!raKey) continue;
 

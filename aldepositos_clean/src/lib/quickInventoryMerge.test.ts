@@ -113,4 +113,32 @@ describe("mergeConcurrentQuickRows", () => {
     const merged = mergeConcurrentQuickRows(baseline, local, []);
     expect(merged).toHaveLength(2);
   });
+
+  it("con baseline atrasado, deletedIds propaga borrado de fila solo-en-vivo", () => {
+    // La fila "live-only" llegó por canal en vivo y nunca entró al baseline BD.
+    const baseline = [row("1", { referencia: "A", bultos: "1" })];
+    const local = [
+      row("1", { referencia: "A", bultos: "1", l: "10" }),
+      row("live-only", { referencia: "X", bultos: "1" }),
+    ];
+    const remote = [row("1", { referencia: "A", bultos: "1" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      deletedIds: ["live-only"],
+    });
+    expect(merged.map((r) => r.id)).toEqual(["1"]);
+    expect(merged[0]).toMatchObject({ l: "10.00" });
+  });
+
+  it("sin deletedIds, conserva alta local vacía no presente en remoto", () => {
+    const baseline = [row("1", { referencia: "A", bultos: "1" })];
+    const local = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("local-shell", { referencia: "L", bultos: "1" }),
+    ];
+    const remote = [row("1", { referencia: "A", bultos: "1" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged.map((r) => r.id)).toEqual(["1", "local-shell"]);
+  });
 });

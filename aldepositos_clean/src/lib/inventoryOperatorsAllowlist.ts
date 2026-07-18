@@ -27,6 +27,17 @@ export const INVENTORY_OPERATORS: InventoryOperatorEntry[] = [
   },
 ];
 
+/**
+ * Supervisores que pueden corregir medidas (alta/baja/edición/guardado)
+ * sin figurar como responsables del inventario.
+ */
+export const INVENTORY_CORRECTORS: InventoryOperatorEntry[] = [
+  {
+    displayNames: ["Cristian Soto", "Cristian Yu", "Cristian"],
+    emails: ["bases1@aldepositos.com", "bases1@aldeposito.com"],
+  },
+];
+
 export type ResolvedInventoryOperator = {
   email: string;
   displayName: string;
@@ -56,22 +67,36 @@ function namesMatch(candidate: string, allowed: string): boolean {
   return false;
 }
 
-function matchOperatorEntry(
+function matchEntryInList(
+  list: InventoryOperatorEntry[],
   email: string | undefined,
   displayName: string | undefined,
 ): InventoryOperatorEntry | null {
   const mail = String(email ?? "").trim().toLowerCase();
   const name = String(displayName ?? "").trim();
 
-  for (const op of INVENTORY_OPERATORS) {
+  for (const op of list) {
     if (mail && op.emails.some((e) => e.toLowerCase() === mail)) {
       return op;
     }
   }
 
+  // Prefijo local del correo (ej. bases1@…) por si el dominio varía.
+  if (mail) {
+    const local = mail.split("@")[0] ?? "";
+    for (const op of list) {
+      if (
+        local &&
+        op.emails.some((e) => e.toLowerCase().split("@")[0] === local)
+      ) {
+        return op;
+      }
+    }
+  }
+
   if (!name) return null;
 
-  for (const op of INVENTORY_OPERATORS) {
+  for (const op of list) {
     if (op.displayNames.some((allowed) => namesMatch(name, allowed))) {
       return op;
     }
@@ -80,6 +105,21 @@ function matchOperatorEntry(
   return null;
 }
 
+function matchOperatorEntry(
+  email: string | undefined,
+  displayName: string | undefined,
+): InventoryOperatorEntry | null {
+  return matchEntryInList(INVENTORY_OPERATORS, email, displayName);
+}
+
+function matchCorrectorEntry(
+  email: string | undefined,
+  displayName: string | undefined,
+): InventoryOperatorEntry | null {
+  return matchEntryInList(INVENTORY_CORRECTORS, email, displayName);
+}
+
+/** Solo Jahir / Claudio / Raul — atribución, badges «En curso» y ranking. */
 export function isAllowedInventoryOperator(
   email?: string | null,
   displayName?: string | null,
@@ -90,9 +130,34 @@ export function isAllowedInventoryOperator(
   ) != null;
 }
 
+/** Cristian (u otros correctores): editan sin ser responsables. */
+export function isInventoryCorrector(
+  email?: string | null,
+  displayName?: string | null,
+): boolean {
+  return matchCorrectorEntry(
+    String(email ?? "").trim() || undefined,
+    String(displayName ?? "").trim() || undefined,
+  ) != null;
+}
+
 /**
- * Solo inventariadores del roster (Jahir, Claudio, Raul) pueden pausar/reanudar
- * y recibir el prompt al salir. Monitores salen sin diálogo.
+ * Puede capturar/editar/guardar medidas como inventariador.
+ * Incluye correctores; la atribución sigue filtrada por isAllowedInventoryOperator.
+ */
+export function canEditInventoryCapture(
+  email?: string | null,
+  displayName?: string | null,
+): boolean {
+  return (
+    isAllowedInventoryOperator(email, displayName) ||
+    isInventoryCorrector(email, displayName)
+  );
+}
+
+/**
+ * Pausar/reanudar y prompt al salir: solo inventariadores (Jahir / Claudio / Raul).
+ * Correctores (p. ej. Cristian) revisan/arreglan sin pausar ni reanudar.
  */
 export function canManageInventoryPause(
   email?: string | null,
@@ -219,6 +284,30 @@ export function resolveActiveInventoryOperatorLabel(
 export function resolvePausedInventoryOperatorLabel(task: Task): string | null {
   if (task.status !== "paused") return null;
   return resolveLatestAllowedContributor(task)?.displayName ?? null;
+}
+
+/**
+ * Timestamp de actividad de inventariador para la tarjeta («ahora» / «hace X»).
+ * No usa `updatedAt`: los correctores (p. ej. Cristian) pueden guardarlo sin
+ * que la tarjeta se marque como recién inventariada.
+ */
+export function resolveInventoryActivityAt(task: Task): string | undefined {
+  const fromContributor = resolveLatestAllowedContributor(task)?.at;
+  if (fromContributor) return fromContributor;
+
+  const completed = task.inventoryCompletedBy;
+  if (
+    completed?.at &&
+    isAllowedInventoryOperator(completed.email, completed.displayName)
+  ) {
+    return completed.at;
+  }
+
+  if (task.status === "paused" && task.inventoryPausedAt) {
+    return task.inventoryPausedAt;
+  }
+
+  return undefined;
 }
 
 export function resolveAllowedInventoryOperator(

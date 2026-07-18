@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  canEditInventoryCapture,
   canManageInventoryPause,
   isAllowedInventoryOperator,
   resolveActiveInventoryOperatorLabel,
   resolveAllowedInventoryOperator,
+  resolveInventoryActivityAt,
   resolveLatestAllowedContributor,
   resolveLiveInventoryOperator,
   resolvePausedInventoryOperatorLabel,
@@ -37,17 +39,29 @@ function baseTask(overrides: Partial<Task> = {}): Task {
 }
 
 describe("canManageInventoryPause", () => {
-  it("permite solo a Jahir, Claudio y Raul", () => {
+  it("permite a Jahir, Claudio y Raul", () => {
     expect(canManageInventoryPause(null, "Jahir Jimenez")).toBe(true);
     expect(canManageInventoryPause(null, "Claudio Guitierrez")).toBe(true);
     expect(canManageInventoryPause(null, "Raul Lezcano")).toBe(true);
   });
 
-  it("bloquea a monitores como Cristian Soto", () => {
-    expect(canManageInventoryPause("cristian@example.com", "Cristian Soto")).toBe(
+  it("bloquea a correctores (Cristian) y monitores", () => {
+    expect(canManageInventoryPause("bases1@aldepositos.com", "Cristian Soto")).toBe(
       false,
     );
     expect(canManageInventoryPause(null, "Operador X")).toBe(false);
+  });
+});
+
+describe("canEditInventoryCapture", () => {
+  it("permite inventariadores y a Cristian Soto", () => {
+    expect(canEditInventoryCapture(null, "Jahir Jimenez")).toBe(true);
+    expect(canEditInventoryCapture("bases1@x.com", "Cristian Soto")).toBe(true);
+    expect(canEditInventoryCapture("bases1@aldepositos.com", null)).toBe(true);
+  });
+
+  it("bloquea a otros monitores", () => {
+    expect(canEditInventoryCapture(null, "Operador X")).toBe(false);
   });
 });
 
@@ -61,8 +75,11 @@ describe("isAllowedInventoryOperator", () => {
     expect(isAllowedInventoryOperator(null, "Raúl Lezcano")).toBe(true);
   });
 
-  it("rechaza Cristian Soto y otros", () => {
+  it("rechaza Cristian Soto y otros (no son responsables)", () => {
     expect(isAllowedInventoryOperator("cristian@example.com", "Cristian Soto")).toBe(
+      false,
+    );
+    expect(isAllowedInventoryOperator("bases1@aldepositos.com", "Cristian Soto")).toBe(
       false,
     );
     expect(isAllowedInventoryOperator(null, "Operador X")).toBe(false);
@@ -242,6 +259,49 @@ describe("resolvePausedInventoryOperatorLabel", () => {
   });
 });
 
+describe("resolveInventoryActivityAt", () => {
+  it("usa el at del inventariador aunque updatedAt sea más reciente (corrector)", () => {
+    const at = resolveInventoryActivityAt(
+      baseTask({
+        updatedAt: "2026-07-17T23:00:00Z",
+        contributors: [
+          {
+            email: "jahir@example.com",
+            displayName: "Jahir",
+            at: "2026-07-17T10:00:00Z",
+          },
+        ],
+      }),
+    );
+    expect(at).toBe("2026-07-17T10:00:00Z");
+  });
+
+  it("no usa updatedAt si no hay inventariador (corrector no marca «ahora»)", () => {
+    expect(
+      resolveInventoryActivityAt(
+        baseTask({
+          updatedAt: "2026-07-17T12:00:00Z",
+          contributors: [],
+          inventoryCompletedBy: undefined,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("en pausa usa inventoryPausedAt si no hay contributor", () => {
+    expect(
+      resolveInventoryActivityAt(
+        baseTask({
+          status: "paused",
+          updatedAt: "2026-07-17T23:00:00Z",
+          inventoryPausedAt: "2026-07-17T08:00:00Z",
+          contributors: [],
+        }),
+      ),
+    ).toBe("2026-07-17T08:00:00Z");
+  });
+});
+
 describe("resolveAllowedInventoryOperator", () => {
   it("prefiere contributor permitido si inventoryCompletedBy es supervisor", () => {
     const task = baseTask({
@@ -373,6 +433,30 @@ describe("applyInventoryAttribution", () => {
     expect(next.inventoryCompletedBy?.displayName).toBe("Claudio Guitierrez");
     expect(next.contributors).toHaveLength(1);
     expect(inventoryCompletedByLabel(next)).toBe("Claudio Guitierrez");
+  });
+
+  it("Cristian corrige medidas sin quedar como responsable", () => {
+    const task = baseTask({
+      status: "in_progress",
+      contributors: [
+        {
+          email: "jahir@example.com",
+          displayName: "Jahir",
+          at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    const next = applyInventoryAttribution(task, {
+      userKey: "bases1@aldepositos.com",
+      userLabel: "Cristian Soto",
+      hasCapture: true,
+      isCompleted: true,
+      priorStatus: "in_progress",
+    });
+    expect(next.contributors).toHaveLength(1);
+    expect(next.contributors?.[0]?.displayName).toBe("Jahir");
+    expect(next.inventoryCompletedBy).toBeUndefined();
+    expect(inventoryCompletedByLabel(next)).toBe("Jahir Jimenez");
   });
 
   it("aún atribuye al completar por primera vez aunque withSession ya sea completed", () => {

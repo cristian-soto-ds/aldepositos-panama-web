@@ -85,7 +85,11 @@ import {
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
-import { canManageInventoryPause } from "@/lib/inventoryOperatorsAllowlist";
+import {
+  canEditInventoryCapture,
+  canManageInventoryPause,
+  isAllowedInventoryOperator,
+} from "@/lib/inventoryOperatorsAllowlist";
 import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
@@ -499,7 +503,7 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
     >
       <td className="px-2 py-1.5 text-center">
         <div
-          className="flex flex-col items-center justify-center gap-0.5"
+          className="inline-flex flex-row items-center justify-center gap-1"
           title={
             isReempaque
               ? `Línea ${displayNum} · Reempaque`
@@ -514,10 +518,10 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
             {displayNum}
           </span>
           {isReempaque ? (
-            <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">
-              <Recycle className="h-3 w-3" aria-hidden />
-              Reemp.
-            </span>
+            <Recycle
+              className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400"
+              aria-label={`Línea ${displayNum} reempaque`}
+            />
           ) : rowComplete ? (
             <CheckCircle2
               className="h-3.5 w-3.5 text-emerald-500"
@@ -692,6 +696,11 @@ export function QuickInventoryEntry({
     presenceUserKey,
     presenceUserLabel,
   );
+  /** Correctores (p. ej. Cristian) editan/guardan medidas sin atribución. */
+  const canEditCapture = canEditInventoryCapture(
+    presenceUserKey,
+    presenceUserLabel,
+  );
 
   const moduleTasks = useMemo(() => {
     const filtered = tasks.filter((t) => {
@@ -776,6 +785,8 @@ export function QuickInventoryEntry({
   // BD confirme la eliminación (deja de traerlas). Evita que una fila borrada
   // "reaparezca" y entre en bucle de borrado.
   const pendingDeletionIdsRef = useRef<Set<string>>(new Set());
+  /** IDs vistos en el último remoto (live o BD) — detecta borrados antes del baseline. */
+  const lastSeenRemoteIdsRef = useRef<Set<string>>(new Set());
 
   const prepareRowsFromRemote = useCallback(
     (remote: Task): MeasureRow[] => {
@@ -841,6 +852,13 @@ export function QuickInventoryEntry({
       // Payload remoto vacío = incompleto; no marcar borrados masivos.
       if (remoteRows.length > 0) {
         const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
+        // Borrado en vivo antes de persistir: la fila estuvo en el último remoto
+        // y ya no viene → tombstone (aunque aún no esté en el baseline de BD).
+        for (const id of lastSeenRemoteIdsRef.current) {
+          if (id && !remoteIds.has(id)) {
+            pendingDeletionIdsRef.current.add(id);
+          }
+        }
         for (const base of serverBaselineRowsRef.current) {
           const id = String(base.id ?? "");
           if (id && !remoteIds.has(id)) {
@@ -848,6 +866,7 @@ export function QuickInventoryEntry({
             pendingDeletionIdsRef.current.add(id);
           }
         }
+        lastSeenRemoteIdsRef.current = remoteIds;
       }
       return mergeConcurrentQuickRows(
         serverBaselineRowsRef.current,
@@ -862,6 +881,7 @@ export function QuickInventoryEntry({
   useEffect(() => {
     // Al cambiar de RA, descarta eliminaciones pendientes de la tarea anterior.
     pendingDeletionIdsRef.current.clear();
+    lastSeenRemoteIdsRef.current = new Set();
     if (!selectedTask) return;
     setMeasureRows((prev) => {
       const next = stripQuickRowsForPersist(prev);
@@ -933,7 +953,7 @@ export function QuickInventoryEntry({
     getLiveTaskMeta,
     userKey: presenceUserKey,
     liveReferenceMode: referenceMode,
-    preferRemoteUpdates: !canPauseInventory,
+    preferRemoteUpdates: !canEditCapture,
     onRemoteReferenceMode: (mode) => {
       if (isReferenceCaptureMode(mode) && mode !== referenceModeRef.current) {
         referenceModeRef.current = mode;
@@ -970,15 +990,16 @@ export function QuickInventoryEntry({
 
   useEffect(() => {
     const key = (presenceUserKey ?? "").trim();
-    if (!key) {
-      void clearWorkPresence(getSharedWorkPresenceTabId());
+    const tabId = getSharedWorkPresenceTabId();
+    // Correctores/monitores revisan sin figurar «en captura» ni «en línea ahora».
+    if (!key || !isAllowedInventoryOperator(key, presenceUserLabel)) {
+      void clearWorkPresence(tabId);
       return;
     }
     const rawLabel = String(presenceUserLabel ?? "").trim();
     const label =
       rawLabel || presenceVisibleLabel(presenceUserLabel, key.includes("@") ? key : null);
     const presenceModule = "quick" as const;
-    const tabId = getSharedWorkPresenceTabId();
     const send = () => {
       publishWorkPresence({
         tabId,
@@ -1935,9 +1956,9 @@ export function QuickInventoryEntry({
       return;
     }
 
-    // Monitores: no deben pisar medidas del inventariador, pero sí pueden
+    // Sin permiso de captura: no pisar medidas del inventariador; solo
     // sincronizar marcas de reempaque para que el equipo las vea en vivo.
-    if (!canPauseInventory) {
+    if (!canEditCapture) {
       const serverRows = (Array.isArray(task.measureData) ? task.measureData : []) as MeasureRow[];
       const localPersisted = stripQuickRowsForPersist(rows);
       const { rows: merged, changed: reempaqueChanged } =
@@ -2076,9 +2097,6 @@ export function QuickInventoryEntry({
       JSON.stringify(task.measureData ?? []) !== JSON.stringify(persistedRows);
     const referenceModeChanged =
       (task.referenceMode ?? null) !== (referenceModeRef.current ?? null);
-    // Solo reanudar pausa si hubo cambio real de captura (no por abrir el RA).
-    const forceResume = task.status === "paused" && measureChanged;
-
     const withData: Task = {
       ...task,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
@@ -2092,13 +2110,24 @@ export function QuickInventoryEntry({
       manualTotalWeight:
         task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
     };
-    const withSession = applyInventorySessionOnSave({
-      task: withData,
-      hasCapture,
-      isCompleted,
-      workStatusWhenActive: "in_progress",
-      forceResume,
-    });
+    // Corrector: solo medidas; no reanudar/completar ni marcar actividad de inventario.
+    const withSession = canPauseInventory
+      ? applyInventorySessionOnSave({
+          task: withData,
+          hasCapture,
+          isCompleted,
+          workStatusWhenActive: "in_progress",
+          forceResume:
+            task.status === "paused" && measureChanged,
+        })
+      : {
+          ...withData,
+          status: task.status,
+          inventoryStartedAt: task.inventoryStartedAt,
+          inventoryPausedAt: task.inventoryPausedAt,
+          inventoryPausedMs: task.inventoryPausedMs,
+          updatedAt: new Date().toISOString(),
+        };
 
     const statusUnchanged = withSession.status === task.status;
     const layoutNow = captureLayoutRef.current;
@@ -2321,7 +2350,7 @@ export function QuickInventoryEntry({
 
   const saveOrder = async () => {
     if (!selectedTask) return;
-    if (!canPauseInventory) {
+    if (!canEditCapture) {
       clearTask();
       return;
     }
@@ -2391,13 +2420,23 @@ export function QuickInventoryEntry({
           ? selectedTask.manualTotalWeight
           : 0,
     };
-    const withSession = applyInventorySessionOnSave({
-      task: withData,
-      hasCapture,
-      isCompleted,
-      workStatusWhenActive: "in_progress",
-      forceResume: selectedTask.status === "paused" && measureChanged,
-    });
+    const withSession = canPauseInventory
+      ? applyInventorySessionOnSave({
+          task: withData,
+          hasCapture,
+          isCompleted,
+          workStatusWhenActive: "in_progress",
+          forceResume:
+            selectedTask.status === "paused" && measureChanged,
+        })
+      : {
+          ...withData,
+          status: selectedTask.status,
+          inventoryStartedAt: selectedTask.inventoryStartedAt,
+          inventoryPausedAt: selectedTask.inventoryPausedAt,
+          inventoryPausedMs: selectedTask.inventoryPausedMs,
+          updatedAt: new Date().toISOString(),
+        };
 
     const updatedTask: Task = applyInventoryAttribution(withSession, {
       userKey: presenceUserKey,

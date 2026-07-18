@@ -10,6 +10,7 @@ import {
 import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
 import {
   resolveActiveInventoryOperatorLabel,
+  resolveInventoryActivityAt,
   resolveLiveInventoryOperator,
   resolvePausedInventoryOperatorLabel,
 } from "@/lib/inventoryOperatorsAllowlist";
@@ -129,7 +130,7 @@ function RaTaskCardInner({
               Por {completedBy}
             </span>
           ) : null}
-          <LastUpdatedLabel at={t.updatedAt} nowMs={nowMs} />
+          <LastUpdatedLabel at={resolveInventoryActivityAt(t)} nowMs={nowMs} />
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <div

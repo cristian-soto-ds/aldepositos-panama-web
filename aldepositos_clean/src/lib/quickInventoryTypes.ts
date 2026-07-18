@@ -227,6 +227,20 @@ export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
 }
 
+/** True si la fila tiene captura real (no solo cáscara vacía / bultos=1 por defecto). */
+export function rowHasCapturedMeasures(row: QuickMeasureRow): boolean {
+  if (row.reempaque === true) return true;
+  const l = parseFloat(String(row.l ?? 0)) || 0;
+  const w = parseFloat(String(row.w ?? 0)) || 0;
+  const h = parseFloat(String(row.h ?? 0)) || 0;
+  const weight = parseFloat(String(row.weight ?? 0)) || 0;
+  const palletWeight = parseFloat(String(row.palletWeight ?? 0)) || 0;
+  if (l > 0 || w > 0 || h > 0 || weight > 0 || palletWeight > 0) return true;
+  const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
+  if (bultos > 1) return true;
+  return false;
+}
+
 export type QuickRowMissingField = "referencia" | "bultos" | "largo" | "ancho" | "alto";
 
 export const QUICK_ROW_MISSING_LABELS: Record<QuickRowMissingField, string> = {

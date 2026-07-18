@@ -133,6 +133,27 @@ export function scheduleTaskLivePublish(params: {
   });
 }
 
+/** Publica al instante (alta/baja de filas): cancela el debounce pendiente. */
+export function flushTaskLivePublish(params: {
+  taskId: string;
+  userKey: string;
+  measureData: unknown[];
+  currentBultos: number;
+  status: string;
+  capturedWeight?: number;
+  rowCount?: number;
+  completeRowCount?: number;
+  referenceMode?: string;
+}) {
+  const key = `task:${params.taskId}`;
+  const existing = publishTimers.get(key);
+  if (existing) {
+    clearTimeout(existing);
+    publishTimers.delete(key);
+  }
+  void publishTaskLiveUpdate(params);
+}
+
 async function publishTaskLiveUpdate(params: {
   taskId: string;
   userKey: string;

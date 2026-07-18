@@ -73,4 +73,44 @@ describe("mergeConcurrentQuickRows", () => {
     const merged = mergeConcurrentQuickRows(baseline, local, remote);
     expect(merged[0]?.l).toBe("10.00");
   });
+
+  it("propaga borrado remoto: deja de mostrar la fila eliminada por otro", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("2", { referencia: "B", bultos: "1" }),
+      row("3", { referencia: "C", bultos: "1" }),
+    ];
+    const local = [
+      row("1", { referencia: "A", bultos: "1", l: "10" }),
+      row("2", { referencia: "B", bultos: "1" }),
+      row("3", { referencia: "C", bultos: "1" }),
+    ];
+    // El otro inventariador borró la fila 2.
+    const remote = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("3", { referencia: "C", bultos: "1", weight: "2" }),
+    ];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged.map((r) => r.id)).toEqual(["1", "3"]);
+    expect(merged[0]).toMatchObject({ l: "10.00" });
+    expect(merged[1]).toMatchObject({ weight: "2.00" });
+  });
+
+  it("propaga borrado local aunque el remoto aún traiga la fila", () => {
+    const baseline = [row("1"), row("2")];
+    const local = [row("1", { l: "5" })];
+    const remote = [row("1"), row("2", { l: "8" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged.map((r) => r.id)).toEqual(["1"]);
+    expect(merged[0]).toMatchObject({ l: "5.00" });
+  });
+
+  it("no interpreta un remoto vacío como borrar todas las filas", () => {
+    const baseline = [row("1"), row("2")];
+    const local = [row("1", { l: "1" }), row("2", { l: "2" })];
+    const merged = mergeConcurrentQuickRows(baseline, local, []);
+    expect(merged).toHaveLength(2);
+  });
 });

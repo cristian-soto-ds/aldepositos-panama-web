@@ -486,6 +486,54 @@ export function ReekonCaptureView({
     onAddRow();
   }, [palletized, activeRow, onAddRowToPallet, onAddRow]);
 
+  const activePalletNum = activeRow ? palletOf(activeRow) : 1;
+
+  const palletSummaries = useMemo(() => {
+    if (!palletized) return [];
+    const map = new Map<number, { count: number; firstRowId: string; completed: number }>();
+    for (const row of measureRows) {
+      const p = palletOf(row);
+      const cur = map.get(p);
+      if (!cur) {
+        map.set(p, {
+          count: 1,
+          firstRowId: row.id,
+          completed: isQuickRowComplete(row) ? 1 : 0,
+        });
+      } else {
+        cur.count += 1;
+        if (isQuickRowComplete(row)) cur.completed += 1;
+      }
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([num, info]) => ({ num, ...info }));
+  }, [palletized, measureRows]);
+
+  const nextPalletNum = useMemo(() => {
+    if (palletSummaries.length === 0) return 1;
+    return Math.max(...palletSummaries.map((p) => p.num)) + 1;
+  }, [palletSummaries]);
+
+  const rowsInActivePallet = useMemo(() => {
+    if (!palletized || !activeRow) return [];
+    return measureRows.filter((r) => palletOf(r) === activePalletNum);
+  }, [palletized, activeRow, measureRows, activePalletNum]);
+
+  const rowIndexInPallet = useMemo(() => {
+    if (!activeId) return 0;
+    const idx = rowsInActivePallet.findIndex((r) => r.id === activeId);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [rowsInActivePallet, activeId]);
+
+  const selectPallet = useCallback(
+    (palletNum: number) => {
+      const first = measureRows.find((r) => palletOf(r) === palletNum);
+      if (first) selectRow(first.id);
+    },
+    [measureRows, selectRow],
+  );
+
   const goPrev = () => {
     if (activeIndex > 0) selectRow(measureRows[activeIndex - 1].id);
   };
@@ -754,10 +802,10 @@ export function ReekonCaptureView({
                 type="button"
                 onClick={onAddPallet}
                 className="reekon-ref-chip border border-dashed border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                aria-label="Nueva paleta"
+                aria-label={`Nueva paleta ${nextPalletNum}`}
               >
                 <Layers className="h-3.5 w-3.5" />
-                Paleta
+                Paleta {nextPalletNum}
               </button>
             ) : null}
           </div>
@@ -789,9 +837,55 @@ export function ReekonCaptureView({
                   />
                 </div>
               ) : palletized ? (
-                <div className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-2 text-sm font-bold text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300">
-                  <Layers className="h-4 w-4" />
-                  Paleta {palletOf(activeRow)}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                      {palletSummaries.map((p) => {
+                        const isActive = p.num === activePalletNum;
+                        const allDone = p.completed === p.count && p.count > 0;
+                        return (
+                          <button
+                            key={p.num}
+                            type="button"
+                            onClick={() => selectPallet(p.num)}
+                            className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-bold transition active:scale-[0.98] ${
+                              isActive
+                                ? "border-violet-500 bg-violet-100 text-violet-900 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-100"
+                                : allDone
+                                  ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                                  : "border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                            }`}
+                            aria-pressed={isActive}
+                            aria-label={`Ir a paleta ${p.num}`}
+                          >
+                            <Layers className="h-3.5 w-3.5 shrink-0" />
+                            P{p.num}
+                            <span className="text-[10px] font-semibold opacity-70">
+                              {p.completed}/{p.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {onAddPallet ? (
+                      <button
+                        type="button"
+                        onClick={onAddPallet}
+                        className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border-2 border-dashed border-violet-400 bg-violet-50 px-3 text-sm font-bold text-violet-800 active:scale-[0.98] dark:border-violet-500 dark:bg-violet-950/40 dark:text-violet-200"
+                        aria-label={`Crear paleta ${nextPalletNum}`}
+                      >
+                        <Plus className="h-4 w-4" />
+                        Paleta {nextPalletNum}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-2 text-sm font-bold text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300">
+                    <Layers className="h-4 w-4" />
+                    Paleta {activePalletNum}
+                    <span className="font-semibold text-violet-500 dark:text-violet-400">
+                      · Fila {rowIndexInPallet}/{rowsInActivePallet.length || 1}
+                    </span>
+                  </div>
                 </div>
               ) : null}
 
@@ -932,12 +1026,12 @@ export function ReekonCaptureView({
               </span>
             )}
           </div>
-          <div className="flex items-stretch gap-2.5">
+          <div className="flex items-stretch gap-2">
             <button
               type="button"
               onClick={handleDeleteCurrent}
               disabled={measureRows.length <= 1}
-              className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 active:scale-95 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"
+              className="flex h-14 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 active:scale-95 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400 sm:w-14"
               aria-label="Eliminar línea"
             >
               <Trash2 className="h-6 w-6" />
@@ -952,41 +1046,67 @@ export function ReekonCaptureView({
                 <Play className="h-5 w-5" />
                 Reanudar
               </button>
-            ) : canPause && onPause ? (
-              <button
-                type="button"
-                onClick={onPause}
-                disabled={isSaving}
-                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-              >
-                <Pause className="h-5 w-5" />
-                Pausar
-              </button>
+            ) : canPause && onPause && !palletized ? (
+              <>
+                <button
+                  type="button"
+                  onClick={onPause}
+                  disabled={isSaving}
+                  className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                  <Pause className="h-5 w-5" />
+                  Pausar
+                </button>
+                <button
+                  type="button"
+                  onClick={addRowHere}
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  aria-label="Agregar línea"
+                >
+                  <Plus className="h-6 w-6" />
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                onClick={addRowHere}
-                className="flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 text-base font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-              >
-                <Plus className="h-5 w-5" />
-                {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Línea"}
-              </button>
+              <>
+                {canPause && onPause && palletized ? (
+                  <button
+                    type="button"
+                    onClick={onPause}
+                    disabled={isSaving}
+                    className="flex h-14 w-12 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                    aria-label="Pausar"
+                  >
+                    <Pause className="h-5 w-5" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={addRowHere}
+                  className="flex h-14 min-w-0 flex-1 items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-slate-50 px-2 text-sm font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 sm:gap-2 sm:text-base"
+                >
+                  <Plus className="h-5 w-5 shrink-0" />
+                  <span className="truncate">
+                    {palletized ? `Fila P${activePalletNum}` : "Línea"}
+                  </span>
+                </button>
+                {palletized && onAddPallet ? (
+                  <button
+                    type="button"
+                    onClick={onAddPallet}
+                    className="flex h-14 min-w-0 flex-1 items-center justify-center gap-1 rounded-2xl border-2 border-violet-400 bg-violet-50 px-2 text-sm font-bold text-violet-800 active:scale-[0.98] dark:border-violet-500 dark:bg-violet-950/40 dark:text-violet-200 sm:gap-2 sm:text-base"
+                    aria-label={`Crear paleta ${nextPalletNum}`}
+                  >
+                    <Layers className="h-5 w-5 shrink-0" />
+                    <span className="truncate">Paleta {nextPalletNum}</span>
+                  </button>
+                ) : null}
+              </>
             )}
-            {!isPaused && canPause && onPause ? (
-              <button
-                type="button"
-                onClick={addRowHere}
-                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                aria-label={palletized && activeRow ? `Agregar fila P${palletOf(activeRow)}` : "Agregar línea"}
-              >
-                <Plus className="h-6 w-6" />
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={onSave}
               disabled={isSaving}
-              className="flex h-14 flex-[1.5] items-center justify-center gap-2 rounded-2xl bg-blue-600 text-base font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60"
+              className="flex h-14 min-w-0 flex-[1.2] items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-2 text-sm font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60 sm:flex-[1.5] sm:gap-2 sm:text-base"
             >
               {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
               Guardar

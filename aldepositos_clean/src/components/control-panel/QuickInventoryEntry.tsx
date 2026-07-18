@@ -498,22 +498,38 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
       }`}
     >
       <td className="px-2 py-1.5 text-center">
-        {isReempaque ? (
-          <div className="flex flex-col items-center gap-0.5" title="Reempaque: no capturar bultos, peso ni medidas">
-            <Recycle className="h-4 w-4 text-violet-500" aria-hidden />
-            <span className="text-[8px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">
-              Reemp.
-            </span>
-          </div>
-        ) : rowComplete ? (
-          <CheckCircle2 className="mx-auto h-4 w-4 text-emerald-500" aria-label="Línea completa" />
-        ) : rowPartial ? (
-          <Circle className="mx-auto h-4 w-4 text-amber-400 fill-amber-100 dark:fill-amber-950/50" aria-label="Línea incompleta" />
-        ) : (
-          <span className="text-sm font-bold tabular-nums text-slate-300 dark:text-slate-600">
+        <div
+          className="flex flex-col items-center justify-center gap-0.5"
+          title={
+            isReempaque
+              ? `Línea ${displayNum} · Reempaque`
+              : rowComplete
+                ? `Línea ${displayNum} · Completa`
+                : rowPartial
+                  ? `Línea ${displayNum} · Incompleta`
+                  : `Línea ${displayNum}`
+          }
+        >
+          <span className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">
             {displayNum}
           </span>
-        )}
+          {isReempaque ? (
+            <span className="inline-flex items-center gap-0.5 text-[8px] font-black uppercase tracking-wider text-violet-600 dark:text-violet-400">
+              <Recycle className="h-3 w-3" aria-hidden />
+              Reemp.
+            </span>
+          ) : rowComplete ? (
+            <CheckCircle2
+              className="h-3.5 w-3.5 text-emerald-500"
+              aria-label={`Línea ${displayNum} completa`}
+            />
+          ) : rowPartial ? (
+            <Circle
+              className="h-3.5 w-3.5 fill-amber-100 text-amber-400 dark:fill-amber-950/50"
+              aria-label={`Línea ${displayNum} incompleta`}
+            />
+          ) : null}
+        </div>
       </td>
 
       {showReferenceColumn && (
@@ -822,6 +838,17 @@ export function QuickInventoryEntry({
 
   const mergeRowsWithRemote = useCallback(
     (localRows: MeasureRow[], remoteRows: MeasureRow[]) => {
+      // Payload remoto vacío = incompleto; no marcar borrados masivos.
+      if (remoteRows.length > 0) {
+        const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
+        for (const base of serverBaselineRowsRef.current) {
+          const id = String(base.id ?? "");
+          if (id && !remoteIds.has(id)) {
+            // Borrado por otro usuario: tombstone hasta que la BD lo confirme.
+            pendingDeletionIdsRef.current.add(id);
+          }
+        }
+      }
       return mergeConcurrentQuickRows(
         serverBaselineRowsRef.current,
         localRows,
@@ -1475,6 +1502,9 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => flushAutosaveRef.current(), 0);
+    }
   };
 
   /**
@@ -1566,6 +1596,9 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => flushAutosaveRef.current(), 0);
+    }
   };
 
   /** Números de paleta actualmente presentes (propios y de otros inventariadores). */
@@ -1648,6 +1681,9 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => flushAutosaveRef.current(), 0);
+    }
   };
 
   /** Paletizado: elimina una paleta completa (todas sus filas) y renumera el resto. */
@@ -1679,8 +1715,9 @@ export function QuickInventoryEntry({
       const remaining = prev.filter(
         (r) => Math.max(1, Number(r.pallet) || 1) !== palletNum,
       );
+      let next: MeasureRow[];
       if (remaining.length === 0) {
-        return [
+        next = [
           {
             ...createEmptyMeasureRow(),
             bultos: "1",
@@ -1688,9 +1725,15 @@ export function QuickInventoryEntry({
             pallet: 1,
           },
         ];
+      } else {
+        next = renumberConsecutiveReferences(renumberPallets(remaining));
       }
-      return renumberConsecutiveReferences(renumberPallets(remaining));
+      latestRowsRef.current = next;
+      return next;
     });
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => flushAutosaveRef.current(), 0);
+    }
   };
 
   const deleteRow = useCallback(
@@ -1706,10 +1749,18 @@ export function QuickInventoryEntry({
         // Marca la fila como eliminada para que un eco remoto no la reinserte.
         pendingDeletionIdsRef.current.add(idToRemove);
         const next = prev.filter((r) => r.id !== idToRemove);
-        return referenceMode !== "with"
-          ? renumberConsecutiveReferences(next)
-          : next;
+        const normalized =
+          referenceMode !== "with"
+            ? renumberConsecutiveReferences(next)
+            : next;
+        // Síncrono: el flush inmediato no debe persistir el estado anterior.
+        latestRowsRef.current = normalized;
+        return normalized;
       });
+      // Persistir al instante para que los demás vean 24 en vez de 25.
+      if (typeof window !== "undefined") {
+        window.setTimeout(() => flushAutosaveRef.current(), 0);
+      }
     },
     [referenceMode],
   );
@@ -2153,18 +2204,26 @@ export function QuickInventoryEntry({
       autosaveTimerRef.current = null;
     }
     const task = latestTaskRef.current;
+    const rows = latestRowsRef.current;
     if (task) {
       persistQuickDraft(
         task.id,
-        latestRowsRef.current,
+        rows,
         referenceModeRef.current,
         captureLayout,
         { force: true },
       );
     }
-    const hash = pendingAutosaveHashRef.current;
-    if (task && hash && hash !== lastSavedHashRef.current) {
-      void runAutosave(task, latestRowsRef.current, hash);
+    // Hash desde latestRowsRef: tras add/delete el setTimeout(0) puede
+    // correr antes del useEffect que actualiza pendingAutosaveHashRef.
+    const hash = JSON.stringify({
+      rows,
+      referenceMode: referenceModeRef.current,
+      captureLayout: captureLayoutRef.current,
+    });
+    pendingAutosaveHashRef.current = hash;
+    if (task && hash !== lastSavedHashRef.current) {
+      void runAutosave(task, rows, hash);
     }
   };
   flushAutosaveRef.current = flushAutosave;
@@ -2910,7 +2969,9 @@ export function QuickInventoryEntry({
             >
               <thead className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 text-[10px] font-semibold text-slate-600 shadow-sm backdrop-blur-sm dark:border-slate-600 dark:bg-slate-900/95 dark:text-slate-300 md:text-xs supports-[backdrop-filter]:bg-white/90">
                 <tr>
-                  <th className="w-10 px-2 py-2.5 text-center" title="Número de línea">#</th>
+                  <th className="w-12 px-2 py-2.5 text-center" title="Consecutivo de línea">
+                    #
+                  </th>
                   {showReferenceColumn && (
                     <th className="min-w-[7rem] px-2 py-2.5 text-left">Referencia</th>
                   )}
@@ -2944,16 +3005,13 @@ export function QuickInventoryEntry({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {(() => {
                   let lastPallet: number | null = null;
-                  let palletRowNum = 0;
                   return measureRows.map((row, idx) => {
                   const rowPallet = Math.max(1, Number(row.pallet) || 1);
                   const isNewPallet = palletized && rowPallet !== lastPallet;
                   if (isNewPallet) {
                     lastPallet = rowPallet;
-                    palletRowNum = 0;
                   }
-                  palletRowNum += 1;
-                  const displayNum = palletized ? palletRowNum : idx + 1;
+                  const displayNum = idx + 1;
 
                   return (
                     <React.Fragment key={row.id}>

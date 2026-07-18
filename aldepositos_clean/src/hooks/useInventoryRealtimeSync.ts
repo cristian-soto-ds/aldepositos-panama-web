@@ -121,8 +121,11 @@ export function useInventoryRealtimeSync<TRow>({
           ? mergeRowsWithRemote(localRows, remoteRows)
           : remoteRows;
 
-      // Eco de BD atrasado (menos filas que lo local sucio): no reescribir la UI.
+      // Sin merge (legado): eco de BD con menos filas y altas locales → no pisar UI.
+      // Con merge a 3 vías NO se corta: un borrado remoto (25→24) debe aplicarse
+      // aunque el otro inventariador tenga ediciones locales / filas nuevas.
       if (
+        !mergeRowsWithRemote &&
         isDirty &&
         !fromLive &&
         remoteRows.length < localRows.length

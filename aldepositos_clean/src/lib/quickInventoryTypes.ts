@@ -435,11 +435,20 @@ function mergeQuickRowThreeWay<T extends QuickMeasureRow>(
   local: T | undefined,
   remote: T | undefined,
 ): T | null {
+  // Ambos ausentes.
   if (!local && !remote) return null;
-  if (local && !remote) return stripQuickMeasureRow(local) as T;
-  if (remote && !local) return stripQuickMeasureRow(remote) as T;
 
-  const id = String(local!.id || remote!.id || "");
+  // Existía en el baseline: si falta en local O en remoto = eliminación.
+  // Así, cuando A borra una fila, B deja de verla (y viceversa).
+  if (base) {
+    if (!local || !remote) return null;
+  } else {
+    // No estaba en baseline → fila nueva de un lado.
+    if (local && !remote) return stripQuickMeasureRow(local) as T;
+    if (remote && !local) return stripQuickMeasureRow(remote) as T;
+  }
+
+  const id = String(local!.id || remote!.id || base?.id || "");
   const out: QuickMeasureRow = { id, referencia: "", bultos: "" };
 
   for (const key of MERGE_ROW_KEYS) {
@@ -460,8 +469,8 @@ export type MergeConcurrentQuickRowsOptions = {
 /**
  * Une capturas concurrentes de varios inventariadores sobre el mismo RA.
  * - Filas nuevas de cualquiera se conservan.
+ * - Eliminaciones (fila en baseline ausente en local o remoto) se respetan.
  * - En la misma fila, cada campo se resuelve a 3 vías vs el último estado persistido.
- * Evita el clásico last-write-wins que borraba la medida del otro al guardar.
  */
 export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   baselineRows: T[],
@@ -469,6 +478,12 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   remoteRows: T[],
   options?: MergeConcurrentQuickRowsOptions,
 ): T[] {
+  // Payload remoto vacío = incompleto (slim/eco), no un borrado masivo real.
+  // En captura siempre queda ≥1 fila; [] no debe vaciar el editor local.
+  if (remoteRows.length === 0 && localRows.length > 0) {
+    return stripQuickRowsForPersist(localRows) as T[];
+  }
+
   const deleted = new Set(
     Array.from(options?.deletedIds ?? []).map((id) => String(id)),
   );
@@ -481,6 +496,11 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   const remoteById = new Map(
     remoteRows.map((r) => [String(r.id ?? ""), r] as const),
   );
+
+  // Remoto quitó una fila que seguía en baseline/local → borrado remoto.
+  for (const id of baseById.keys()) {
+    if (!remoteById.has(id) && localById.has(id)) deleted.add(id);
+  }
 
   const order: string[] = [];
   const seen = new Set<string>();
@@ -497,6 +517,7 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
 
   const merged: T[] = [];
   for (const id of order) {
+    if (deleted.has(id)) continue;
     const row = mergeQuickRowThreeWay(
       baseById.get(id),
       localById.get(id),

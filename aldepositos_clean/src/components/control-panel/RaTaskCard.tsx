@@ -78,7 +78,7 @@ function RaTaskCardInner({
           onSelect(t);
         }
       }}
-      className={`group flex cursor-pointer flex-col gap-1 rounded-lg border px-2.5 py-1.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:gap-2 sm:rounded-xl sm:p-4 ${
+      className={`group flex cursor-pointer flex-col gap-1.5 rounded-xl border px-3 py-2.5 shadow-sm transition-all hover:border-blue-200 hover:shadow-md dark:hover:border-blue-800 sm:gap-2 sm:rounded-xl sm:p-4 ${
         viewMode === "priority"
           ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20"
           : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"

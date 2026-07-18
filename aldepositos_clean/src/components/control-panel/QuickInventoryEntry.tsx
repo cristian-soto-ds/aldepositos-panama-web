@@ -2159,9 +2159,9 @@ export function QuickInventoryEntry({
   // Lista de órdenes (sin task seleccionado) — encabezado fijo, solo la lista con barra de desplazamiento
   if (!selectedTask) {
     return (
-      <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">
+      <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
         <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
-          <div className="mb-1.5 shrink-0 space-y-1.5 sm:mb-4 sm:space-y-4 md:mb-6 md:space-y-6">
+          <div className="mb-2 shrink-0 space-y-2 sm:mb-4 sm:space-y-4 md:mb-6 md:space-y-6">
             <div className="flex flex-row items-center justify-between gap-2 sm:gap-4">
               <div>
                 <h2 className="flex items-center gap-1.5 text-base font-bold text-[#16263F] dark:text-slate-100 sm:gap-2 sm:text-fluid-title md:gap-3">
@@ -2251,8 +2251,8 @@ export function QuickInventoryEntry({
             )}
           </div>
 
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-8 sm:pb-20">
-            <div className="grid grid-cols-1 gap-1 sm:gap-3">
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-[max(6rem,calc(env(safe-area-inset-bottom,0px)+4.5rem))] sm:pb-20">
+            <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
               {displayedTasks.length === 0 ? (
                 <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center font-bold text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500 md:p-16">
                   No hay órdenes{" "}
@@ -2266,13 +2266,7 @@ export function QuickInventoryEntry({
               ) : (
                 <>
                   {visibleListTasks.map((t) => (
-                    <div
-                      key={t.id}
-                      style={{
-                        contentVisibility: "auto",
-                        containIntrinsicSize: "0 64px",
-                      }}
-                    >
+                    <div key={t.id}>
                       <RaTaskCard
                         task={t}
                         viewMode={viewMode}

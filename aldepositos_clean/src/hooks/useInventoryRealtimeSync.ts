@@ -24,6 +24,13 @@ type InventoryRealtimeSyncOptions<TRow> = {
   latestTaskRef: React.MutableRefObject<Task | null>;
   buildHash: (rows: TRow[]) => string;
   prepareRowsFromRemote: (remote: Task) => TRow[];
+  /**
+   * Fusiona filas locales con remotas (3 vías) para colaboración multi-usuario.
+   * Si no se pasa, se reemplaza el estado local (comportamiento anterior).
+   */
+  mergeRowsWithRemote?: (localRows: TRow[], remoteRows: TRow[]) => TRow[];
+  /** Snapshot persistido del servidor (para el merge a 3 vías). */
+  onServerSnapshot?: (rows: TRow[]) => void;
   getLiveTaskMeta: (rows: TRow[]) => {
     currentBultos: number;
     status: string;
@@ -48,6 +55,7 @@ type InventoryRealtimeSyncOptions<TRow> = {
  * Sincroniza el editor con:
  * - Broadcast en vivo (~80 ms) mientras otro operador escribe
  * - Supabase Realtime / refetch al guardar en BD
+ * - Merge concurrente para no pisar medidas de otro inventariador
  */
 export function useInventoryRealtimeSync<TRow>({
   tasks,
@@ -61,6 +69,8 @@ export function useInventoryRealtimeSync<TRow>({
   latestTaskRef,
   buildHash,
   prepareRowsFromRemote,
+  mergeRowsWithRemote,
+  onServerSnapshot,
   getLiveTaskMeta,
   userKey,
   onTaskRemoved,
@@ -87,15 +97,78 @@ export function useInventoryRealtimeSync<TRow>({
 
   const applyRemote = useCallback(
     (remote: Task, fromLive = false) => {
-      const newRows = prepareRowsFromRemote(remote);
+      const remoteRows = prepareRowsFromRemote(remote);
+      // Solo el estado persistido avanza el baseline (no el broadcast efímero).
+      if (!fromLive) {
+        onServerSnapshot?.(remoteRows);
+      }
+      const localRows = latestRowsRef.current;
+      const localHash = buildHash(localRows);
+      const isDirty = localHash !== lastSavedHashRef.current;
 
-      // Si el contenido no cambió (caso típico tras un autosave propio), no
-      // reemplazamos las filas: así evitamos repintar toda la tabla y perder la
-      // memoización de filas. Solo refrescamos los metadatos de la tarea.
+      // Colaboración: si hay cambios locales (u otro usuario midiendo), fusionar
+      // en vez de reemplazar — así no se pierde la medida de nadie.
+      const shouldMerge =
+        Boolean(mergeRowsWithRemote) &&
+        (isDirty || fromLive || preferRemoteUpdates) &&
+        localRows.length > 0;
+
+      const newRows =
+        shouldMerge && mergeRowsWithRemote
+          ? mergeRowsWithRemote(localRows, remoteRows)
+          : remoteRows;
+
+      // Eco de BD atrasado (menos filas que lo local sucio): no reescribir la UI.
+      if (
+        isDirty &&
+        !fromLive &&
+        remoteRows.length < localRows.length
+      ) {
+        const remoteIds = new Set(
+          remoteRows.map((r) => String((r as { id?: string }).id ?? "")),
+        );
+        const hasLocalOnly = localRows.some(
+          (r) => !remoteIds.has(String((r as { id?: string }).id ?? "")),
+        );
+        if (hasLocalOnly) {
+          setSelectedTask((prev) => {
+            if (!prev || prev.id !== remote.id) return remote;
+            return {
+              ...prev,
+              status: remote.status,
+              currentBultos: remote.currentBultos,
+              expectedBultos: remote.expectedBultos,
+              capturedWeight: remote.capturedWeight,
+              updatedAt: remote.updatedAt,
+              measureData: localRows as unknown[],
+            };
+          });
+          lastRemoteMeasureHashRef.current = JSON.stringify(
+            remote.measureData ?? [],
+          );
+          pendingRemoteTaskRef.current = null;
+          setRemoteUpdatePending(false);
+          return;
+        }
+      }
+
       if (buildHash(newRows) === buildHash(latestRowsRef.current)) {
-        setSelectedTask(remote);
-        latestTaskRef.current = remote;
-        if (!fromLive) {
+        setSelectedTask((prev) => {
+          if (!prev || prev.id !== remote.id) return remote;
+          return {
+            ...prev,
+            ...remote,
+            measureData: newRows as unknown[],
+            currentBultos: remote.currentBultos,
+            status: remote.status,
+          };
+        });
+        latestTaskRef.current = {
+          ...(latestTaskRef.current ?? remote),
+          ...remote,
+          measureData: newRows as unknown[],
+        };
+        if (!fromLive && !isDirty) {
           lastSavedHashRef.current = buildHash(newRows);
         }
         lastRemoteMeasureHashRef.current = JSON.stringify(remote.measureData ?? []);
@@ -105,10 +178,20 @@ export function useInventoryRealtimeSync<TRow>({
       }
 
       setMeasureRows(newRows);
-      setSelectedTask(remote);
       latestRowsRef.current = newRows;
-      latestTaskRef.current = remote;
-      if (!fromLive) {
+      const nextTask: Task = {
+        ...(latestTaskRef.current && latestTaskRef.current.id === remote.id
+          ? latestTaskRef.current
+          : remote),
+        ...remote,
+        measureData: newRows as unknown[],
+      };
+      setSelectedTask(nextTask);
+      latestTaskRef.current = nextTask;
+
+      // Si fusionamos estando dirty, NO marcamos como guardado: el autosave
+      // persistirá el resultado unido. Si estábamos limpios, sí.
+      if (!fromLive && !isDirty) {
         lastSavedHashRef.current = buildHash(newRows);
       }
       lastRemoteMeasureHashRef.current = JSON.stringify(remote.measureData ?? []);
@@ -120,6 +203,9 @@ export function useInventoryRealtimeSync<TRow>({
       latestRowsRef,
       latestTaskRef,
       lastSavedHashRef,
+      mergeRowsWithRemote,
+      onServerSnapshot,
+      preferRemoteUpdates,
       prepareRowsFromRemote,
       setMeasureRows,
       setSelectedTask,
@@ -154,19 +240,6 @@ export function useInventoryRealtimeSync<TRow>({
         return;
       }
 
-      const localHash = buildHash(latestRowsRef.current);
-      const isDirty = localHash !== lastSavedHashRef.current;
-
-      // Inventariador con cambios locales: no pisar. Monitor: siempre aplicar.
-      if (isDirty && !preferRemoteUpdates) {
-        pendingRemoteTaskRef.current = remote;
-        setRemoteUpdatePending(true);
-        lastRemoteMeasureHashRef.current = liveHash;
-        return;
-      }
-
-      // Sincroniza el modo de captura (con/sin refs o paletizado) ANTES de aplicar
-      // las filas, para que la transformación remota use el modo correcto.
       if (
         typeof update.referenceMode === "string" &&
         update.referenceMode &&
@@ -175,17 +248,14 @@ export function useInventoryRealtimeSync<TRow>({
         onRemoteReferenceMode(update.referenceMode);
       }
 
+      // Siempre fusionar en vivo (aunque dirty): dos cintas en el mismo RA.
       applyRemote(remote, true);
     },
     [
       applyRemote,
-      buildHash,
       isSavingRef,
-      lastSavedHashRef,
-      latestRowsRef,
       latestTaskRef,
       onRemoteReferenceMode,
-      preferRemoteUpdates,
       selectedTask,
     ],
   );
@@ -196,13 +266,17 @@ export function useInventoryRealtimeSync<TRow>({
   }, [applyRemote]);
 
   const onLocalSaveCompleted = useCallback(() => {
-    // Tras guardar, el estado local es la autoridad recién persistida. Descartamos
-    // cualquier actualización remota pendiente (que puede ser un eco de un guardado
-    // anterior con menos filas) para no revertir lo recién capturado. Un cambio
-    // remoto real se re-aplicará en el siguiente refetch cuando no haya pendientes.
-    pendingRemoteTaskRef.current = null;
+    // Tras guardar, si quedó un remoto pendiente (otro usuario midió durante el
+    // save), fusionarlo en vez de descartarlo.
+    const pending = pendingRemoteTaskRef.current;
+    if (pending) {
+      pendingRemoteTaskRef.current = null;
+      setRemoteUpdatePending(false);
+      applyRemote(pending, true);
+      return;
+    }
     setRemoteUpdatePending(false);
-  }, []);
+  }, [applyRemote]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -250,20 +324,27 @@ export function useInventoryRealtimeSync<TRow>({
     const remoteMeasureHash = JSON.stringify(remote.measureData ?? []);
     const measureChanged = remoteMeasureHash !== lastRemoteMeasureHashRef.current;
 
-    setSelectedTask((prev) => {
-      if (!prev || prev.id !== remote.id) return remote;
-      const sameMeasure =
-        JSON.stringify(prev.measureData ?? []) === remoteMeasureHash;
-      const sameStatus = prev.status === remote.status;
-      const sameBultos = prev.currentBultos === remote.currentBultos;
-      const sameExpected = prev.expectedBultos === remote.expectedBultos;
-      const sameWeight = prev.capturedWeight === remote.capturedWeight;
-      if (sameMeasure && sameStatus && sameBultos && sameExpected && sameWeight)
-        return prev;
-      return { ...prev, ...remote };
-    });
-
-    if (!measureChanged) return;
+    if (!measureChanged) {
+      setSelectedTask((prev) => {
+        if (!prev || prev.id !== remote.id) return remote;
+        const sameStatus = prev.status === remote.status;
+        const sameBultos = prev.currentBultos === remote.currentBultos;
+        const sameExpected = prev.expectedBultos === remote.expectedBultos;
+        const sameWeight = prev.capturedWeight === remote.capturedWeight;
+        if (sameStatus && sameBultos && sameExpected && sameWeight) return prev;
+        return {
+          ...prev,
+          status: remote.status,
+          currentBultos: remote.currentBultos,
+          expectedBultos: remote.expectedBultos,
+          capturedWeight: remote.capturedWeight,
+          completeRowCount: remote.completeRowCount,
+          rowCount: remote.rowCount,
+          updatedAt: remote.updatedAt,
+        };
+      });
+      return;
+    }
 
     if (isSavingRef.current) {
       pendingRemoteTaskRef.current = remote;
@@ -271,27 +352,14 @@ export function useInventoryRealtimeSync<TRow>({
       return;
     }
 
-    const localHash = buildHash(latestRowsRef.current);
-    const isDirty = localHash !== lastSavedHashRef.current;
-
-    // Nunca pisar cambios locales del inventariador; monitores sí reciben remoto.
-    if (isDirty && !preferRemoteUpdates) {
-      pendingRemoteTaskRef.current = remote;
-      setRemoteUpdatePending(true);
-      return;
-    }
-
-    applyRemote(remote);
+    // Persistido en BD: fusionar con lo local (no last-write-wins).
+    applyRemote(remote, false);
   }, [
     tasks,
     selectedId,
     applyRemote,
-    buildHash,
     isSavingRef,
-    lastSavedHashRef,
-    latestRowsRef,
     onTaskRemoved,
-    preferRemoteUpdates,
     setSelectedTask,
   ]);
 

@@ -24,6 +24,8 @@ export const viewport: Viewport = {
   maximumScale: 5,
   userScalable: true,
   viewportFit: "cover",
+  /** Ayuda a que el teclado virtual reduzca el área útil (móvil). */
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#16263F" },
     { media: "(prefers-color-scheme: dark)", color: "#0f172a" },

@@ -367,3 +367,142 @@ export function mergeReempaqueFlagsOntoRows<T extends QuickMeasureRow>(
 
   return { rows: next, changed };
 }
+
+const MERGE_ROW_KEYS = [
+  "referencia",
+  "descripcion",
+  "bultos",
+  "unidadesPorBulto",
+  "pesoPorBulto",
+  "l",
+  "w",
+  "h",
+  "weight",
+  "volumenM3",
+  "unidad",
+  "reempaque",
+  "bultoContenedor",
+  "referenciasContenedor",
+  "reempaqueRefs",
+  "referenciaContenedora",
+  "pallet",
+  "palletWeight",
+] as const satisfies readonly (keyof QuickMeasureRow)[];
+
+function normMergeValue(value: unknown): string {
+  if (value === true) return "true";
+  if (value === false || value === undefined || value === null) return "";
+  if (Array.isArray(value)) return JSON.stringify(value);
+  const s = String(value).trim();
+  if (s === "0" || s === "0.0" || s === "0.00") return "";
+  return s;
+}
+
+function isMergeValueFilled(value: unknown): boolean {
+  return normMergeValue(value).length > 0;
+}
+
+/**
+ * Elige un campo en merge a 3 vías (baseline servidor / local / remoto).
+ * Conserva ediciones locales y remotas cuando no colisionan.
+ */
+function pickMergedField(
+  baseVal: unknown,
+  localVal: unknown,
+  remoteVal: unknown,
+): unknown {
+  const base = normMergeValue(baseVal);
+  const local = normMergeValue(localVal);
+  const remote = normMergeValue(remoteVal);
+  const localChanged = local !== base;
+  const remoteChanged = remote !== base;
+
+  if (localChanged && !remoteChanged) return localVal;
+  if (remoteChanged && !localChanged) return remoteVal;
+  if (!localChanged && !remoteChanged) {
+    return localVal !== undefined ? localVal : remoteVal !== undefined ? remoteVal : baseVal;
+  }
+  // Ambos cambiaron desde el baseline.
+  if (local === remote) return localVal;
+  if (isMergeValueFilled(localVal) && !isMergeValueFilled(remoteVal)) return localVal;
+  if (isMergeValueFilled(remoteVal) && !isMergeValueFilled(localVal)) return remoteVal;
+  // Conflicto real en el mismo campo: preferir local (no perder lo que se está midiendo aquí).
+  return localVal;
+}
+
+function mergeQuickRowThreeWay<T extends QuickMeasureRow>(
+  base: T | undefined,
+  local: T | undefined,
+  remote: T | undefined,
+): T | null {
+  if (!local && !remote) return null;
+  if (local && !remote) return stripQuickMeasureRow(local) as T;
+  if (remote && !local) return stripQuickMeasureRow(remote) as T;
+
+  const id = String(local!.id || remote!.id || "");
+  const out: QuickMeasureRow = { id, referencia: "", bultos: "" };
+
+  for (const key of MERGE_ROW_KEYS) {
+    const picked = pickMergedField(base?.[key], local![key], remote![key]);
+    if (picked === undefined || picked === "" || picked === false) continue;
+    if (Array.isArray(picked) && picked.length === 0) continue;
+    (out as Record<string, unknown>)[key] = picked;
+  }
+
+  return stripQuickMeasureRow(out as T) as T;
+}
+
+export type MergeConcurrentQuickRowsOptions = {
+  /** Filas eliminadas localmente que aún no confirmó el servidor. */
+  deletedIds?: Iterable<string>;
+};
+
+/**
+ * Une capturas concurrentes de varios inventariadores sobre el mismo RA.
+ * - Filas nuevas de cualquiera se conservan.
+ * - En la misma fila, cada campo se resuelve a 3 vías vs el último estado persistido.
+ * Evita el clásico last-write-wins que borraba la medida del otro al guardar.
+ */
+export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
+  baselineRows: T[],
+  localRows: T[],
+  remoteRows: T[],
+  options?: MergeConcurrentQuickRowsOptions,
+): T[] {
+  const deleted = new Set(
+    Array.from(options?.deletedIds ?? []).map((id) => String(id)),
+  );
+  const baseById = new Map(
+    baselineRows.map((r) => [String(r.id ?? ""), r] as const),
+  );
+  const localById = new Map(
+    localRows.map((r) => [String(r.id ?? ""), r] as const),
+  );
+  const remoteById = new Map(
+    remoteRows.map((r) => [String(r.id ?? ""), r] as const),
+  );
+
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const pushId = (id: string) => {
+    if (!id || deleted.has(id) || seen.has(id)) return;
+    seen.add(id);
+    order.push(id);
+  };
+
+  // Orden: baseline, luego locales nuevas, luego remotas nuevas.
+  for (const row of baselineRows) pushId(String(row.id ?? ""));
+  for (const row of localRows) pushId(String(row.id ?? ""));
+  for (const row of remoteRows) pushId(String(row.id ?? ""));
+
+  const merged: T[] = [];
+  for (const id of order) {
+    const row = mergeQuickRowThreeWay(
+      baseById.get(id),
+      localById.get(id),
+      remoteById.get(id),
+    );
+    if (row) merged.push(row);
+  }
+  return merged;
+}

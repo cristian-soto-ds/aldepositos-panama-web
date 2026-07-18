@@ -84,6 +84,47 @@ const FILTERS: { id: FilterId; label: string }[] = [
   { id: "all", label: "Todas" },
 ];
 
+/** Altura visible real (encima del teclado virtual en móvil). */
+function useVisualViewportMetrics(enabled: boolean) {
+  const [height, setHeight] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight : 800,
+  );
+  const [bottomInset, setBottomInset] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const update = () => {
+      const vv = window.visualViewport;
+      if (!vv) {
+        setHeight(window.innerHeight);
+        setBottomInset(0);
+        return;
+      }
+      // Espacio que el teclado (u overlays) ocupa bajo el área visible.
+      const inset = Math.max(
+        0,
+        Math.round(window.innerHeight - vv.height - vv.offsetTop),
+      );
+      setHeight(Math.round(vv.height));
+      setBottomInset(inset);
+    };
+
+    update();
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", update);
+    vv?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      vv?.removeEventListener("resize", update);
+      vv?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [enabled]);
+
+  return { height, bottomInset };
+}
+
 export function ReekonReferenceListSheet({
   open,
   onClose,
@@ -97,16 +138,34 @@ export function ReekonReferenceListSheet({
 }: ReekonReferenceListSheetProps) {
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [query, setQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const palletized = referenceMode === "palletized";
+  const { height: viewportHeight, bottomInset } = useVisualViewportMetrics(open);
 
   useEffect(() => {
     if (!open) return;
     setFilter(initialFilter);
     setQuery("");
+    setSearchFocused(false);
+    // En móvil no autofocus: el teclado tapa la lista. En desktop sí.
+    const isCoarse =
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (isCoarse) return;
     const t = window.setTimeout(() => searchRef.current?.focus(), 80);
     return () => window.clearTimeout(t);
   }, [open, initialFilter]);
+
+  // Cuando abre el teclado, asegurar que el buscador quede visible (arriba).
+  useEffect(() => {
+    if (!open || !searchFocused) return;
+    const t = window.setTimeout(() => {
+      searchRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [open, searchFocused, bottomInset]);
 
   const entries = useMemo(() => {
     return measureRows.map((row, index) => {
@@ -132,7 +191,6 @@ export function ReekonReferenceListSheet({
     if (filter === "pending") list = list.filter((e) => !e.done);
     else if (filter === "done") list = list.filter((e) => e.done);
     else {
-      // Todas: pendientes primero, luego completas (orden relativo).
       list = [...list].sort((a, b) => Number(a.done) - Number(b.done));
     }
     if (q) {
@@ -150,24 +208,35 @@ export function ReekonReferenceListSheet({
     onClose();
   };
 
+  // Con teclado: hoja más baja para dejar ver la lista; sin teclado: ~88% del viewport.
+  const sheetMaxHeight = Math.max(
+    280,
+    Math.round(viewportHeight * (bottomInset > 80 ? 0.98 : 0.88)),
+  );
+
   return (
-    <div className="fixed inset-0 z-[10002] flex flex-col justify-end">
+    <div
+      className="fixed inset-0 z-[10002] flex flex-col justify-end"
+      style={{ paddingBottom: bottomInset > 0 ? bottomInset : undefined }}
+    >
       <button
         type="button"
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
         aria-label="Cerrar lista"
         onClick={onClose}
+        style={{ bottom: bottomInset > 0 ? bottomInset : 0 }}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="reekon-ref-list-title"
-        className="relative flex max-h-[min(92vh,820px)] flex-col rounded-t-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        className="relative flex w-full flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+        style={{ maxHeight: sheetMaxHeight }}
       >
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800 sm:px-4">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800 sm:px-4 sm:py-2.5">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <List className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <List className="h-4 w-4 shrink-0 text-[#16263F] dark:text-slate-200" />
               <h2
                 id="reekon-ref-list-title"
                 className="text-sm font-bold text-slate-900 dark:text-slate-100 sm:text-base"
@@ -198,9 +267,11 @@ export function ReekonReferenceListSheet({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               placeholder="Buscar por código, descripción o línea…"
               enterKeyHint="search"
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm font-medium text-slate-900 outline-none ring-blue-500/30 placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm font-medium text-slate-900 outline-none ring-[#16263F]/20 placeholder:text-slate-400 focus:border-[#16263F] focus:bg-white focus:ring-2 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
             />
             {query ? (
               <button
@@ -217,7 +288,7 @@ export function ReekonReferenceListSheet({
             ) : null}
           </label>
 
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="flex gap-1 overflow-x-auto pb-0.5">
             {FILTERS.map((f) => {
               const count =
                 f.id === "all"
@@ -243,7 +314,14 @@ export function ReekonReferenceListSheet({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-3">
+        <div
+          ref={listRef}
+          className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 sm:px-3"
+          style={{
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
+          }}
+        >
           {filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
               {query.trim()
@@ -261,11 +339,11 @@ export function ReekonReferenceListSheet({
                       onClick={() => handleSelect(row.id)}
                       className={`w-full rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.99] ${
                         isActive
-                          ? "border-blue-500 bg-blue-50 shadow-sm dark:border-blue-400 dark:bg-blue-950/40"
+                          ? "border-[#16263F] bg-slate-100 shadow-sm dark:border-slate-400 dark:bg-slate-800"
                           : done
-                            ? "border-emerald-200/80 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/25"
+                            ? "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40"
                             : reemp
-                              ? "border-violet-200/80 bg-violet-50/60 dark:border-violet-800 dark:bg-violet-950/25"
+                              ? "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60"
                               : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60"
                       }`}
                     >
@@ -273,10 +351,10 @@ export function ReekonReferenceListSheet({
                         <span
                           className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
                             reemp
-                              ? "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
+                              ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
                               : done
-                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
-                                : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+                                ? "bg-[#16263F]/10 text-[#16263F] dark:bg-slate-700 dark:text-slate-200"
+                                : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
                           }`}
                         >
                           {reemp ? (

@@ -66,6 +66,7 @@ import {
   nextConsecutiveReference,
   stripQuickRowsForPersist,
   mergeReempaqueFlagsOntoRows,
+  mergeConcurrentQuickRows,
   type CaptureLayout,
   type QuickMeasureRow,
   type ReferenceCaptureMode,
@@ -269,10 +270,10 @@ function createEmptyMeasureRow(): MeasureRow {
   };
 }
 const CATALOG_DEBOUNCE_MS = 500;
-/** Debounce a Supabase: más corto para que monitores vean bultos/peso pronto. */
-const QUICK_AUTOSAVE_MS = 500;
+/** Debounce a Supabase: agrupa altas rápidas de filas en un solo guardado. */
+const QUICK_AUTOSAVE_MS = 900;
 /** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
-const QUICK_DRAFT_PERSIST_MS = 2500;
+const QUICK_DRAFT_PERSIST_MS = 2000;
 const QUICK_PRESENCE_HEARTBEAT_MS = 28_000;
 // Reintentos con backoff cuando el guardado en el servidor falla (red caída, etc.).
 const AUTOSAVE_RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000];
@@ -732,6 +733,8 @@ export function QuickInventoryEntry({
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
+  /** Último measureData confirmado en servidor (baseline del merge multi-usuario). */
+  const serverBaselineRowsRef = useRef<MeasureRow[]>([]);
   const [csvExportOpen, setCsvExportOpen] = useState(false);
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
@@ -746,6 +749,7 @@ export function QuickInventoryEntry({
   // Espejo del modo de captura para leerlo de forma síncrona (p. ej. al aplicar
   // un modo que acaba de llegar por el canal en vivo, antes del re-render).
   const referenceModeRef = useRef<ReferenceCaptureMode>(referenceMode);
+  const captureLayoutRef = useRef<CaptureLayout>(captureLayout);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
   >({});
@@ -816,6 +820,18 @@ export function QuickInventoryEntry({
     [],
   );
 
+  const mergeRowsWithRemote = useCallback(
+    (localRows: MeasureRow[], remoteRows: MeasureRow[]) => {
+      return mergeConcurrentQuickRows(
+        serverBaselineRowsRef.current,
+        localRows,
+        remoteRows,
+        { deletedIds: pendingDeletionIdsRef.current },
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
     // Al cambiar de RA, descarta eliminaciones pendientes de la tarea anterior.
     pendingDeletionIdsRef.current.clear();
@@ -881,6 +897,12 @@ export function QuickInventoryEntry({
     latestTaskRef,
     buildHash: buildEditorHash,
     prepareRowsFromRemote,
+    mergeRowsWithRemote,
+    onServerSnapshot: (rows) => {
+      serverBaselineRowsRef.current = JSON.parse(
+        JSON.stringify(stripQuickRowsForPersist(rows)),
+      ) as MeasureRow[];
+    },
     getLiveTaskMeta,
     userKey: presenceUserKey,
     liveReferenceMode: referenceMode,
@@ -906,6 +928,10 @@ export function QuickInventoryEntry({
   useEffect(() => {
     referenceModeRef.current = referenceMode;
   }, [referenceMode]);
+
+  useEffect(() => {
+    captureLayoutRef.current = captureLayout;
+  }, [captureLayout]);
 
   useEffect(() => {
     const debRef = catalogDebounceRef;
@@ -1202,6 +1228,9 @@ export function QuickInventoryEntry({
     setMeasureRows(rowsToUse);
     latestRowsRef.current = rowsToUse;
     latestTaskRef.current = task;
+    serverBaselineRowsRef.current = JSON.parse(
+      JSON.stringify(stripQuickRowsForPersist(rowsToUse)),
+    ) as MeasureRow[];
     lastSavedHashRef.current = JSON.stringify({
       rows: rowsToUse,
       referenceMode: refModeToUse,
@@ -1260,7 +1289,24 @@ export function QuickInventoryEntry({
   const pauseAndExit = async () => {
     if (!selectedTask) return;
     const task = selectedTask;
-    const rows = latestRowsRef.current;
+    let rows = latestRowsRef.current;
+    try {
+      const serverTask = await fetchTaskById(task.id);
+      if (serverTask) {
+        const serverRows = prepareRowsFromRemote(serverTask);
+        rows = mergeConcurrentQuickRows(
+          serverBaselineRowsRef.current,
+          stripQuickRowsForPersist(rows),
+          serverRows,
+          { deletedIds: pendingDeletionIdsRef.current },
+        );
+        serverBaselineRowsRef.current = JSON.parse(
+          JSON.stringify(serverRows),
+        ) as MeasureRow[];
+      }
+    } catch {
+      /* si falla la lectura, pausamos con lo local */
+    }
     const hasCapture = quickRowsHaveAnyCapture(rows);
     const captureMeta = computeQuickCaptureMeta(rows, referenceModeRef.current);
     const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
@@ -1307,6 +1353,9 @@ export function QuickInventoryEntry({
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
       lastSavedHashRef.current = currentHash;
+      serverBaselineRowsRef.current = JSON.parse(
+        JSON.stringify(persistedRows),
+      ) as MeasureRow[];
       setLastSavedAt(Date.now());
       setPendingCount(0);
       setAutosaveState("saved");
@@ -1401,7 +1450,7 @@ export function QuickInventoryEntry({
         referenceMode === "palletized"
           ? Math.max(1, maxPalletNumber(prev))
           : undefined;
-      return [
+      const next = [
         ...prev,
         {
           id: newId,
@@ -1419,6 +1468,9 @@ export function QuickInventoryEntry({
           ...(pallet ? { pallet } : {}),
         },
       ];
+      // Síncrono: un autosave en vuelo debe ver la fila recién agregada.
+      latestRowsRef.current = next;
+      return next;
     });
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
@@ -1508,6 +1560,7 @@ export function QuickInventoryEntry({
         },
       ];
       // Se añade al final sin renumerar: no se recrean las filas existentes.
+      latestRowsRef.current = next;
       return next;
     });
     if (captureLayout === "reekon") {
@@ -1589,6 +1642,7 @@ export function QuickInventoryEntry({
       if (lastIdx === -1) next.push(newRow);
       else next.splice(lastIdx + 1, 0, newRow);
       // Sin renumerar: se conserva la identidad de todas las filas existentes.
+      latestRowsRef.current = next;
       return next;
     });
     if (captureLayout === "reekon") {
@@ -1912,21 +1966,60 @@ export function QuickInventoryEntry({
     isSavingRef.current = true;
     setAutosaveState("saving");
 
-    const hasCapture = quickRowsHaveAnyCapture(rows);
-    const captureMeta = computeQuickCaptureMeta(rows, referenceModeRef.current);
+    // Siempre partir del estado más reciente (altas rápidas durante el debounce/save).
+    let rowsToPersist = latestRowsRef.current;
+
+    // Antes de escribir: leer servidor y fusionar en el PAYLOAD (no reescribir la UI).
+    // Reescribir measureRows aquí borraba filas agregadas mientras el fetch estaba en vuelo.
+    try {
+      const serverTask = await fetchTaskById(task.id);
+      if (serverTask && activeTaskIdRef.current === task.id) {
+        const serverRows = prepareRowsFromRemote(serverTask);
+        const localNow = stripQuickRowsForPersist(latestRowsRef.current);
+        const merged = mergeConcurrentQuickRows(
+          serverBaselineRowsRef.current,
+          localNow,
+          serverRows,
+          { deletedIds: pendingDeletionIdsRef.current },
+        );
+        // Segunda pasada por si el inventariador agregó filas durante el await.
+        const localAfter = stripQuickRowsForPersist(latestRowsRef.current);
+        rowsToPersist =
+          localAfter.length !== localNow.length
+            ? mergeConcurrentQuickRows(
+                serverBaselineRowsRef.current,
+                localAfter,
+                merged,
+                { deletedIds: pendingDeletionIdsRef.current },
+              )
+            : merged;
+        serverBaselineRowsRef.current = JSON.parse(
+          JSON.stringify(serverRows),
+        ) as MeasureRow[];
+      }
+    } catch (e) {
+      console.warn("No se pudo leer el RA del servidor antes de fusionar:", e);
+      rowsToPersist = latestRowsRef.current;
+    }
+
+    const hasCapture = quickRowsHaveAnyCapture(rowsToPersist);
+    const captureMeta = computeQuickCaptureMeta(
+      rowsToPersist,
+      referenceModeRef.current,
+    );
     const totalsBultos = captureMeta.currentBultos;
     const originalExpected = task.originalExpectedBultos || task.expectedBultos;
-    const requiredOk = hasCapture && hasQuickRequiredData(rows);
+    const requiredOk = hasCapture && hasQuickRequiredData(rowsToPersist);
     const priorStatus = task.status;
     const isCompleted =
       priorStatus === "completed"
         ? requiredOk
         : requiredOk && totalsBultos >= task.expectedBultos;
 
-    const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
-    if (!hasCapture && typeof window !== "undefined") {
-      window.localStorage.removeItem(inventoryDraftKey(task.id, taskDraftKind(task)));
-    }
+    // Conservar cáscaras de fila (ids) aunque aún no tengan captura: evita perder
+    // altas rápidas en modo «Con refs» antes de escribir medidas.
+    const persistedRows = stripQuickRowsForPersist(rowsToPersist);
+    const hasRowStructure = persistedRows.length > 0;
 
     const measureChanged =
       JSON.stringify(task.measureData ?? []) !== JSON.stringify(persistedRows);
@@ -1940,7 +2033,7 @@ export function QuickInventoryEntry({
       measureData: JSON.parse(JSON.stringify(persistedRows)),
       currentBultos: hasCapture ? totalsBultos : 0,
       capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
-      rowCount: hasCapture ? captureMeta.rowCount : 0,
+      rowCount: hasRowStructure ? captureMeta.rowCount : 0,
       completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: referenceModeRef.current,
@@ -1957,8 +2050,17 @@ export function QuickInventoryEntry({
     });
 
     const statusUnchanged = withSession.status === task.status;
+    const layoutNow = captureLayoutRef.current;
+    const persistHash = JSON.stringify({
+      rows: rowsToPersist,
+      referenceMode: referenceModeRef.current,
+      captureLayout: layoutNow,
+    });
     if (!measureChanged && !referenceModeChanged && statusUnchanged && !isCompleted) {
-      lastSavedHashRef.current = hash;
+      lastSavedHashRef.current = persistHash;
+      serverBaselineRowsRef.current = JSON.parse(
+        JSON.stringify(persistedRows),
+      ) as MeasureRow[];
       setAutosaveState("saved");
       setPendingCount(0);
       isSavingRef.current = false;
@@ -1978,9 +2080,30 @@ export function QuickInventoryEntry({
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
       if (activeTaskIdRef.current === task.id) {
-        setSelectedTask(updatedTask);
+        // No pisar filas locales más nuevas que las que acabamos de guardar.
+        setSelectedTask((prev) => {
+          const local = latestRowsRef.current;
+          const saved = persistedRows;
+          const keepLocal =
+            local.length > saved.length ||
+            (local.length > 0 &&
+              JSON.stringify(stripQuickRowsForPersist(local)) !==
+                JSON.stringify(saved));
+          const nextMeasure = keepLocal
+            ? (stripQuickRowsForPersist(local) as unknown[])
+            : (persistedRows as unknown[]);
+          const base = prev && prev.id === updatedTask.id ? prev : updatedTask;
+          return {
+            ...base,
+            ...updatedTask,
+            measureData: nextMeasure,
+          };
+        });
+        serverBaselineRowsRef.current = JSON.parse(
+          JSON.stringify(persistedRows),
+        ) as MeasureRow[];
       }
-      lastSavedHashRef.current = hash;
+      lastSavedHashRef.current = persistHash;
       retryAttemptsRef.current = 0;
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
@@ -1993,15 +2116,21 @@ export function QuickInventoryEntry({
       failed = true;
     } finally {
       isSavingRef.current = false;
+      // Si hubo altas/edits durante el save, encolar un guardado con lo último.
+      const followUpHash = JSON.stringify({
+        rows: latestRowsRef.current,
+        referenceMode: referenceModeRef.current,
+        captureLayout: captureLayoutRef.current,
+      });
+      if (followUpHash !== lastSavedHashRef.current) {
+        queuedRef.current = true;
+        queuedHashRef.current = followUpHash;
+        pendingAutosaveHashRef.current = followUpHash;
+      }
       onLocalSaveCompletedRef.current();
       if (queuedRef.current && queuedHashRef.current !== lastSavedHashRef.current) {
-        // Hay un cambio más nuevo en cola: guárdalo (tiene prioridad sobre un reintento).
         queuedRef.current = false;
-        const latestHash =
-          queuedHashRef.current ||
-          JSON.stringify({
-            rows: latestRowsRef.current,
-          });
+        const latestHash = queuedHashRef.current;
         queuedHashRef.current = "";
         if (latestTaskRef.current) {
           await runAutosave(
@@ -2044,7 +2173,11 @@ export function QuickInventoryEntry({
     if (!selectedTask) return;
     latestRowsRef.current = measureRows;
     latestTaskRef.current = selectedTask;
-    const hash = JSON.stringify({ rows: measureRows, referenceMode, captureLayout });
+    const hash = JSON.stringify({
+      rows: measureRows,
+      referenceMode,
+      captureLayout,
+    });
     pendingAutosaveHashRef.current = hash;
     persistQuickDraft(selectedTask.id, measureRows, referenceMode, captureLayout);
     const dirty = hash !== lastSavedHashRef.current;
@@ -2055,7 +2188,16 @@ export function QuickInventoryEntry({
       clearTimeout(autosaveTimerRef.current);
     }
     autosaveTimerRef.current = setTimeout(() => {
-      void runAutosave(selectedTask, measureRows, hash);
+      const task = latestTaskRef.current;
+      if (!task) return;
+      const rows = latestRowsRef.current;
+      const latestHash = JSON.stringify({
+        rows,
+        referenceMode: referenceModeRef.current,
+        captureLayout: captureLayoutRef.current,
+      });
+      pendingAutosaveHashRef.current = latestHash;
+      void runAutosave(task, rows, latestHash);
     }, QUICK_AUTOSAVE_MS);
 
     return () => {
@@ -2124,18 +2266,48 @@ export function QuickInventoryEntry({
       clearTask();
       return;
     }
-    const totals = calculateTotals();
-    const hasCapture = quickRowsHaveAnyCapture(measureRows);
+
+    let rowsForSave = measureRows;
+    try {
+      const serverTask = await fetchTaskById(selectedTask.id);
+      if (serverTask) {
+        const serverRows = prepareRowsFromRemote(serverTask);
+        rowsForSave = mergeConcurrentQuickRows(
+          serverBaselineRowsRef.current,
+          stripQuickRowsForPersist(measureRows),
+          serverRows,
+          { deletedIds: pendingDeletionIdsRef.current },
+        );
+        serverBaselineRowsRef.current = JSON.parse(
+          JSON.stringify(serverRows),
+        ) as MeasureRow[];
+        if (
+          JSON.stringify(rowsForSave) !==
+          JSON.stringify(stripQuickRowsForPersist(measureRows))
+        ) {
+          setMeasureRows(rowsForSave);
+          latestRowsRef.current = rowsForSave;
+        }
+      }
+    } catch {
+      /* continuar con filas locales */
+    }
+
+    const captureMeta = computeQuickCaptureMeta(
+      rowsForSave,
+      referenceModeRef.current,
+    );
+    const hasCapture = quickRowsHaveAnyCapture(rowsForSave);
     const originalExpected =
       selectedTask.originalExpectedBultos || selectedTask.expectedBultos;
-    const requiredOk = hasCapture && hasQuickRequiredData(measureRows);
+    const requiredOk = hasCapture && hasQuickRequiredData(rowsForSave);
     const priorStatus = selectedTask.status;
     const isCompleted =
       priorStatus === "completed"
         ? requiredOk
-        : requiredOk && totals.bultos >= selectedTask.expectedBultos;
+        : requiredOk && captureMeta.currentBultos >= selectedTask.expectedBultos;
 
-    const persistedRows = hasCapture ? stripQuickRowsForPersist(measureRows) : [];
+    const persistedRows = hasCapture ? stripQuickRowsForPersist(rowsForSave) : [];
     if (!hasCapture && typeof window !== "undefined") {
       window.localStorage.removeItem(
         inventoryDraftKey(selectedTask.id, taskDraftKind(selectedTask)),
@@ -2148,14 +2320,10 @@ export function QuickInventoryEntry({
     const withData: Task = {
       ...selectedTask,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? totals.bultos : 0,
-      capturedWeight: hasCapture ? totals.weight : 0,
-      rowCount: hasCapture
-        ? measureRows.filter((row) => quickRowHasPartialData(row)).length
-        : 0,
-      completeRowCount: hasCapture
-        ? measureRows.filter((row) => isQuickRowComplete(row)).length
-        : 0,
+      currentBultos: hasCapture ? captureMeta.currentBultos : 0,
+      capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
+      rowCount: hasCapture ? captureMeta.rowCount : 0,
+      completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: referenceModeRef.current,
       originalExpectedBultos: originalExpected,
@@ -2181,7 +2349,7 @@ export function QuickInventoryEntry({
     });
 
     const currentHash = JSON.stringify({
-      rows: measureRows,
+      rows: rowsForSave,
       referenceMode,
       captureLayout,
     });
@@ -2192,6 +2360,9 @@ export function QuickInventoryEntry({
       // Marca el estado como guardado para que el flush de clearTask no dispare
       // un segundo guardado redundante del mismo contenido.
       lastSavedHashRef.current = currentHash;
+      serverBaselineRowsRef.current = JSON.parse(
+        JSON.stringify(persistedRows),
+      ) as MeasureRow[];
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(
           inventoryDraftKey(selectedTask.id, taskDraftKind(selectedTask)),

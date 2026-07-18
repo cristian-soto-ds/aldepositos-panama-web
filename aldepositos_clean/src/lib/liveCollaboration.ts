@@ -9,7 +9,7 @@ import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 
 export const COLLAB_CHANNEL = "aldepositos-collab-v1";
-export const COLLAB_PUBLISH_DEBOUNCE_MS = 80;
+export const COLLAB_PUBLISH_DEBOUNCE_MS = 220;
 
 export type TaskLiveUpdate = {
   type: "task";

@@ -69,6 +69,7 @@ import {
   stripQuickRowsForPersist,
   mergeReempaqueFlagsOntoRows,
   mergeConcurrentQuickRows,
+  quickRowsCaptureContainedIn,
   isQuickRowComplete,
   type CaptureLayout,
   type QuickMeasureRow,
@@ -97,7 +98,7 @@ import {
   applyInventoryAttribution,
   inventoryCompletedByLabel,
 } from "@/lib/taskContributors";
-import { fetchTaskById } from "@/lib/supabase";
+import { fetchTaskById, fetchTaskRow, updateTaskIfMatch } from "@/lib/supabase";
 import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 import {
   applyInventorySessionOnSave,
@@ -126,7 +127,7 @@ type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type QuickInventoryEntryProps = {
   tasks: Task[];
-  onUpdateTask: (task: Task) => void;
+  onUpdateTask: (task: Task, options?: { skipRemote?: boolean }) => void;
   onDeleteTask: (id: string) => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
@@ -653,6 +654,7 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
           </button>
           <button
             type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => onDeleteRow(row.id)}
             title="Eliminar línea"
             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-950/40"
@@ -758,6 +760,10 @@ export function QuickInventoryEntry({
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [palletModalOpen, setPalletModalOpen] = useState(false);
   const [palletModalValue, setPalletModalValue] = useState("");
+  /** Confirmación in-app (sin window.confirm → sin pitido del sistema en Windows). */
+  const [deletePalletConfirm, setDeletePalletConfirm] = useState<number | null>(
+    null,
+  );
   const [aiExtractBusy, setAiExtractBusy] = useState(false);
   const [aiExtractError, setAiExtractError] = useState<string | null>(null);
   const aiFileRef = useRef<HTMLInputElement>(null);
@@ -1744,20 +1750,14 @@ export function QuickInventoryEntry({
   };
 
   /** Paletizado: elimina una paleta completa (todas sus filas) y renumera el resto. */
-  const deletePallet = (palletNum: number) => {
-    const rowsInPallet = measureRows.filter(
+  const performDeletePallet = (palletNum: number) => {
+    if (typeof document !== "undefined") {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    }
+    const rowsInPallet = latestRowsRef.current.filter(
       (r) => Math.max(1, Number(r.pallet) || 1) === palletNum,
     );
-    const hasData = rowsInPallet.some((r) => quickRowHasPartialData(r));
-    if (
-      hasData &&
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `¿Eliminar la Paleta ${palletNum} y sus ${rowsInPallet.length} fila(s)?`,
-      )
-    ) {
-      return;
-    }
     for (const r of rowsInPallet) {
       const t = catalogDebounceRef.current[r.id];
       if (t) {
@@ -1765,7 +1765,6 @@ export function QuickInventoryEntry({
         delete catalogDebounceRef.current[r.id];
       }
       delete sourceReferencesRef.current[r.id];
-      // Marca cada fila de la paleta como eliminada (guard anti-reaparición).
       pendingDeletionIdsRef.current.add(r.id);
     }
     setMeasureRows((prev) => {
@@ -1793,8 +1792,25 @@ export function QuickInventoryEntry({
     }
   };
 
+  const deletePallet = (palletNum: number) => {
+    const rowsInPallet = measureRows.filter(
+      (r) => Math.max(1, Number(r.pallet) || 1) === palletNum,
+    );
+    const hasData = rowsInPallet.some((r) => quickRowHasPartialData(r));
+    if (hasData) {
+      setDeletePalletConfirm(palletNum);
+      return;
+    }
+    performDeletePallet(palletNum);
+  };
+
   const deleteRow = useCallback(
     (idToRemove: string) => {
+      // Quitar foco antes de desmontar el input: evita el pitido del sistema en Windows.
+      if (typeof document !== "undefined") {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+      }
       const t = catalogDebounceRef.current[idToRemove];
       if (t) {
         clearTimeout(t);
@@ -1803,18 +1819,15 @@ export function QuickInventoryEntry({
       delete sourceReferencesRef.current[idToRemove];
       setMeasureRows((prev) => {
         if (prev.length <= 1) return prev;
-        // Marca la fila como eliminada para que un eco remoto no la reinserte.
         pendingDeletionIdsRef.current.add(idToRemove);
         const next = prev.filter((r) => r.id !== idToRemove);
         const normalized =
           referenceMode !== "with"
             ? renumberConsecutiveReferences(next)
             : next;
-        // Síncrono: el flush inmediato no debe persistir el estado anterior.
         latestRowsRef.current = normalized;
         return normalized;
       });
-      // Persistir al instante para que los demás vean 24 en vez de 25.
       if (typeof window !== "undefined") {
         window.setTimeout(() => flushAutosaveRef.current(), 0);
       }
@@ -2091,120 +2104,199 @@ export function QuickInventoryEntry({
     // Congela el baseline al inicio: no actualizarlo con el fetch (eso hacía
     // que un save parcial de otro celular borrara medidas en el merge en vivo).
     const baselineAtSave = serverBaselineRowsRef.current;
+    const MAX_COLLAB_SAVE_ATTEMPTS = 5;
 
-    // Antes de escribir: leer servidor y fusionar en el PAYLOAD (no reescribir la UI).
+    const buildUpdatedTask = (rows: MeasureRow[]): {
+      persistedRows: MeasureRow[];
+      updatedTask: Task;
+      persistHash: string;
+      measureChanged: boolean;
+      skipWrite: boolean;
+    } => {
+      const hasCapture = quickRowsHaveAnyCapture(rows);
+      const captureMeta = computeQuickCaptureMeta(
+        rows,
+        referenceModeRef.current,
+      );
+      const totalsBultos = captureMeta.currentBultos;
+      const originalExpected =
+        task.originalExpectedBultos || task.expectedBultos;
+      const requiredOk = hasCapture && hasQuickRequiredData(rows);
+      const priorStatus = task.status;
+      const isCompleted =
+        priorStatus === "completed"
+          ? requiredOk
+          : requiredOk && totalsBultos >= task.expectedBultos;
+      const persisted = stripQuickRowsForPersist(rows);
+      const hasRowStructure = persisted.length > 0;
+      const measureChanged =
+        JSON.stringify(task.measureData ?? []) !== JSON.stringify(persisted);
+      const referenceModeChanged =
+        (task.referenceMode ?? null) !== (referenceModeRef.current ?? null);
+      const withData: Task = {
+        ...task,
+        measureData: JSON.parse(JSON.stringify(persisted)),
+        currentBultos: hasCapture ? totalsBultos : 0,
+        capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
+        rowCount: hasRowStructure ? captureMeta.rowCount : 0,
+        completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
+        weightMode: QUICK_WEIGHT_MODE,
+        referenceMode: referenceModeRef.current,
+        originalExpectedBultos: originalExpected,
+        manualTotalWeight:
+          task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
+      };
+      const withSession = canPauseInventory
+        ? applyInventorySessionOnSave({
+            task: withData,
+            hasCapture,
+            isCompleted,
+            workStatusWhenActive: "in_progress",
+            forceResume: task.status === "paused" && measureChanged,
+          })
+        : {
+            ...withData,
+            status: task.status,
+            inventoryStartedAt: task.inventoryStartedAt,
+            inventoryPausedAt: task.inventoryPausedAt,
+            inventoryPausedMs: task.inventoryPausedMs,
+            updatedAt: new Date().toISOString(),
+          };
+      const statusUnchanged = withSession.status === task.status;
+      const layoutNow = captureLayoutRef.current;
+      const persistHash = JSON.stringify({
+        rows,
+        referenceMode: referenceModeRef.current,
+        captureLayout: layoutNow,
+      });
+      const skipWrite =
+        !measureChanged &&
+        !referenceModeChanged &&
+        statusUnchanged &&
+        !isCompleted;
+      const updatedTask: Task = applyInventoryAttribution(withSession, {
+        userKey: presenceUserKey,
+        userLabel: presenceUserLabel,
+        hasCapture,
+        isCompleted,
+        priorStatus,
+      });
+      return { persistedRows: persisted, updatedTask, persistHash, measureChanged, skipWrite };
+    };
+
+    let persistedRows: MeasureRow[] = [];
+    let updatedTask: Task = task;
+    let persistHash = hash;
+    let savedOk = false;
+    let failed = false;
+
     try {
-      const serverTask = await fetchTaskById(task.id);
-      if (serverTask && activeTaskIdRef.current === task.id) {
-        const serverRows = prepareRowsFromRemote(serverTask);
-        const localLatest = stripQuickRowsForPersist(latestRowsRef.current);
-        rowsToPersist = mergeConcurrentQuickRows(
-          baselineAtSave,
-          localLatest,
-          serverRows,
-          mergeOpts,
+      for (let attempt = 0; attempt < MAX_COLLAB_SAVE_ATTEMPTS; attempt++) {
+        let expectedUpdatedAt: string | null = null;
+        try {
+          const row = await fetchTaskRow(task.id);
+          if (row && activeTaskIdRef.current === task.id) {
+            expectedUpdatedAt = row.updatedAt;
+            const serverRows = prepareRowsFromRemote(row.task);
+            const localLatest = stripQuickRowsForPersist(latestRowsRef.current);
+            rowsToPersist = mergeConcurrentQuickRows(
+              baselineAtSave,
+              localLatest,
+              serverRows,
+              mergeOpts,
+            );
+            rowsToPersist = mergeConcurrentQuickRows(
+              baselineAtSave,
+              stripQuickRowsForPersist(latestRowsRef.current),
+              rowsToPersist,
+              mergeOpts,
+            );
+          } else {
+            rowsToPersist = stripQuickRowsForPersist(latestRowsRef.current);
+          }
+        } catch (e) {
+          console.warn(
+            "No se pudo leer el RA del servidor antes de fusionar:",
+            e,
+          );
+          rowsToPersist = stripQuickRowsForPersist(latestRowsRef.current);
+        }
+
+        const built = buildUpdatedTask(rowsToPersist);
+        persistedRows = built.persistedRows;
+        updatedTask = built.updatedTask;
+        persistHash = built.persistHash;
+
+        if (built.skipWrite) {
+          lastSavedHashRef.current = persistHash;
+          serverBaselineRowsRef.current = JSON.parse(
+            JSON.stringify(persistedRows),
+          ) as MeasureRow[];
+          setAutosaveState("saved");
+          setPendingCount(0);
+          isSavingRef.current = false;
+          onLocalSaveCompletedRef.current();
+          return;
+        }
+
+        const cas = await updateTaskIfMatch(updatedTask, expectedUpdatedAt);
+        if (cas === "conflict") {
+          // Otro inventariador guardó primero: re-leer, fusionar y reintentar.
+          continue;
+        }
+
+        // Verificar que lo que acabamos de fusionar/escribir sigue en BD.
+        const verify = await fetchTaskRow(task.id);
+        if (verify) {
+          const verifyRows = prepareRowsFromRemote(verify.task);
+          if (quickRowsCaptureContainedIn(persistedRows, verifyRows)) {
+            savedOk = true;
+            break;
+          }
+          // BD quedó incompleta (pisado justo después del CAS): reintentar.
+          continue;
+        }
+        savedOk = true;
+        break;
+      }
+
+      if (!savedOk) {
+        // Último recurso: merge fresco + escritura forzada.
+        try {
+          const row = await fetchTaskRow(task.id);
+          if (row) {
+            const serverRows = prepareRowsFromRemote(row.task);
+            rowsToPersist = mergeConcurrentQuickRows(
+              baselineAtSave,
+              stripQuickRowsForPersist(latestRowsRef.current),
+              serverRows,
+              mergeOpts,
+            );
+            const built = buildUpdatedTask(rowsToPersist);
+            persistedRows = built.persistedRows;
+            updatedTask = built.updatedTask;
+            persistHash = built.persistHash;
+          }
+        } catch {
+          /* usar último updatedTask */
+        }
+        await Promise.resolve(
+          (onUpdateTask as (t: Task) => unknown)(updatedTask),
         );
-        // Segunda pasada: medidas/cinta escritas durante el await del fetch.
-        const localAfter = stripQuickRowsForPersist(latestRowsRef.current);
-        rowsToPersist = mergeConcurrentQuickRows(
-          baselineAtSave,
-          localAfter,
-          rowsToPersist,
-          mergeOpts,
+        savedOk = true;
+      } else {
+        // Lista local sin segundo write a BD.
+        await Promise.resolve(
+          (
+            onUpdateTask as (
+              t: Task,
+              o?: { skipRemote?: boolean },
+            ) => unknown
+          )(updatedTask, { skipRemote: true }),
         );
       }
-    } catch (e) {
-      console.warn("No se pudo leer el RA del servidor antes de fusionar:", e);
-      rowsToPersist = latestRowsRef.current;
-    }
 
-    const hasCapture = quickRowsHaveAnyCapture(rowsToPersist);
-    const captureMeta = computeQuickCaptureMeta(
-      rowsToPersist,
-      referenceModeRef.current,
-    );
-    const totalsBultos = captureMeta.currentBultos;
-    const originalExpected = task.originalExpectedBultos || task.expectedBultos;
-    const requiredOk = hasCapture && hasQuickRequiredData(rowsToPersist);
-    const priorStatus = task.status;
-    const isCompleted =
-      priorStatus === "completed"
-        ? requiredOk
-        : requiredOk && totalsBultos >= task.expectedBultos;
-
-    // Conservar cáscaras de fila (ids) aunque aún no tengan captura: evita perder
-    // altas rápidas en modo «Con refs» antes de escribir medidas.
-    const persistedRows = stripQuickRowsForPersist(rowsToPersist);
-    const hasRowStructure = persistedRows.length > 0;
-
-    const measureChanged =
-      JSON.stringify(task.measureData ?? []) !== JSON.stringify(persistedRows);
-    const referenceModeChanged =
-      (task.referenceMode ?? null) !== (referenceModeRef.current ?? null);
-    const withData: Task = {
-      ...task,
-      measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? totalsBultos : 0,
-      capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
-      rowCount: hasRowStructure ? captureMeta.rowCount : 0,
-      completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
-      weightMode: QUICK_WEIGHT_MODE,
-      referenceMode: referenceModeRef.current,
-      originalExpectedBultos: originalExpected,
-      manualTotalWeight:
-        task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
-    };
-    // Corrector: solo medidas; no reanudar/completar ni marcar actividad de inventario.
-    const withSession = canPauseInventory
-      ? applyInventorySessionOnSave({
-          task: withData,
-          hasCapture,
-          isCompleted,
-          workStatusWhenActive: "in_progress",
-          forceResume:
-            task.status === "paused" && measureChanged,
-        })
-      : {
-          ...withData,
-          status: task.status,
-          inventoryStartedAt: task.inventoryStartedAt,
-          inventoryPausedAt: task.inventoryPausedAt,
-          inventoryPausedMs: task.inventoryPausedMs,
-          updatedAt: new Date().toISOString(),
-        };
-
-    const statusUnchanged = withSession.status === task.status;
-    const layoutNow = captureLayoutRef.current;
-    const persistHash = JSON.stringify({
-      rows: rowsToPersist,
-      referenceMode: referenceModeRef.current,
-      captureLayout: layoutNow,
-    });
-    if (!measureChanged && !referenceModeChanged && statusUnchanged && !isCompleted) {
-      lastSavedHashRef.current = persistHash;
-      serverBaselineRowsRef.current = JSON.parse(
-        JSON.stringify(persistedRows),
-      ) as MeasureRow[];
-      setAutosaveState("saved");
-      setPendingCount(0);
-      isSavingRef.current = false;
-      onLocalSaveCompletedRef.current();
-      return;
-    }
-
-    const updatedTask: Task = applyInventoryAttribution(withSession, {
-      userKey: presenceUserKey,
-      userLabel: presenceUserLabel,
-      hasCapture,
-      isCompleted,
-      priorStatus,
-    });
-
-    let failed = false;
-    try {
-      await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
       if (activeTaskIdRef.current === task.id) {
-        // Incorporar lo guardado (medidas de otros) sin perder tecleo local más nuevo.
         const localNow = stripQuickRowsForPersist(latestRowsRef.current);
         const uiMerged = mergeConcurrentQuickRows(
           baselineAtSave,
@@ -3136,6 +3228,7 @@ export function QuickInventoryEntry({
                               </button>
                               <button
                                 type="button"
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => deletePallet(rowPallet)}
                                 title={`Eliminar la Paleta ${rowPallet}`}
                                 className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-red-200 bg-white text-red-500 transition hover:bg-red-50 hover:text-red-600 dark:border-red-900/50 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -3379,6 +3472,56 @@ export function QuickInventoryEntry({
                 className="flex-1 rounded-xl bg-indigo-600 py-2 text-xs font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Crear paleta
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+    {deletePalletConfirm != null && (() => {
+      const palletNum = deletePalletConfirm;
+      const count = measureRows.filter(
+        (r) => Math.max(1, Number(r.pallet) || 1) === palletNum,
+      ).length;
+      return (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-pallet-title"
+          onClick={() => setDeletePalletConfirm(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="delete-pallet-title"
+              className="text-sm font-black text-slate-800 dark:text-slate-100"
+            >
+              ¿Eliminar Paleta {palletNum}?
+            </h3>
+            <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">
+              Se borrarán {count} fila(s) de esta paleta. Esta acción no se puede
+              deshacer.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeletePalletConfirm(null)}
+                className="flex-1 rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletePalletConfirm(null);
+                  performDeletePallet(palletNum);
+                }}
+                className="flex-1 rounded-xl bg-red-600 py-2 text-xs font-bold text-white transition hover:bg-red-700"
+              >
+                Eliminar
               </button>
             </div>
           </div>

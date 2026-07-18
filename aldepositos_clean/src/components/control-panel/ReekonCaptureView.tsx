@@ -574,6 +574,10 @@ export function ReekonCaptureView({
 
   const handleDeleteCurrent = () => {
     if (!activeId || measureRows.length <= 1) return;
+    if (typeof document !== "undefined") {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+    }
     const idx = activeIndex;
     const nextId = measureRows[idx + 1]?.id ?? measureRows[idx - 1]?.id;
     onDeleteRow(activeId);
@@ -1029,6 +1033,7 @@ export function ReekonCaptureView({
           <div className="flex items-stretch gap-2">
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={handleDeleteCurrent}
               disabled={measureRows.length <= 1}
               className="flex h-14 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 active:scale-95 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400 sm:w-14"

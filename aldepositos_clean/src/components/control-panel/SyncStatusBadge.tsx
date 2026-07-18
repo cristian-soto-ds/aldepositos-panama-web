@@ -51,13 +51,14 @@ export function SyncStatusBadge({
     icon = <WifiOff className="icon-sm" />;
     label = "Sin conexión";
   } else if (state === "saving") {
+    // Mismo tono que «guardado»: evita el flash ámbar molesto en cada borrado/alta.
     tone =
-      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200";
     icon = <Loader2 className="icon-sm animate-spin" />;
     label = "Guardando…";
   } else if (state === "retrying") {
     tone =
-      "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200";
     icon = <RefreshCw className="icon-sm animate-spin" />;
     label = "Reintentando…";
   } else if (state === "error") {

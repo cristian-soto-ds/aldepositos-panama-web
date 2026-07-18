@@ -385,11 +385,15 @@ export default function PanelPage() {
     }
   };
 
-  const handleUpdateTask = useCallback(async (updatedTask: Task) => {
+  const handleUpdateTask = useCallback(async (
+    updatedTask: Task,
+    options?: { skipRemote?: boolean },
+  ) => {
     // Actualización optimista: no se revierte ante un fallo puntual de red.
     setTasks((prev) =>
       prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
     );
+    if (options?.skipRemote) return;
     try {
       await updateTask(updatedTask);
     } catch (e) {

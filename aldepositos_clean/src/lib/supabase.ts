@@ -57,6 +57,18 @@ export async function fetchTasks(
 
 /** Carga el payload completo de un RA (incluye measureData). */
 export async function fetchTaskById(id: string): Promise<Task | null> {
+  const row = await fetchTaskRow(id);
+  return row?.task ?? null;
+}
+
+export type TaskRowMeta = {
+  task: Task;
+  /** Columna `updated_at` de la fila (versión para CAS). */
+  updatedAt: string | null;
+};
+
+/** Payload + versión de fila (para merge concurrente con compare-and-swap). */
+export async function fetchTaskRow(id: string): Promise<TaskRowMeta | null> {
   const { data, error } = await supabase
     .from("tasks")
     .select("id, payload, updated_at")
@@ -65,7 +77,13 @@ export async function fetchTaskById(id: string): Promise<Task | null> {
 
   if (error) throw error;
   if (!data?.payload || !isTaskPayload(data.payload)) return null;
-  return data.payload;
+  const updatedAt =
+    typeof data.updated_at === "string" && data.updated_at
+      ? data.updated_at
+      : typeof data.payload.updatedAt === "string"
+        ? data.payload.updatedAt
+        : null;
+  return { task: data.payload, updatedAt };
 }
 
 /**
@@ -104,6 +122,34 @@ export async function updateTask(task: Task): Promise<void> {
     })
     .eq("id", task.id);
   if (error) throw error;
+}
+
+/**
+ * Actualiza solo si `updated_at` sigue siendo el esperado.
+ * Evita que un inventariador pise el guardado concurrente de otro (last-write-wins).
+ */
+export async function updateTaskIfMatch(
+  task: Task,
+  expectedUpdatedAt: string | null,
+): Promise<"ok" | "conflict"> {
+  const nextUpdatedAt = new Date().toISOString();
+  const payload: Task = { ...task, updatedAt: nextUpdatedAt };
+  let query = supabase
+    .from("tasks")
+    .update({
+      payload,
+      updated_at: nextUpdatedAt,
+    })
+    .eq("id", task.id);
+
+  if (expectedUpdatedAt) {
+    query = query.eq("updated_at", expectedUpdatedAt);
+  }
+
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error) throw error;
+  if (!data?.id) return "conflict";
+  return "ok";
 }
 
 /**

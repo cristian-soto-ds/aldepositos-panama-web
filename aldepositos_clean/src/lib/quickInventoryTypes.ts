@@ -643,3 +643,38 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   }
   return groupRowsByPallet(merged);
 }
+
+const CAPTURE_CONTAIN_KEYS = [
+  "referencia",
+  "bultos",
+  "l",
+  "w",
+  "h",
+  "weight",
+  "palletWeight",
+  "pallet",
+  "reempaque",
+] as const satisfies readonly (keyof QuickMeasureRow)[];
+
+/**
+ * True si todo valor capturado en `source` está presente igual en `target`
+ * (mismo id de fila). Sirve para detectar un save concurrente que pisó medidas.
+ */
+export function quickRowsCaptureContainedIn<T extends QuickMeasureRow>(
+  source: T[],
+  target: T[],
+): boolean {
+  const byId = new Map(target.map((r) => [String(r.id ?? ""), r] as const));
+  for (const s of source) {
+    const id = String(s.id ?? "");
+    if (!id) continue;
+    const t = byId.get(id);
+    for (const key of CAPTURE_CONTAIN_KEYS) {
+      const sv = s[key];
+      if (!isMergeValueFilled(sv) && sv !== true) continue;
+      if (!t) return false;
+      if (normMergeValue(t[key]) !== normMergeValue(sv)) return false;
+    }
+  }
+  return true;
+}

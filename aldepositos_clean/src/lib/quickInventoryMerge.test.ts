@@ -3,6 +3,7 @@ import {
   allocatePalletNumber,
   groupRowsByPallet,
   mergeConcurrentQuickRows,
+  quickRowsCaptureContainedIn,
   type QuickMeasureRow,
 } from "@/lib/quickInventoryTypes";
 
@@ -206,6 +207,21 @@ describe("mergeConcurrentQuickRows", () => {
       w: "10.60",
       h: "8.00",
     });
+  });
+
+  it("detecta cuando un save concurrente perdió medidas (containment)", () => {
+    const written = [
+      row("1", { l: "10", w: "20" }),
+      row("2", { l: "30" }),
+    ];
+    const incomplete = [row("1", { l: "10" }), row("2", { l: "30" })];
+    expect(quickRowsCaptureContainedIn(written, incomplete)).toBe(false);
+    expect(
+      quickRowsCaptureContainedIn(written, [
+        row("1", { l: "10", w: "20" }),
+        row("2", { l: "30", h: "5" }),
+      ]),
+    ).toBe(true);
   });
 });
 

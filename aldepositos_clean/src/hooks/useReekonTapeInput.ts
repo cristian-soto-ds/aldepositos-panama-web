@@ -14,6 +14,10 @@ export function useReekonTapeInput() {
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const vibrate = useCallback(() => {
+    // Solo en dispositivos táctiles: en PC navigator.vibrate no aplica, pero
+    // evitamos cualquier feedback raro al confirmar medidas/borrados.
+    if (typeof window === "undefined") return;
+    if (!("ontouchstart" in window)) return;
     if (typeof navigator !== "undefined" && navigator.vibrate) {
       navigator.vibrate(30);
     }

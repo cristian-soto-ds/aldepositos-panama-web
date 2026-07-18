@@ -410,9 +410,11 @@ export function useInventoryRealtimeSync<TRow>({
   }, [selectedId, userKey, applyLiveUpdate]);
 
   const prevLiveStructureKeyRef = useRef("");
+  const prevLiveMeasuresKeyRef = useRef("");
 
   useEffect(() => {
     prevLiveStructureKeyRef.current = "";
+    prevLiveMeasuresKeyRef.current = "";
   }, [selectedId]);
 
   useEffect(() => {
@@ -421,17 +423,42 @@ export function useInventoryRealtimeSync<TRow>({
     const structureKey = measureRows
       .map((r) => String((r as { id?: string }).id ?? ""))
       .join("\0");
+    const measuresKey = measureRows
+      .map((r) => {
+        const row = r as {
+          id?: string;
+          l?: unknown;
+          w?: unknown;
+          h?: unknown;
+          weight?: unknown;
+          palletWeight?: unknown;
+          bultos?: unknown;
+        };
+        return [
+          row.id,
+          row.l,
+          row.w,
+          row.h,
+          row.weight,
+          row.palletWeight,
+          row.bultos,
+        ].join(":");
+      })
+      .join("|");
     const hash = buildHash(measureRows);
     if (hash === lastSavedHashRef.current) {
       // Ancla IDs al estado guardado para detectar el próximo alta/baja.
       prevLiveStructureKeyRef.current = structureKey;
+      prevLiveMeasuresKeyRef.current = measuresKey;
       return;
     }
     if (hash === lastLivePublishedHashRef.current) return;
     const meta = getLiveTaskMeta(measureRows);
     lastLivePublishedHashRef.current = hash;
     const structureChanged = structureKey !== prevLiveStructureKeyRef.current;
+    const measuresChanged = measuresKey !== prevLiveMeasuresKeyRef.current;
     prevLiveStructureKeyRef.current = structureKey;
+    prevLiveMeasuresKeyRef.current = measuresKey;
     const payload = {
       taskId: selectedId,
       userKey: key,
@@ -443,9 +470,8 @@ export function useInventoryRealtimeSync<TRow>({
       completeRowCount: meta.completeRowCount,
       referenceMode: liveReferenceMode,
     };
-    // Alta/baja de filas: publicar al instante para que el conteo no quede
-    // desfasado ~1s entre celulares.
-    if (structureChanged) flushTaskLivePublish(payload);
+    // Alta/baja o medida nueva: publicar al instante para colaboración.
+    if (structureChanged || measuresChanged) flushTaskLivePublish(payload);
     else scheduleTaskLivePublish(payload);
   }, [
     measureRows,

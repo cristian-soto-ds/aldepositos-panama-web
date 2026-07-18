@@ -142,6 +142,16 @@ function getTaskProgressPercent(task: Task): number {
   const bultosProgress =
     expected > 0 ? Math.min(100, Math.round((current / expected) * 100)) : 0;
 
+  // Meta liviana (live/autosave) sin measureData completo.
+  const rowCount = task.rowCount ?? 0;
+  const completeRows = task.completeRowCount ?? 0;
+  if (rowCount > 0 && (!Array.isArray(task.measureData) || task.measureData.length === 0)) {
+    const rowProgress = Math.round((completeRows / rowCount) * 100);
+    if (task.status === "completed") return 100;
+    if (expected > 0) return Math.min(100, Math.min(rowProgress, bultosProgress) || bultosProgress);
+    return Math.min(100, rowProgress);
+  }
+
   const rows = Array.isArray(task.measureData)
     ? (task.measureData as Record<string, unknown>[])
     : [];
@@ -740,6 +750,17 @@ export function ControlPanelHome({
                         {t.mainClient || "Sin cliente"} · {t.provider || "—"}
                         {liveLabels.length > 0
                           ? ` · En vivo: ${liveLabels.join(", ")}`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-600 dark:text-slate-300">
+                        {(t.currentBultos || 0) > 0 || (t.expectedBultos || 0) > 0
+                          ? `${t.currentBultos || 0}/${t.expectedBultos || 0} bultos`
+                          : "Sin bultos"}
+                        {(t.capturedWeight || 0) > 0
+                          ? ` · ${t.capturedWeight} kg`
+                          : ""}
+                        {(t.completeRowCount || 0) > 0
+                          ? ` · ${t.completeRowCount}/${t.rowCount || t.completeRowCount} líneas`
                           : ""}
                       </p>
                     </div>

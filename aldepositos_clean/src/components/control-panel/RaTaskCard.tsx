@@ -66,6 +66,17 @@ function RaTaskCardInner({
   const showPaused = t.status === "paused" && !liveOp && !!pausedInventariador;
   const providerLabel = formatRaFieldLabel(t.provider);
   const brandLabel = formatRaFieldLabel(t.brand);
+  const expected = t.expectedBultos > 0 ? t.expectedBultos : 0;
+  const captured = Math.max(0, t.currentBultos || 0);
+  const showCaptureProgress = captured > 0 || (t.completeRowCount ?? 0) > 0;
+  const capturedWeight = t.capturedWeight ?? 0;
+  const bultosLabel = showCaptureProgress
+    ? expected > 0
+      ? `${captured}/${expected}`
+      : String(captured)
+    : expected > 0
+      ? String(expected)
+      : "—";
 
   return (
     <div
@@ -122,18 +133,34 @@ function RaTaskCardInner({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <div
-            className={`flex min-w-[2.75rem] flex-col items-center rounded-md border px-1.5 py-0.5 text-center sm:min-w-0 sm:rounded-lg sm:px-3 sm:py-1 ${
+            className={`flex min-w-[3.25rem] flex-col items-center rounded-md border px-1.5 py-0.5 text-center sm:min-w-0 sm:rounded-lg sm:px-3 sm:py-1 ${
               viewMode === "priority"
                 ? "border-red-200 bg-red-100 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
                 : "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
             }`}
+            title={
+              showCaptureProgress
+                ? `Capturados ${captured} de ${expected || "—"} bultos${
+                    capturedWeight > 0 ? ` · ${capturedWeight} kg` : ""
+                  }${
+                    (t.completeRowCount ?? 0) > 0
+                      ? ` · ${t.completeRowCount}/${t.rowCount ?? t.completeRowCount} líneas`
+                      : ""
+                  }`
+                : "Bultos declarados"
+            }
           >
             <span className="text-[7px] font-semibold leading-none sm:text-[9px]">
               Bultos
             </span>
             <span className="text-sm font-bold tabular-nums leading-tight sm:text-lg">
-              {t.expectedBultos > 0 ? t.expectedBultos : "—"}
+              {bultosLabel}
             </span>
+            {capturedWeight > 0 ? (
+              <span className="text-[8px] font-semibold tabular-nums leading-none text-current/80 sm:text-[9px]">
+                {capturedWeight} kg
+              </span>
+            ) : null}
           </div>
           <div
             className="flex shrink-0 items-center sm:hidden"
@@ -164,7 +191,6 @@ function RaTaskCardInner({
           </div>
         </div>
       </div>
-
       <InventoryLiveOperators operators={liveWorkers} />
 
       {/* Móvil: proveedor · marca en una sola línea */}

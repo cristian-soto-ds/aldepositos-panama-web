@@ -106,14 +106,30 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
       taskId: string;
       currentBultos: number;
       status: string;
+      capturedWeight?: number;
+      rowCount?: number;
+      completeRowCount?: number;
     }) => {
       setTasks((prev) => {
         let changed = false;
         const next = prev.map((t) => {
           if (t.id !== update.taskId) return t;
+          const nextWeight =
+            typeof update.capturedWeight === "number"
+              ? update.capturedWeight
+              : t.capturedWeight;
+          const nextRowCount =
+            typeof update.rowCount === "number" ? update.rowCount : t.rowCount;
+          const nextComplete =
+            typeof update.completeRowCount === "number"
+              ? update.completeRowCount
+              : t.completeRowCount;
           if (
             t.currentBultos === update.currentBultos &&
-            t.status === update.status
+            t.status === update.status &&
+            t.capturedWeight === nextWeight &&
+            t.rowCount === nextRowCount &&
+            t.completeRowCount === nextComplete
           ) {
             return t;
           }
@@ -122,6 +138,9 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
             ...t,
             currentBultos: update.currentBultos,
             status: update.status,
+            capturedWeight: nextWeight,
+            rowCount: nextRowCount,
+            completeRowCount: nextComplete,
             updatedAt: new Date().toISOString(),
           };
         });

@@ -17,6 +17,15 @@ export type Task = {
   expectedWeight: number;
   notes: string;
   currentBultos: number;
+  /**
+   * Peso capturado en vivo / último autosave (kg).
+   * Permite que monitores vean progreso sin hidratar measureData completo.
+   */
+  capturedWeight?: number;
+  /** Filas de medida con datos (progreso para monitores). */
+  rowCount?: number;
+  /** Filas completas (refs + bultos + LWH cuando aplica). */
+  completeRowCount?: number;
   status: string;
   measureData: unknown[];
   weightMode: string;

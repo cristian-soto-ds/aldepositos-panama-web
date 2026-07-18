@@ -17,6 +17,8 @@ import {
   Plus,
   Recycle,
   Save,
+  Search,
+  SkipForward,
   Trash2,
 } from "lucide-react";
 import type { QuickMeasureRow, ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
@@ -335,6 +337,7 @@ export function ReekonCaptureView({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refListOpen, setRefListOpen] = useState(false);
+  const [showRefCarousel, setShowRefCarousel] = useState(false);
 
   // Peso de paleta con borrador local: escribir es instantáneo y solo se confirma
   // al salir del campo (evita el bloqueo al replicar el peso en todas las filas).
@@ -490,6 +493,37 @@ export function ReekonCaptureView({
     if (activeIndex < measureRows.length - 1) selectRow(measureRows[activeIndex + 1].id);
   };
 
+  const goNextPending = () => {
+    if (measureRows.length === 0) return;
+    const start = activeIndex >= 0 ? activeIndex + 1 : 0;
+    for (let i = 0; i < measureRows.length; i += 1) {
+      const idx = (start + i) % measureRows.length;
+      const row = measureRows[idx];
+      if (!isQuickRowComplete(row)) {
+        selectRow(row.id);
+        return;
+      }
+    }
+  };
+
+  const activeChipLabel = useMemo(() => {
+    if (!activeRow) return "Sin línea";
+    const i = activeIndex >= 0 ? activeIndex : 0;
+    if (palletized) {
+      const pnum = palletOf(activeRow);
+      const subIdx = measureRows
+        .slice(0, i + 1)
+        .filter((r) => palletOf(r) === pnum).length;
+      return `P${pnum}-${subIdx}`;
+    }
+    if (referenceMode === "with" && strVal(activeRow.referencia)) {
+      return strVal(activeRow.referencia);
+    }
+    return `#${i + 1}`;
+  }, [activeRow, activeIndex, palletized, referenceMode, measureRows]);
+
+  const pendingCount = measureRows.length - completedCount;
+
   const handleDeleteCurrent = () => {
     if (!activeId || measureRows.length <= 1) return;
     const idx = activeIndex;
@@ -507,7 +541,6 @@ export function ReekonCaptureView({
   };
 
   const progressPct = measureRows.length ? Math.round((completedCount / measureRows.length) * 100) : 0;
-  const pendingCount = measureRows.length - completedCount;
 
   return (
     <div className="reekon-immersive text-slate-900 dark:text-slate-100">
@@ -579,121 +612,156 @@ export function ReekonCaptureView({
         </div>
       </div>
 
-      {/* Selector de líneas (en el mismo orden de la tabla) */}
-      <div
-        ref={refStripRef}
-        className="reekon-ref-strip mx-auto w-full max-w-md shrink-0 border-b border-slate-100 dark:border-slate-800"
-      >
-        {measureRows.map((row, i) => {
-          const done = isQuickRowComplete(row);
-          const reemp = row.reempaque === true;
-          const isActive = row.id === activeId;
-          let label: string;
-          if (palletized) {
-            const pnum = palletOf(row);
-            const subIdx = measureRows
-              .slice(0, i + 1)
-              .filter((r) => palletOf(r) === pnum).length;
-            label = `P${pnum}-${subIdx}`;
-          } else {
-            label =
-              referenceMode === "with" && strVal(row.referencia)
-                ? strVal(row.referencia)
-                : `#${i + 1}`;
-          }
-          return (
-            <button
-              key={row.id}
-              type="button"
-              data-ref-chip
-              onClick={() => selectRow(row.id)}
-              className={`reekon-ref-chip border ${
-                isActive
-                  ? reemp
-                    ? "border-violet-500 bg-violet-100 text-violet-800 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-200"
-                    : "border-blue-500 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
-                  : reemp
-                    ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                    : done
-                      ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-                      : "border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
-              }`}
-              title={reemp ? "Reempaque (no se mide)" : undefined}
-            >
-              {reemp ? (
-                <Recycle className="h-3 w-3 shrink-0" />
-              ) : done ? (
-                <Check className="h-3 w-3 shrink-0" />
-              ) : null}
-              <span className="max-w-[7rem] truncate">{label}</span>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={addRowHere}
-          className="reekon-ref-chip border border-dashed border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300"
-          aria-label={
-            palletized && activeRow
-              ? `Nueva fila en la paleta ${palletOf(activeRow)}`
-              : "Nueva línea"
-          }
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Nueva"}
-        </button>
-        {palletized && onAddPallet ? (
-          <button
-            type="button"
-            onClick={onAddPallet}
-            className="reekon-ref-chip border border-dashed border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-            aria-label="Nueva paleta"
-          >
-            <Layers className="h-3.5 w-3.5" />
-            Paleta
-          </button>
-        ) : null}
-      </div>
-
-      <div className="mx-auto flex w-full max-w-md shrink-0 justify-center border-b border-slate-100 px-3 py-1.5 dark:border-slate-800">
+      {/* Selector de referencia: búsqueda primero; carrusel opcional */}
+      <div className="mx-auto w-full max-w-md shrink-0 space-y-1.5 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
         <button
           type="button"
           onClick={() => setRefListOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+          className="flex w-full items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50/80 px-3 py-2.5 text-left shadow-sm transition active:scale-[0.99] dark:border-blue-800 dark:bg-blue-950/40"
         >
-          <List className="h-3.5 w-3.5" />
-          Ver todas las referencias
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white">
+            <Search className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[10px] font-bold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
+              Referencia activa · L{Math.max(1, activeIndex + 1)}/{measureRows.length || 1}
+            </span>
+            <span className="block truncate text-sm font-bold text-[#16263F] dark:text-slate-100">
+              {activeChipLabel}
+            </span>
+          </span>
           {pendingCount > 0 ? (
-            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
               {pendingCount} pend.
             </span>
-          ) : null}
+          ) : (
+            <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+              Listo
+            </span>
+          )}
         </button>
-      </div>
 
-      {/* Navegación entre líneas */}
-      <div className="mx-auto flex w-full max-w-md shrink-0 items-center justify-between border-b border-slate-100 px-3 py-1.5 dark:border-slate-800">
-        <button
-          type="button"
-          onClick={goPrev}
-          disabled={activeIndex <= 0}
-          className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-30 dark:text-slate-400"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Ant.
-        </button>
-        <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-          Línea {activeIndex + 1} de {measureRows.length}
-        </span>
-        <button
-          type="button"
-          onClick={goNext}
-          disabled={activeIndex >= measureRows.length - 1}
-          className="flex items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 disabled:opacity-30 dark:text-slate-400"
-        >
-          Sig.
-          <ChevronRight className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={activeIndex <= 0}
+            className="flex h-9 flex-1 items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 disabled:opacity-30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Ant.
+          </button>
+          <button
+            type="button"
+            onClick={goNextPending}
+            disabled={pendingCount === 0}
+            className="flex h-9 flex-[1.4] items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 text-xs font-bold text-amber-900 disabled:opacity-30 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+            title="Saltar a la siguiente referencia pendiente"
+          >
+            <SkipForward className="h-3.5 w-3.5" />
+            Pendiente
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={activeIndex >= measureRows.length - 1}
+            className="flex h-9 flex-1 items-center justify-center gap-0.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 disabled:opacity-30 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          >
+            Sig.
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowRefCarousel((v) => !v)}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-slate-500 dark:text-slate-400 ${
+              showRefCarousel
+                ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/40"
+                : "border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800"
+            }`}
+            aria-pressed={showRefCarousel}
+            title="Mostrar carrusel rápido"
+            aria-label="Mostrar carrusel rápido"
+          >
+            <List className="h-4 w-4" />
+          </button>
+        </div>
+
+        {showRefCarousel ? (
+          <div
+            ref={refStripRef}
+            className="reekon-ref-strip w-full border-t border-slate-100 pt-1.5 dark:border-slate-800"
+          >
+            {measureRows.map((row, i) => {
+              const done = isQuickRowComplete(row);
+              const reemp = row.reempaque === true;
+              const isActive = row.id === activeId;
+              let label: string;
+              if (palletized) {
+                const pnum = palletOf(row);
+                const subIdx = measureRows
+                  .slice(0, i + 1)
+                  .filter((r) => palletOf(r) === pnum).length;
+                label = `P${pnum}-${subIdx}`;
+              } else {
+                label =
+                  referenceMode === "with" && strVal(row.referencia)
+                    ? strVal(row.referencia)
+                    : `#${i + 1}`;
+              }
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  data-ref-chip
+                  onClick={() => selectRow(row.id)}
+                  className={`reekon-ref-chip border ${
+                    isActive
+                      ? reemp
+                        ? "border-violet-500 bg-violet-100 text-violet-800 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-200"
+                        : "border-blue-500 bg-blue-50 text-blue-800 shadow-sm dark:border-blue-400 dark:bg-blue-950/50 dark:text-blue-200"
+                      : reemp
+                        ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                        : done
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                          : "border-slate-200 bg-white text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}
+                  title={reemp ? "Reempaque (no se mide)" : undefined}
+                >
+                  {reemp ? (
+                    <Recycle className="h-3 w-3 shrink-0" />
+                  ) : done ? (
+                    <Check className="h-3 w-3 shrink-0" />
+                  ) : null}
+                  <span className="max-w-[7rem] truncate">{label}</span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={addRowHere}
+              className="reekon-ref-chip border border-dashed border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300"
+              aria-label={
+                palletized && activeRow
+                  ? `Nueva fila en la paleta ${palletOf(activeRow)}`
+                  : "Nueva línea"
+              }
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {palletized && activeRow ? `Fila P${palletOf(activeRow)}` : "Nueva"}
+            </button>
+            {palletized && onAddPallet ? (
+              <button
+                type="button"
+                onClick={onAddPallet}
+                className="reekon-ref-chip border border-dashed border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                aria-label="Nueva paleta"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                Paleta
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {/* Panel principal: todos los campos editables directamente */}

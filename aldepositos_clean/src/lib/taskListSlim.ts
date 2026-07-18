@@ -43,7 +43,7 @@ export function tasksListFingerprint(tasks: Task[]): string {
   if (tasks.length === 0) return "0";
   let acc = String(tasks.length);
   for (const t of tasks) {
-    acc += `|${t.id}:${t.updatedAt ?? ""}:${t.status}:${t.currentBultos ?? 0}`;
+    acc += `|${t.id}:${t.updatedAt ?? ""}:${t.status}:${t.currentBultos ?? 0}:${t.capturedWeight ?? 0}:${t.completeRowCount ?? 0}`;
   }
   return acc;
 }

@@ -269,7 +269,8 @@ function createEmptyMeasureRow(): MeasureRow {
   };
 }
 const CATALOG_DEBOUNCE_MS = 500;
-const QUICK_AUTOSAVE_MS = 1100;
+/** Debounce a Supabase: más corto para que monitores vean bultos/peso pronto. */
+const QUICK_AUTOSAVE_MS = 500;
 /** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
 const QUICK_DRAFT_PERSIST_MS = 2500;
 const QUICK_PRESENCE_HEARTBEAT_MS = 28_000;
@@ -380,6 +381,51 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
       referenciaContenedora.length > 0
     );
   });
+}
+
+/** Totales ligeros para live/autosave (monitores sin measureData completo). */
+function computeQuickCaptureMeta(
+  rows: MeasureRow[],
+  referenceMode: ReferenceCaptureMode,
+): {
+  currentBultos: number;
+  capturedWeight: number;
+  rowCount: number;
+  completeRowCount: number;
+} {
+  const activeRows = rows.filter((row) => quickRowHasPartialData(row));
+  const currentBultos = rows.reduce(
+    (a, row) => a + (parseFloat(String(row.bultos)) || 0),
+    0,
+  );
+  const capturedWeight =
+    referenceMode === "palletized"
+      ? roundUpMeasure(
+          (() => {
+            const seen = new Set<number>();
+            let acc = 0;
+            for (const row of rows) {
+              const p = Math.max(1, Number(row.pallet) || 1);
+              if (seen.has(p)) continue;
+              seen.add(p);
+              acc += parseFloat(String(row.palletWeight)) || 0;
+            }
+            return acc;
+          })(),
+        )
+      : roundUpMeasure(
+          rows.reduce((acc, row) => {
+            const rowWeight = parseFloat(String(row.weight)) || 0;
+            const b = parseFloat(String(row.bultos)) || 0;
+            return acc + rowWeight * b;
+          }, 0),
+        );
+  return {
+    currentBultos,
+    capturedWeight,
+    rowCount: activeRows.length,
+    completeRowCount: activeRows.filter((row) => isQuickRowComplete(row)).length,
+  };
 }
 
 type MeasureTableRowProps = {
@@ -791,17 +837,14 @@ export function QuickInventoryEntry({
   const getLiveTaskMeta = useCallback(
     (rows: MeasureRow[]) => {
       const hasCapture = quickRowsHaveAnyCapture(rows);
-      const totalsBultos = rows.reduce(
-        (a, row) => a + (parseFloat(String(row.bultos)) || 0),
-        0,
-      );
+      const captureMeta = computeQuickCaptureMeta(rows, referenceModeRef.current);
       const expected = selectedTask?.expectedBultos ?? 0;
       const requiredOk = hasCapture && hasQuickRequiredData(rows);
       // Correcciones: un RA ya completado no pierde ese estado al ajustar bultos.
       const isCompleted =
         selectedTask?.status === "completed"
           ? requiredOk
-          : requiredOk && totalsBultos >= expected;
+          : requiredOk && captureMeta.currentBultos >= expected;
       const base = selectedTask ?? ({ status: "pending" } as Task);
       const withSession = applyInventorySessionOnSave({
         task: base,
@@ -811,8 +854,11 @@ export function QuickInventoryEntry({
         forceResume: false,
       });
       return {
-        currentBultos: hasCapture ? totalsBultos : 0,
+        currentBultos: hasCapture ? captureMeta.currentBultos : 0,
         status: withSession.status,
+        capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
+        rowCount: hasCapture ? captureMeta.rowCount : 0,
+        completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
       };
     },
     [selectedTask],
@@ -838,6 +884,7 @@ export function QuickInventoryEntry({
     getLiveTaskMeta,
     userKey: presenceUserKey,
     liveReferenceMode: referenceMode,
+    preferRemoteUpdates: !canPauseInventory,
     onRemoteReferenceMode: (mode) => {
       if (isReferenceCaptureMode(mode) && mode !== referenceModeRef.current) {
         referenceModeRef.current = mode;
@@ -1215,15 +1262,15 @@ export function QuickInventoryEntry({
     const task = selectedTask;
     const rows = latestRowsRef.current;
     const hasCapture = quickRowsHaveAnyCapture(rows);
-    const totalsBultos = rows.reduce(
-      (a, row) => a + (parseFloat(String(row.bultos)) || 0),
-      0,
-    );
+    const captureMeta = computeQuickCaptureMeta(rows, referenceModeRef.current);
     const persistedRows = hasCapture ? stripQuickRowsForPersist(rows) : [];
     const withData: Task = {
       ...task,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
-      currentBultos: hasCapture ? totalsBultos : 0,
+      currentBultos: hasCapture ? captureMeta.currentBultos : 0,
+      capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
+      rowCount: hasCapture ? captureMeta.rowCount : 0,
+      completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: referenceModeRef.current,
       originalExpectedBultos: task.originalExpectedBultos || task.expectedBultos,
@@ -1866,10 +1913,8 @@ export function QuickInventoryEntry({
     setAutosaveState("saving");
 
     const hasCapture = quickRowsHaveAnyCapture(rows);
-    const totalsBultos = rows.reduce(
-      (a, row) => a + (parseFloat(String(row.bultos)) || 0),
-      0,
-    );
+    const captureMeta = computeQuickCaptureMeta(rows, referenceModeRef.current);
+    const totalsBultos = captureMeta.currentBultos;
     const originalExpected = task.originalExpectedBultos || task.expectedBultos;
     const requiredOk = hasCapture && hasQuickRequiredData(rows);
     const priorStatus = task.status;
@@ -1894,6 +1939,9 @@ export function QuickInventoryEntry({
       ...task,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
       currentBultos: hasCapture ? totalsBultos : 0,
+      capturedWeight: hasCapture ? captureMeta.capturedWeight : 0,
+      rowCount: hasCapture ? captureMeta.rowCount : 0,
+      completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: referenceModeRef.current,
       originalExpectedBultos: originalExpected,
@@ -2101,6 +2149,13 @@ export function QuickInventoryEntry({
       ...selectedTask,
       measureData: JSON.parse(JSON.stringify(persistedRows)),
       currentBultos: hasCapture ? totals.bultos : 0,
+      capturedWeight: hasCapture ? totals.weight : 0,
+      rowCount: hasCapture
+        ? measureRows.filter((row) => quickRowHasPartialData(row)).length
+        : 0,
+      completeRowCount: hasCapture
+        ? measureRows.filter((row) => isQuickRowComplete(row)).length
+        : 0,
       weightMode: QUICK_WEIGHT_MODE,
       referenceMode: referenceModeRef.current,
       originalExpectedBultos: originalExpected,

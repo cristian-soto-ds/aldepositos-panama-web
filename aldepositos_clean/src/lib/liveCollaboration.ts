@@ -19,6 +19,10 @@ export type TaskLiveUpdate = {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  /** Peso capturado (kg) para monitores sin measureData completo. */
+  capturedWeight?: number;
+  rowCount?: number;
+  completeRowCount?: number;
   /** Modo de captura activo (con/sin refs o paletizado) para sincronizarlo entre vistas/dispositivos. */
   referenceMode?: string;
   seq: number;
@@ -95,6 +99,9 @@ export function scheduleTaskLivePublish(params: {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  capturedWeight?: number;
+  rowCount?: number;
+  completeRowCount?: number;
   referenceMode?: string;
 }) {
   const key = `task:${params.taskId}`;
@@ -109,6 +116,9 @@ async function publishTaskLiveUpdate(params: {
   measureData: unknown[];
   currentBultos: number;
   status: string;
+  capturedWeight?: number;
+  rowCount?: number;
+  completeRowCount?: number;
   referenceMode?: string;
 }) {
   await ensureChannel();
@@ -122,6 +132,9 @@ async function publishTaskLiveUpdate(params: {
     measureData: JSON.parse(JSON.stringify(params.measureData)),
     currentBultos: params.currentBultos,
     status: params.status,
+    capturedWeight: params.capturedWeight,
+    rowCount: params.rowCount,
+    completeRowCount: params.completeRowCount,
     referenceMode: params.referenceMode,
     seq: nextSeq(`${tabId}:task:${params.taskId}`),
     at: Date.now(),

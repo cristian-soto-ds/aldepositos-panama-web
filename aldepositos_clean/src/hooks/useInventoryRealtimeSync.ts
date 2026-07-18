@@ -24,13 +24,24 @@ type InventoryRealtimeSyncOptions<TRow> = {
   latestTaskRef: React.MutableRefObject<Task | null>;
   buildHash: (rows: TRow[]) => string;
   prepareRowsFromRemote: (remote: Task) => TRow[];
-  getLiveTaskMeta: (rows: TRow[]) => { currentBultos: number; status: string };
+  getLiveTaskMeta: (rows: TRow[]) => {
+    currentBultos: number;
+    status: string;
+    capturedWeight?: number;
+    rowCount?: number;
+    completeRowCount?: number;
+  };
   userKey?: string | null;
   onTaskRemoved?: () => void;
   /** Modo de captura local a difundir en vivo (con/sin refs o paletizado). */
   liveReferenceMode?: string;
   /** Se invoca cuando llega un modo de captura remoto distinto (otra vista/dispositivo). */
   onRemoteReferenceMode?: (mode: string) => void;
+  /**
+   * Si true (p. ej. monitor sin permiso de inventariar), los broadcasts remotos
+   * siempre se aplican aunque el editor local esté "dirty".
+   */
+  preferRemoteUpdates?: boolean;
 };
 
 /**
@@ -55,6 +66,7 @@ export function useInventoryRealtimeSync<TRow>({
   onTaskRemoved,
   liveReferenceMode,
   onRemoteReferenceMode,
+  preferRemoteUpdates = false,
 }: InventoryRealtimeSyncOptions<TRow>) {
   const [remoteUpdatePending, setRemoteUpdatePending] = useState(false);
   const lastRemoteMeasureHashRef = useRef("");
@@ -127,18 +139,28 @@ export function useInventoryRealtimeSync<TRow>({
         measureData: update.measureData,
         currentBultos: update.currentBultos,
         status: update.status,
+        ...(typeof update.capturedWeight === "number"
+          ? { capturedWeight: update.capturedWeight }
+          : {}),
+        ...(typeof update.rowCount === "number" ? { rowCount: update.rowCount } : {}),
+        ...(typeof update.completeRowCount === "number"
+          ? { completeRowCount: update.completeRowCount }
+          : {}),
       };
 
       if (isSavingRef.current) {
         pendingRemoteTaskRef.current = remote;
+        setRemoteUpdatePending(true);
         return;
       }
 
       const localHash = buildHash(latestRowsRef.current);
       const isDirty = localHash !== lastSavedHashRef.current;
 
-      // No pisar cambios locales sin guardar con un broadcast entrante.
-      if (isDirty) {
+      // Inventariador con cambios locales: no pisar. Monitor: siempre aplicar.
+      if (isDirty && !preferRemoteUpdates) {
+        pendingRemoteTaskRef.current = remote;
+        setRemoteUpdatePending(true);
         lastRemoteMeasureHashRef.current = liveHash;
         return;
       }
@@ -163,6 +185,7 @@ export function useInventoryRealtimeSync<TRow>({
       latestRowsRef,
       latestTaskRef,
       onRemoteReferenceMode,
+      preferRemoteUpdates,
       selectedTask,
     ],
   );
@@ -203,6 +226,9 @@ export function useInventoryRealtimeSync<TRow>({
           prev.status === remote.status &&
           prev.currentBultos === remote.currentBultos &&
           prev.expectedBultos === remote.expectedBultos &&
+          prev.capturedWeight === remote.capturedWeight &&
+          prev.completeRowCount === remote.completeRowCount &&
+          prev.rowCount === remote.rowCount &&
           prev.updatedAt === remote.updatedAt
         ) {
           return prev;
@@ -212,6 +238,9 @@ export function useInventoryRealtimeSync<TRow>({
           status: remote.status,
           currentBultos: remote.currentBultos,
           expectedBultos: remote.expectedBultos,
+          capturedWeight: remote.capturedWeight,
+          completeRowCount: remote.completeRowCount,
+          rowCount: remote.rowCount,
           updatedAt: remote.updatedAt,
         };
       });
@@ -228,7 +257,9 @@ export function useInventoryRealtimeSync<TRow>({
       const sameStatus = prev.status === remote.status;
       const sameBultos = prev.currentBultos === remote.currentBultos;
       const sameExpected = prev.expectedBultos === remote.expectedBultos;
-      if (sameMeasure && sameStatus && sameBultos && sameExpected) return prev;
+      const sameWeight = prev.capturedWeight === remote.capturedWeight;
+      if (sameMeasure && sameStatus && sameBultos && sameExpected && sameWeight)
+        return prev;
       return { ...prev, ...remote };
     });
 
@@ -236,16 +267,17 @@ export function useInventoryRealtimeSync<TRow>({
 
     if (isSavingRef.current) {
       pendingRemoteTaskRef.current = remote;
+      setRemoteUpdatePending(true);
       return;
     }
 
     const localHash = buildHash(latestRowsRef.current);
     const isDirty = localHash !== lastSavedHashRef.current;
 
-    // Nunca pisar cambios locales sin guardar (p. ej. una fila recién añadida):
-    // el autosave los persistirá y el siguiente refetch ya coincidirá. Esto evita
-    // que un eco de la BD a mitad del autosave revierta lo que acabas de capturar.
-    if (isDirty) {
+    // Nunca pisar cambios locales del inventariador; monitores sí reciben remoto.
+    if (isDirty && !preferRemoteUpdates) {
+      pendingRemoteTaskRef.current = remote;
+      setRemoteUpdatePending(true);
       return;
     }
 
@@ -259,6 +291,7 @@ export function useInventoryRealtimeSync<TRow>({
     lastSavedHashRef,
     latestRowsRef,
     onTaskRemoved,
+    preferRemoteUpdates,
     setSelectedTask,
   ]);
 
@@ -284,6 +317,9 @@ export function useInventoryRealtimeSync<TRow>({
       measureData: measureRows as unknown[],
       currentBultos: meta.currentBultos,
       status: meta.status,
+      capturedWeight: meta.capturedWeight,
+      rowCount: meta.rowCount,
+      completeRowCount: meta.completeRowCount,
       referenceMode: liveReferenceMode,
     });
   }, [

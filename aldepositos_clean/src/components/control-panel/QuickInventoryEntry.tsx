@@ -2161,31 +2161,33 @@ export function QuickInventoryEntry({
     return (
       <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto">
         <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col">
-          <div className="shrink-0 space-y-2 sm:space-y-4 md:space-y-6 mb-2 sm:mb-4 md:mb-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="mb-1.5 shrink-0 space-y-1.5 sm:mb-4 sm:space-y-4 md:mb-6 md:space-y-6">
+            <div className="flex flex-row items-center justify-between gap-2 sm:gap-4">
               <div>
-                <h2 className="text-fluid-title flex items-center gap-2 font-bold text-[#16263F] dark:text-slate-100 md:gap-3">
-                  <Box className="icon-lg text-[#16263F] dark:text-slate-100" />
+                <h2 className="flex items-center gap-1.5 text-base font-bold text-[#16263F] dark:text-slate-100 sm:gap-2 sm:text-fluid-title md:gap-3">
+                  <Box className="h-4 w-4 shrink-0 text-[#16263F] dark:text-slate-100 sm:icon-lg" />
                   Ingreso rápido
                 </h2>
               </div>
               <button
                 type="button"
                 onClick={openManualModal}
-                className="bg-[#16263F] hover:bg-[#0f172a] text-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl font-semibold shadow-md transition cursor-pointer flex items-center justify-center gap-2 active:scale-95 text-xs md:text-sm w-full sm:w-auto"
+                className="flex w-auto cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#16263F] px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-md transition hover:bg-[#0f172a] active:scale-95 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-xs md:px-5 md:py-3 md:text-sm"
               >
-                <Plus size={16} /> Nueva orden manual
+                <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <span className="sm:hidden">Nueva</span>
+                <span className="hidden sm:inline">Nueva orden manual</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100/80 p-1 dark:border-slate-600 dark:bg-slate-800/50">
+            <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:gap-1 sm:rounded-xl sm:p-1">
               <button
                 type="button"
                 onClick={() => {
                   setViewMode("pending");
                   setClientFilter("Todos");
                 }}
-                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
+                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "pending"
                     ? "bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
@@ -2199,7 +2201,7 @@ export function QuickInventoryEntry({
                   setViewMode("priority");
                   setClientFilter("Todos");
                 }}
-                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
+                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "priority"
                     ? "bg-red-500 text-white shadow-sm"
                     : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
@@ -2214,7 +2216,7 @@ export function QuickInventoryEntry({
                   setViewMode("completed");
                   setClientFilter("Todos");
                 }}
-                className={`rounded-lg px-1.5 py-2.5 text-[10px] font-semibold transition-all sm:px-4 sm:text-xs ${
+                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "completed"
                     ? "bg-white text-emerald-600 shadow-sm dark:bg-slate-900"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
@@ -2225,10 +2227,10 @@ export function QuickInventoryEntry({
             </div>
 
             {clients.length > 0 && (
-              <div className="flex items-center gap-2 sm:gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-3">
                 <label
                   htmlFor="quick-client-filter"
-                  className="shrink-0 text-[9px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:text-[10px]"
+                  className="shrink-0 text-[8px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:text-[10px]"
                 >
                   Cliente
                 </label>
@@ -2236,7 +2238,7 @@ export function QuickInventoryEntry({
                   id="quick-client-filter"
                   value={clientFilter}
                   onChange={(e) => setClientFilter(e.target.value)}
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:text-xs"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
                 >
                   <option value="Todos">TODOS ({totalModuleTasks})</option>
                   {clients.map((c) => (
@@ -2249,10 +2251,10 @@ export function QuickInventoryEntry({
             )}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar pb-12 sm:pb-20">
-            <div className="grid grid-cols-1 gap-2 sm:gap-3">
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-8 sm:pb-20">
+            <div className="grid grid-cols-1 gap-1 sm:gap-3">
               {displayedTasks.length === 0 ? (
-                <div className="bg-white dark:bg-slate-900 p-8 md:p-16 rounded-[2rem] border border-slate-200 dark:border-slate-600 text-center font-bold text-slate-400 dark:text-slate-500">
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center font-bold text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500 md:p-16">
                   No hay órdenes{" "}
                   {viewMode === "completed"
                     ? "completadas"
@@ -2268,7 +2270,7 @@ export function QuickInventoryEntry({
                       key={t.id}
                       style={{
                         contentVisibility: "auto",
-                        containIntrinsicSize: "0 140px",
+                        containIntrinsicSize: "0 64px",
                       }}
                     >
                       <RaTaskCard

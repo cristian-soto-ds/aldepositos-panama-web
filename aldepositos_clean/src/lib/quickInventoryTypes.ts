@@ -477,6 +477,14 @@ function normMergeValue(value: unknown): string {
   if (Array.isArray(value)) return JSON.stringify(value);
   const s = String(value).trim();
   if (s === "0" || s === "0.0" || s === "0.00") return "";
+  // "10.6" y "10.60" cuentan como el mismo valor capturado.
+  if (/^-?\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n)) {
+      if (n === 0) return "";
+      return String(n);
+    }
+  }
   return s;
 }
 
@@ -487,6 +495,8 @@ function isMergeValueFilled(value: unknown): boolean {
 /**
  * Elige un campo en merge a 3 vías (baseline servidor / local / remoto).
  * Conserva ediciones locales y remotas cuando no colisionan.
+ * Importante: un remoto vacío NO borra una medida ya capturada (save parcial
+ * de otro inventariador que aún no tenía ese campo).
  */
 function pickMergedField(
   baseVal: unknown,
@@ -498,17 +508,27 @@ function pickMergedField(
   const remote = normMergeValue(remoteVal);
   const localChanged = local !== base;
   const remoteChanged = remote !== base;
+  const localFilled = isMergeValueFilled(localVal);
+  const remoteFilled = isMergeValueFilled(remoteVal);
 
   if (localChanged && !remoteChanged) return localVal;
-  if (remoteChanged && !localChanged) return remoteVal;
+  if (remoteChanged && !localChanged) {
+    // Eco/save incompleto: el otro lado “perdió” el valor; no pisar lo local.
+    if (!remoteFilled && localFilled) return localVal;
+    return remoteVal;
+  }
   if (!localChanged && !remoteChanged) {
-    return localVal !== undefined ? localVal : remoteVal !== undefined ? remoteVal : baseVal;
+    return localVal !== undefined
+      ? localVal
+      : remoteVal !== undefined
+        ? remoteVal
+        : baseVal;
   }
   // Ambos cambiaron desde el baseline.
   if (local === remote) return localVal;
-  if (isMergeValueFilled(localVal) && !isMergeValueFilled(remoteVal)) return localVal;
-  if (isMergeValueFilled(remoteVal) && !isMergeValueFilled(localVal)) return remoteVal;
-  // Conflicto real en el mismo campo: preferir local (no perder lo que se está midiendo aquí).
+  if (localFilled && !remoteFilled) return localVal;
+  if (remoteFilled && !localFilled) return remoteVal;
+  // Conflicto real en el mismo campo: preferir local (no perder lo de este dispositivo).
   return localVal;
 }
 

@@ -179,6 +179,34 @@ describe("mergeConcurrentQuickRows", () => {
     expect(merged.map((r) => r.id)).toEqual(["p1a", "p1b", "p2a", "p3a"]);
     expect(merged.map((r) => r.pallet)).toEqual([1, 1, 2, 3]);
   });
+
+  it("une largo local y ancho remoto en la misma fila (tres inventariadores)", () => {
+    const baseline = [row("1", { referencia: "A", bultos: "1" })];
+    const local = [row("1", { referencia: "A", bultos: "1", l: "10.60" })];
+    const remote = [row("1", { referencia: "A", bultos: "1", w: "10.60" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ l: "10.60", w: "10.60" });
+  });
+
+  it("no borra una medida local cuando el remoto llega sin ese campo (save parcial)", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1", l: "10.60", w: "10.60" }),
+    ];
+    const local = [
+      row("1", { referencia: "A", bultos: "1", l: "10.60", w: "10.60" }),
+    ];
+    // Otro inventariador guardó solo el alto; su payload no trae L/W.
+    const remote = [row("1", { referencia: "A", bultos: "1", h: "8.00" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged[0]).toMatchObject({
+      l: "10.60",
+      w: "10.60",
+      h: "8.00",
+    });
+  });
 });
 
 describe("groupRowsByPallet", () => {

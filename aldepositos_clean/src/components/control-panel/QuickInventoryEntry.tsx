@@ -1679,16 +1679,16 @@ export function QuickInventoryEntry({
 
   /** Paletizado: fija el peso total de una paleta (se replica en todas sus filas). */
   const setPalletWeight = useCallback((palletNum: number, value: string) => {
-    setMeasureRows((prev) =>
-      prev.map((r) => {
+    setMeasureRows((prev) => {
+      const next = prev.map((r) => {
         if (Math.max(1, Number(r.pallet) || 1) !== palletNum) return r;
-        // Conserva la identidad si el valor no cambia (evita repintar la fila).
         return String(r.palletWeight ?? "") === value
           ? r
           : { ...r, palletWeight: value };
-      }),
-    );
-    // El peso de paleta se confirma al salir del campo: persiste de inmediato.
+      });
+      latestRowsRef.current = next;
+      return next;
+    });
     if (typeof window !== "undefined") {
       window.setTimeout(() => flushAutosaveRef.current(), 0);
     }
@@ -1827,10 +1827,16 @@ export function QuickInventoryEntry({
       id: string,
       field: keyof MeasureRow | keyof QuickMeasureRow,
       value: string | boolean | string[],
-    ) =>
-      setMeasureRows((prev) =>
-        prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
-      ),
+    ) => {
+      setMeasureRows((prev) => {
+        const next = prev.map((row) =>
+          row.id === id ? { ...row, [field]: value } : row,
+        );
+        // Síncrono: el autosave/merge no debe leer medidas atrasadas.
+        latestRowsRef.current = next;
+        return next;
+      });
+    },
     [],
   );
 
@@ -1878,11 +1884,13 @@ export function QuickInventoryEntry({
       const mod: InventoryCatalogModule =
         taskDraftKind(selectedTask) === "airway" ? "airway" : "quick";
       const patch = buildMeasurePatchFromCatalog(mod, item);
-      setMeasureRows((prev) =>
-        stripQuickRowsForPersist(
+      setMeasureRows((prev) => {
+        const next = stripQuickRowsForPersist(
           prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
-        ),
-      );
+        );
+        latestRowsRef.current = next;
+        return next;
+      });
     },
     [selectedTask],
   );
@@ -2076,40 +2084,34 @@ export function QuickInventoryEntry({
 
     // Siempre partir del estado más reciente (altas rápidas durante el debounce/save).
     let rowsToPersist = latestRowsRef.current;
+    const mergeOpts = {
+      deletedIds: pendingDeletionIdsRef.current,
+      protectIds: pendingLocalCreationIdsRef.current,
+    };
+    // Congela el baseline al inicio: no actualizarlo con el fetch (eso hacía
+    // que un save parcial de otro celular borrara medidas en el merge en vivo).
+    const baselineAtSave = serverBaselineRowsRef.current;
 
     // Antes de escribir: leer servidor y fusionar en el PAYLOAD (no reescribir la UI).
-    // Reescribir measureRows aquí borraba filas agregadas mientras el fetch estaba en vuelo.
     try {
       const serverTask = await fetchTaskById(task.id);
       if (serverTask && activeTaskIdRef.current === task.id) {
         const serverRows = prepareRowsFromRemote(serverTask);
-        const localNow = stripQuickRowsForPersist(latestRowsRef.current);
-        const merged = mergeConcurrentQuickRows(
-          serverBaselineRowsRef.current,
-          localNow,
+        const localLatest = stripQuickRowsForPersist(latestRowsRef.current);
+        rowsToPersist = mergeConcurrentQuickRows(
+          baselineAtSave,
+          localLatest,
           serverRows,
-          {
-            deletedIds: pendingDeletionIdsRef.current,
-            protectIds: pendingLocalCreationIdsRef.current,
-          },
+          mergeOpts,
         );
-        // Segunda pasada por si el inventariador agregó filas durante el await.
+        // Segunda pasada: medidas/cinta escritas durante el await del fetch.
         const localAfter = stripQuickRowsForPersist(latestRowsRef.current);
-        rowsToPersist =
-          localAfter.length !== localNow.length
-            ? mergeConcurrentQuickRows(
-                serverBaselineRowsRef.current,
-                localAfter,
-                merged,
-                {
-                  deletedIds: pendingDeletionIdsRef.current,
-                  protectIds: pendingLocalCreationIdsRef.current,
-                },
-              )
-            : merged;
-        serverBaselineRowsRef.current = JSON.parse(
-          JSON.stringify(serverRows),
-        ) as MeasureRow[];
+        rowsToPersist = mergeConcurrentQuickRows(
+          baselineAtSave,
+          localAfter,
+          rowsToPersist,
+          mergeOpts,
+        );
       }
     } catch (e) {
       console.warn("No se pudo leer el RA del servidor antes de fusionar:", e);
@@ -2202,23 +2204,22 @@ export function QuickInventoryEntry({
     try {
       await Promise.resolve((onUpdateTask as (t: Task) => unknown)(updatedTask));
       if (activeTaskIdRef.current === task.id) {
-        // No pisar filas locales más nuevas que las que acabamos de guardar.
+        // Incorporar lo guardado (medidas de otros) sin perder tecleo local más nuevo.
+        const localNow = stripQuickRowsForPersist(latestRowsRef.current);
+        const uiMerged = mergeConcurrentQuickRows(
+          baselineAtSave,
+          localNow,
+          persistedRows,
+          mergeOpts,
+        );
+        setMeasureRows(uiMerged);
+        latestRowsRef.current = uiMerged;
         setSelectedTask((prev) => {
-          const local = latestRowsRef.current;
-          const saved = persistedRows;
-          const keepLocal =
-            local.length > saved.length ||
-            (local.length > 0 &&
-              JSON.stringify(stripQuickRowsForPersist(local)) !==
-                JSON.stringify(saved));
-          const nextMeasure = keepLocal
-            ? (stripQuickRowsForPersist(local) as unknown[])
-            : (persistedRows as unknown[]);
           const base = prev && prev.id === updatedTask.id ? prev : updatedTask;
           return {
             ...base,
             ...updatedTask,
-            measureData: nextMeasure,
+            measureData: uiMerged as unknown[],
           };
         });
         serverBaselineRowsRef.current = JSON.parse(
@@ -3089,13 +3090,17 @@ export function QuickInventoryEntry({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {(() => {
                   let lastPallet: number | null = null;
+                  let withinPalletIdx = 0;
                   return measureRows.map((row, idx) => {
                   const rowPallet = Math.max(1, Number(row.pallet) || 1);
                   const isNewPallet = palletized && rowPallet !== lastPallet;
                   if (isNewPallet) {
                     lastPallet = rowPallet;
+                    withinPalletIdx = 0;
                   }
-                  const displayNum = idx + 1;
+                  // Paletizado: consecutivo por paleta (1, 2… reinicia en cada una).
+                  const displayNum = palletized ? withinPalletIdx + 1 : idx + 1;
+                  withinPalletIdx += 1;
 
                   return (
                     <React.Fragment key={row.id}>

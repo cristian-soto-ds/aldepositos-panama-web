@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allocatePalletNumber,
+  groupRowsByPallet,
   mergeConcurrentQuickRows,
   type QuickMeasureRow,
 } from "@/lib/quickInventoryTypes";
@@ -160,6 +161,40 @@ describe("mergeConcurrentQuickRows", () => {
     });
     expect(merged.map((r) => r.id)).toEqual(["1", "p2"]);
     expect(merged[1]).toMatchObject({ pallet: 2 });
+  });
+
+  it("agrupa filas nuevas de P1 junto a su paleta (no al final tras P2/P3)", () => {
+    const baseline = [
+      row("p1a", { pallet: 1, bultos: "1" }),
+      row("p2a", { pallet: 2, bultos: "1" }),
+      row("p3a", { pallet: 3, bultos: "1" }),
+    ];
+    const local = [
+      ...baseline,
+      row("p1b", { pallet: 1, bultos: "1", l: "10" }),
+    ];
+    const remote = baseline;
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged.map((r) => r.id)).toEqual(["p1a", "p1b", "p2a", "p3a"]);
+    expect(merged.map((r) => r.pallet)).toEqual([1, 1, 2, 3]);
+  });
+});
+
+describe("groupRowsByPallet", () => {
+  it("reordena [P1,P2,P3,P1] a [P1,P1,P2,P3]", () => {
+    const rows = [
+      row("a", { pallet: 1 }),
+      row("b", { pallet: 2 }),
+      row("c", { pallet: 3 }),
+      row("d", { pallet: 1 }),
+    ];
+    expect(groupRowsByPallet(rows).map((r) => r.id)).toEqual([
+      "a",
+      "d",
+      "b",
+      "c",
+    ]);
   });
 });
 

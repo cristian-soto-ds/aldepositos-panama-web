@@ -238,6 +238,31 @@ export function renumberPallets<T extends QuickMeasureRow>(rows: T[]): T[] {
   }));
 }
 
+/**
+ * Agrupa filas por número de paleta (1, 2, 3…) sin mezclar grupos.
+ * Dentro de cada paleta conserva el orden relativo de las filas.
+ * Necesario tras merges multi-dispositivo: una alta en P1 no debe quedar
+ * después de P2/P3 (eso duplicaba el encabezado «Paleta 1» en la UI).
+ */
+export function groupRowsByPallet<T extends QuickMeasureRow>(rows: T[]): T[] {
+  if (rows.length <= 1) return rows;
+  const hasPallet = rows.some((r) => {
+    const n = Number(r.pallet);
+    return Number.isFinite(n) && n >= 1;
+  });
+  if (!hasPallet) return rows;
+
+  const byPallet = new Map<number, T[]>();
+  for (const row of rows) {
+    const p = Math.max(1, Number(row.pallet) || 1);
+    const list = byPallet.get(p);
+    if (list) list.push(row);
+    else byPallet.set(p, [row]);
+  }
+  const nums = [...byPallet.keys()].sort((a, b) => a - b);
+  return nums.flatMap((p) => byPallet.get(p)!);
+}
+
 export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   const referencia = String(row.referencia ?? "").trim();
   // Reempaque: no lleva bulto/peso/medidas → se considera LISTA con solo la referencia.
@@ -246,7 +271,18 @@ export function isQuickRowComplete(row: QuickMeasureRow): boolean {
   const l = parseFloat(String(row.l ?? 0)) || 0;
   const w = parseFloat(String(row.w ?? 0)) || 0;
   const h = parseFloat(String(row.h ?? 0)) || 0;
-  return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  const weight = parseFloat(String(row.weight ?? 0)) || 0;
+  const palletWeight = parseFloat(String(row.palletWeight ?? 0)) || 0;
+  // Peso por bulto (modo normal) o peso de paleta (paletizado): obligatorio.
+  const hasWeight = weight > 0 || palletWeight > 0;
+  return (
+    referencia.length > 0 &&
+    bultos > 0 &&
+    l > 0 &&
+    w > 0 &&
+    h > 0 &&
+    hasWeight
+  );
 }
 
 /** True si la fila tiene captura real (no solo cáscara vacía / bultos=1 por defecto). */
@@ -263,11 +299,18 @@ export function rowHasCapturedMeasures(row: QuickMeasureRow): boolean {
   return false;
 }
 
-export type QuickRowMissingField = "referencia" | "bultos" | "largo" | "ancho" | "alto";
+export type QuickRowMissingField =
+  | "referencia"
+  | "bultos"
+  | "peso"
+  | "largo"
+  | "ancho"
+  | "alto";
 
 export const QUICK_ROW_MISSING_LABELS: Record<QuickRowMissingField, string> = {
   referencia: "Referencia",
   bultos: "Bultos",
+  peso: "Peso",
   largo: "Largo",
   ancho: "Ancho",
   alto: "Alto",
@@ -282,6 +325,9 @@ export function getQuickRowMissingFields(row: QuickMeasureRow): QuickRowMissingF
   const missing: QuickRowMissingField[] = [];
   if (!referencia) missing.push("referencia");
   if (!(parseFloat(String(row.bultos ?? 0)) > 0)) missing.push("bultos");
+  const weight = parseFloat(String(row.weight ?? 0)) || 0;
+  const palletWeight = parseFloat(String(row.palletWeight ?? 0)) || 0;
+  if (!(weight > 0 || palletWeight > 0)) missing.push("peso");
   if (!(parseFloat(String(row.l ?? 0)) > 0)) missing.push("largo");
   if (!(parseFloat(String(row.w ?? 0)) > 0)) missing.push("ancho");
   if (!(parseFloat(String(row.h ?? 0)) > 0)) missing.push("alto");
@@ -519,7 +565,7 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   // Payload remoto vacío = incompleto (slim/eco), no un borrado masivo real.
   // En captura siempre queda ≥1 fila; [] no debe vaciar el editor local.
   if (remoteRows.length === 0 && localRows.length > 0) {
-    return stripQuickRowsForPersist(localRows) as T[];
+    return groupRowsByPallet(stripQuickRowsForPersist(localRows) as T[]);
   }
 
   const deleted = new Set(
@@ -575,5 +621,5 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
     );
     if (row) merged.push(row);
   }
-  return merged;
+  return groupRowsByPallet(merged);
 }

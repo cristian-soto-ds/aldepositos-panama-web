@@ -55,6 +55,7 @@ import {
   CAPTURE_LAYOUT_STORAGE_KEY,
   allocatePalletNumber,
   ensurePalletNumbers,
+  groupRowsByPallet,
   isAutoConsecutiveBlock,
   isCaptureLayout,
   isReferenceCaptureMode,
@@ -68,6 +69,7 @@ import {
   stripQuickRowsForPersist,
   mergeReempaqueFlagsOntoRows,
   mergeConcurrentQuickRows,
+  isQuickRowComplete,
   type CaptureLayout,
   type QuickMeasureRow,
   type ReferenceCaptureMode,
@@ -325,27 +327,7 @@ function CaptureLayoutToggle({
 
 function hasQuickRequiredData(rows: MeasureRow[]): boolean {
   if (rows.length === 0) return false;
-  return rows.every((row) => {
-    const referencia = String(row.referencia ?? "").trim();
-    // Reempaque: solo necesita referencia (no lleva bultos, peso ni medidas).
-    if (row.reempaque === true) return referencia.length > 0;
-    const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-    const l = parseFloat(String(row.l ?? 0)) || 0;
-    const w = parseFloat(String(row.w ?? 0)) || 0;
-    const h = parseFloat(String(row.h ?? 0)) || 0;
-    return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
-  });
-}
-
-function isQuickRowComplete(row: MeasureRow): boolean {
-  const referencia = String(row.referencia ?? "").trim();
-  // Reempaque: se considera completa con solo la referencia.
-  if (row.reempaque === true) return referencia.length > 0;
-  const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-  const l = parseFloat(String(row.l ?? 0)) || 0;
-  const w = parseFloat(String(row.w ?? 0)) || 0;
-  const h = parseFloat(String(row.h ?? 0)) || 0;
-  return referencia.length > 0 && bultos > 0 && l > 0 && w > 0 && h > 0;
+  return rows.every((row) => isQuickRowComplete(row));
 }
 
 function quickRowHasPartialData(row: MeasureRow): boolean {
@@ -356,7 +338,16 @@ function quickRowHasPartialData(row: MeasureRow): boolean {
   const w = parseFloat(String(row.w ?? 0)) || 0;
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const weight = parseFloat(String(row.weight ?? 0)) || 0;
-  return referencia.length > 0 || bultos > 0 || l > 0 || w > 0 || h > 0 || weight > 0;
+  const palletWeight = parseFloat(String(row.palletWeight ?? 0)) || 0;
+  return (
+    referencia.length > 0 ||
+    bultos > 0 ||
+    l > 0 ||
+    w > 0 ||
+    h > 0 ||
+    weight > 0 ||
+    palletWeight > 0
+  );
 }
 
 function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
@@ -834,7 +825,9 @@ export function QuickInventoryEntry({
       }
       if (mode === "palletized") {
         return taskRows.length > 0
-          ? ensurePalletNumbers(applyConsecutiveReferences(taskRows))
+          ? groupRowsByPallet(
+              ensurePalletNumbers(applyConsecutiveReferences(taskRows)),
+            )
           : [];
       }
       if (mode === "without") {
@@ -1272,7 +1265,9 @@ export function QuickInventoryEntry({
     if (refModeToUse === "palletized") {
       rowsToUse =
         rowsToUse.length > 0
-          ? ensurePalletNumbers(applyConsecutiveReferences(rowsToUse))
+          ? groupRowsByPallet(
+              ensurePalletNumbers(applyConsecutiveReferences(rowsToUse)),
+            )
           : [];
     } else if (refModeToUse === "without") {
       rowsToUse =
@@ -1517,15 +1512,20 @@ export function QuickInventoryEntry({
   };
 
   const addRow = () => {
+    // Paletizado: insertar en el grupo de la paleta activa (no al final de la lista).
+    if (referenceMode === "palletized") {
+      const active =
+        (expandedRowId &&
+          latestRowsRef.current.find((r) => r.id === expandedRowId)) ||
+        latestRowsRef.current[latestRowsRef.current.length - 1];
+      const palletNum = Math.max(1, Number(active?.pallet) || 1);
+      addRowToPallet(palletNum);
+      return;
+    }
     const newId = generateId();
     setMeasureRows((prev) => {
       const autoRef = referenceMode !== "with";
       const nextRef = autoRef ? nextConsecutiveReference(prev) : "";
-      // Paletizado: la nueva fila se añade a la última paleta abierta.
-      const pallet =
-        referenceMode === "palletized"
-          ? Math.max(1, maxPalletNumber(prev))
-          : undefined;
       const next = [
         ...prev,
         {
@@ -1541,7 +1541,6 @@ export function QuickInventoryEntry({
           referenciasContenedor: "",
           reempaqueRefs: [],
           referenciaContenedora: "",
-          ...(pallet ? { pallet } : {}),
         },
       ];
       // Síncrono: un autosave en vuelo debe ver la fila recién agregada.
@@ -1731,9 +1730,10 @@ export function QuickInventoryEntry({
       const next = [...prev];
       if (lastIdx === -1) next.push(newRow);
       else next.splice(lastIdx + 1, 0, newRow);
-      // Sin renumerar: se conserva la identidad de todas las filas existentes.
-      latestRowsRef.current = next;
-      return next;
+      // Reagrupa por si el estado llegó desordenado tras un sync.
+      const grouped = groupRowsByPallet(next);
+      latestRowsRef.current = grouped;
+      return grouped;
     });
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);

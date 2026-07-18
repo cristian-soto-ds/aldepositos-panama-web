@@ -194,6 +194,28 @@ export function maxPalletNumber(rows: QuickMeasureRow[]): number {
   return max;
 }
 
+/**
+ * Siguiente número de paleta libre (max+1), o el preferido si no choca.
+ * Si otro inventariador ya tomó ese número, avanza al siguiente libre.
+ */
+export function allocatePalletNumber(
+  rows: QuickMeasureRow[],
+  preferred?: number,
+): number {
+  const used = new Set<number>();
+  for (const row of rows) {
+    const n = Number(row.pallet);
+    if (Number.isFinite(n) && n >= 1) used.add(n);
+  }
+  let next =
+    preferred != null && Number.isFinite(preferred) && preferred >= 1
+      ? Math.floor(preferred)
+      : maxPalletNumber(rows) + 1;
+  if (next < 1) next = 1;
+  while (used.has(next)) next += 1;
+  return next;
+}
+
 /** Asegura que todas las filas tengan un número de paleta válido (por defecto 1). */
 export function ensurePalletNumbers<T extends QuickMeasureRow>(rows: T[]): T[] {
   return rows.map((row) => {
@@ -478,6 +500,8 @@ function mergeQuickRowThreeWay<T extends QuickMeasureRow>(
 export type MergeConcurrentQuickRowsOptions = {
   /** Filas eliminadas localmente que aún no confirmó el servidor. */
   deletedIds?: Iterable<string>;
+  /** Altas locales aún no confirmadas — no se borran por eco de BD atrasado. */
+  protectIds?: Iterable<string>;
 };
 
 /**
@@ -501,6 +525,11 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   const deleted = new Set(
     Array.from(options?.deletedIds ?? []).map((id) => String(id)),
   );
+  const protectedIds = new Set(
+    Array.from(options?.protectIds ?? []).map((id) => String(id)),
+  );
+  for (const id of protectedIds) deleted.delete(id);
+
   const baseById = new Map(
     baselineRows.map((r) => [String(r.id ?? ""), r] as const),
   );
@@ -512,7 +541,9 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   );
 
   // Remoto quitó una fila que seguía en baseline/local → borrado remoto.
+  // No aplica a altas locales protegidas (eco de BD sin la paleta recién creada).
   for (const id of baseById.keys()) {
+    if (protectedIds.has(id)) continue;
     if (!remoteById.has(id) && localById.has(id)) deleted.add(id);
   }
 
@@ -532,6 +563,11 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   const merged: T[] = [];
   for (const id of order) {
     if (deleted.has(id)) continue;
+    // Alta local protegida: no aplicar el "falta en remoto = borrado" del 3-vías.
+    if (protectedIds.has(id) && localById.has(id) && !remoteById.has(id)) {
+      merged.push(stripQuickMeasureRow(localById.get(id)!) as T);
+      continue;
+    }
     const row = mergeQuickRowThreeWay(
       baseById.get(id),
       localById.get(id),

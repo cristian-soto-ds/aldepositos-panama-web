@@ -53,6 +53,7 @@ import {
   buildSourceReferenceSnapshot,
   captureSourceReferencesFromRows,
   CAPTURE_LAYOUT_STORAGE_KEY,
+  allocatePalletNumber,
   ensurePalletNumbers,
   isAutoConsecutiveBlock,
   isCaptureLayout,
@@ -787,6 +788,8 @@ export function QuickInventoryEntry({
   const pendingDeletionIdsRef = useRef<Set<string>>(new Set());
   /** IDs vistos en el último remoto (live o BD) — detecta borrados antes del baseline. */
   const lastSeenRemoteIdsRef = useRef<Set<string>>(new Set());
+  /** Altas locales (p. ej. paleta nueva) hasta que BD/live las confirmen. */
+  const pendingLocalCreationIdsRef = useRef<Set<string>>(new Set());
 
   const prepareRowsFromRemote = useCallback(
     (remote: Task): MeasureRow[] => {
@@ -848,21 +851,39 @@ export function QuickInventoryEntry({
   );
 
   const mergeRowsWithRemote = useCallback(
-    (localRows: MeasureRow[], remoteRows: MeasureRow[]) => {
+    (
+      localRows: MeasureRow[],
+      remoteRows: MeasureRow[],
+      options?: { fromLive?: boolean },
+    ) => {
       // Payload remoto vacío = incompleto; no marcar borrados masivos.
       if (remoteRows.length > 0) {
         const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
-        // Borrado en vivo antes de persistir: la fila estuvo en el último remoto
-        // y ya no viene → tombstone (aunque aún no esté en el baseline de BD).
-        for (const id of lastSeenRemoteIdsRef.current) {
-          if (id && !remoteIds.has(id)) {
-            pendingDeletionIdsRef.current.add(id);
+        // Confirmación: la alta local ya está en el remoto.
+        for (const id of Array.from(pendingLocalCreationIdsRef.current)) {
+          if (remoteIds.has(id)) pendingLocalCreationIdsRef.current.delete(id);
+        }
+        // Solo en vivo: un eco de BD atrasado NO debe borrar paletas/filas
+        // recién publicadas por live (causaba el parpadeo pone/quita).
+        if (options?.fromLive) {
+          for (const id of lastSeenRemoteIdsRef.current) {
+            if (
+              id &&
+              !remoteIds.has(id) &&
+              !pendingLocalCreationIdsRef.current.has(id)
+            ) {
+              pendingDeletionIdsRef.current.add(id);
+            }
           }
         }
         for (const base of serverBaselineRowsRef.current) {
           const id = String(base.id ?? "");
-          if (id && !remoteIds.has(id)) {
-            // Borrado por otro usuario: tombstone hasta que la BD lo confirme.
+          if (
+            id &&
+            !remoteIds.has(id) &&
+            !pendingLocalCreationIdsRef.current.has(id)
+          ) {
+            // Borrado confirmado vs baseline de BD.
             pendingDeletionIdsRef.current.add(id);
           }
         }
@@ -872,7 +893,10 @@ export function QuickInventoryEntry({
         serverBaselineRowsRef.current,
         localRows,
         remoteRows,
-        { deletedIds: pendingDeletionIdsRef.current },
+        {
+          deletedIds: pendingDeletionIdsRef.current,
+          protectIds: pendingLocalCreationIdsRef.current,
+        },
       );
     },
     [],
@@ -882,6 +906,7 @@ export function QuickInventoryEntry({
     // Al cambiar de RA, descarta eliminaciones pendientes de la tarea anterior.
     pendingDeletionIdsRef.current.clear();
     lastSeenRemoteIdsRef.current = new Set();
+    pendingLocalCreationIdsRef.current.clear();
     if (!selectedTask) return;
     setMeasureRows((prev) => {
       const next = stripQuickRowsForPersist(prev);
@@ -1346,7 +1371,10 @@ export function QuickInventoryEntry({
           serverBaselineRowsRef.current,
           stripQuickRowsForPersist(rows),
           serverRows,
-          { deletedIds: pendingDeletionIdsRef.current },
+          {
+            deletedIds: pendingDeletionIdsRef.current,
+            protectIds: pendingLocalCreationIdsRef.current,
+          },
         );
         serverBaselineRowsRef.current = JSON.parse(
           JSON.stringify(serverRows),
@@ -1587,11 +1615,17 @@ export function QuickInventoryEntry({
 
   /**
    * Paletizado: crea una paleta con un número concreto y su primera fila.
-   * El número lo elige el inventariador (con aviso de colisión en el modal).
+   * Si el número ya existe (otro inventariador lo tomó), usa el siguiente libre.
+   * No renumera ni mueve a quien está midiendo otra paleta.
    */
-  const createPalletWithNumber = (palletNum: number) => {
+  const createPalletWithNumber = (palletNum?: number) => {
     const newId = generateId();
+    pendingLocalCreationIdsRef.current.add(newId);
     setMeasureRows((prev) => {
+      const assigned = allocatePalletNumber(
+        prev,
+        palletNum ?? maxPalletNumber(prev) + 1,
+      );
       const next: MeasureRow[] = [
         ...prev,
         {
@@ -1607,7 +1641,7 @@ export function QuickInventoryEntry({
           referenciasContenedor: "",
           reempaqueRefs: [],
           referenciaContenedora: "",
-          pallet: palletNum,
+          pallet: assigned,
         },
       ];
       // Se añade al final sin renumerar: no se recrean las filas existentes.
@@ -1630,14 +1664,16 @@ export function QuickInventoryEntry({
   }, [measureRows]);
 
   const openPalletModal = () => {
-    setPalletModalValue(String(maxPalletNumber(measureRows) + 1));
+    setPalletModalValue(
+      String(allocatePalletNumber(latestRowsRef.current)),
+    );
     setPalletModalOpen(true);
   };
 
   const confirmPalletModal = () => {
     const num = parseInt(palletModalValue, 10);
     if (!Number.isFinite(num) || num < 1) return;
-    if (existingPalletNumbers.has(num)) return;
+    // Si chocó con una paleta que llegó en vivo, allocatePalletNumber corrige.
     createPalletWithNumber(num);
     setPalletModalOpen(false);
   };
@@ -2052,7 +2088,10 @@ export function QuickInventoryEntry({
           serverBaselineRowsRef.current,
           localNow,
           serverRows,
-          { deletedIds: pendingDeletionIdsRef.current },
+          {
+            deletedIds: pendingDeletionIdsRef.current,
+            protectIds: pendingLocalCreationIdsRef.current,
+          },
         );
         // Segunda pasada por si el inventariador agregó filas durante el await.
         const localAfter = stripQuickRowsForPersist(latestRowsRef.current);
@@ -2062,7 +2101,10 @@ export function QuickInventoryEntry({
                 serverBaselineRowsRef.current,
                 localAfter,
                 merged,
-                { deletedIds: pendingDeletionIdsRef.current },
+                {
+                  deletedIds: pendingDeletionIdsRef.current,
+                  protectIds: pendingLocalCreationIdsRef.current,
+                },
               )
             : merged;
         serverBaselineRowsRef.current = JSON.parse(
@@ -2364,7 +2406,10 @@ export function QuickInventoryEntry({
           serverBaselineRowsRef.current,
           stripQuickRowsForPersist(measureRows),
           serverRows,
-          { deletedIds: pendingDeletionIdsRef.current },
+          {
+            deletedIds: pendingDeletionIdsRef.current,
+            protectIds: pendingLocalCreationIdsRef.current,
+          },
         );
         serverBaselineRowsRef.current = JSON.parse(
           JSON.stringify(serverRows),
@@ -2715,7 +2760,7 @@ export function QuickInventoryEntry({
           }}
           onAddRow={addRow}
           onAddPallet={() =>
-            createPalletWithNumber(maxPalletNumber(measureRows) + 1)
+            createPalletWithNumber(allocatePalletNumber(latestRowsRef.current))
           }
           onAddRowToPallet={addRowToPallet}
           onSetPalletWeight={setPalletWeight}
@@ -3259,7 +3304,7 @@ export function QuickInventoryEntry({
       const parsed = parseInt(palletModalValue, 10);
       const valid = Number.isFinite(parsed) && parsed >= 1;
       const collides = valid && existingPalletNumbers.has(parsed);
-      const suggestedFree = maxPalletNumber(measureRows) + 1;
+      const suggestedFree = allocatePalletNumber(measureRows);
       return (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"

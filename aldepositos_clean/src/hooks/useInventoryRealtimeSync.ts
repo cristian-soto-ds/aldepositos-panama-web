@@ -11,10 +11,8 @@ import {
 } from "@/lib/liveCollaboration";
 import type { Task } from "@/lib/types/task";
 import { measureDataLooksEmpty } from "@/lib/taskListSlim";
-import {
-  rowHasCapturedMeasures,
-  type QuickMeasureRow,
-} from "@/lib/quickInventoryTypes";
+
+type MergeRemoteOptions = { fromLive?: boolean };
 
 type InventoryRealtimeSyncOptions<TRow> = {
   tasks: Task[];
@@ -33,7 +31,11 @@ type InventoryRealtimeSyncOptions<TRow> = {
    * Fusiona filas locales con remotas (3 vías) para colaboración multi-usuario.
    * Si no se pasa, se reemplaza el estado local (comportamiento anterior).
    */
-  mergeRowsWithRemote?: (localRows: TRow[], remoteRows: TRow[]) => TRow[];
+  mergeRowsWithRemote?: (
+    localRows: TRow[],
+    remoteRows: TRow[],
+    options?: MergeRemoteOptions,
+  ) => TRow[];
   /** Snapshot persistido del servidor (para el merge a 3 vías). */
   onServerSnapshot?: (rows: TRow[]) => void;
   getLiveTaskMeta: (rows: TRow[]) => {
@@ -110,6 +112,25 @@ export function useInventoryRealtimeSync<TRow>({
       const localHash = buildHash(localRows);
       const isDirty = localHash !== lastSavedHashRef.current;
 
+      // Eco de BD más viejo que nuestro último guardado: no reaplicar filas
+      // (evita que una paleta nueva parpadee y desaparezca).
+      if (!fromLive && remote.updatedAt && latestTaskRef.current?.updatedAt) {
+        const remoteT = Date.parse(String(remote.updatedAt));
+        const localT = Date.parse(String(latestTaskRef.current.updatedAt));
+        if (
+          Number.isFinite(remoteT) &&
+          Number.isFinite(localT) &&
+          remoteT < localT
+        ) {
+          lastRemoteMeasureHashRef.current = JSON.stringify(
+            remote.measureData ?? [],
+          );
+          pendingRemoteTaskRef.current = null;
+          setRemoteUpdatePending(false);
+          return;
+        }
+      }
+
       // Colaboración: fusionar con el baseline ANTERIOR al snapshot remoto.
       // Si actualizamos el baseline antes del merge, los borrados remotos se
       // reinsertan como «filas locales nuevas» y los conteos divergen.
@@ -118,23 +139,10 @@ export function useInventoryRealtimeSync<TRow>({
         (isDirty || fromLive || preferRemoteUpdates) &&
         localRows.length > 0;
 
-      let newRows =
+      const newRows =
         shouldMerge && mergeRowsWithRemote
-          ? mergeRowsWithRemote(localRows, remoteRows)
+          ? mergeRowsWithRemote(localRows, remoteRows, { fromLive })
           : remoteRows;
-
-      // Tras merge con BD: descartar cáscaras vacías solo-locales (altas
-      // concurrentes en otros celulares). Conservar filas con medidas reales.
-      if (!fromLive && shouldMerge && mergeRowsWithRemote) {
-        const remoteIds = new Set(
-          remoteRows.map((r) => String((r as { id?: string }).id ?? "")),
-        );
-        newRows = newRows.filter((r) => {
-          const id = String((r as { id?: string }).id ?? "");
-          if (!id || remoteIds.has(id)) return true;
-          return rowHasCapturedMeasures(r as QuickMeasureRow);
-        });
-      }
 
       // Snapshot persistido DESPUÉS del merge.
       if (!fromLive) {

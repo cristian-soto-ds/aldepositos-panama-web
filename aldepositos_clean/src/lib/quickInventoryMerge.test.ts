@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  allocatePalletNumber,
   mergeConcurrentQuickRows,
   type QuickMeasureRow,
 } from "@/lib/quickInventoryTypes";
@@ -140,5 +141,44 @@ describe("mergeConcurrentQuickRows", () => {
 
     const merged = mergeConcurrentQuickRows(baseline, local, remote);
     expect(merged.map((r) => r.id)).toEqual(["1", "local-shell"]);
+  });
+
+  it("protectIds evita que un eco atrasado borre una paleta recién creada", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1", pallet: 1 }),
+      row("p2", { referencia: "B", bultos: "1", pallet: 2 }),
+    ];
+    const local = [
+      row("1", { referencia: "A", bultos: "1", pallet: 1, l: "8" }),
+      row("p2", { referencia: "B", bultos: "1", pallet: 2 }),
+    ];
+    // Eco de BD anterior a la creación de paleta 2.
+    const remote = [row("1", { referencia: "A", bultos: "1", pallet: 1 })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      protectIds: ["p2"],
+    });
+    expect(merged.map((r) => r.id)).toEqual(["1", "p2"]);
+    expect(merged[1]).toMatchObject({ pallet: 2 });
+  });
+});
+
+describe("allocatePalletNumber", () => {
+  it("sugiere max+1", () => {
+    expect(
+      allocatePalletNumber([
+        row("a", { pallet: 1 }),
+        row("b", { pallet: 2 }),
+      ]),
+    ).toBe(3);
+  });
+
+  it("si el preferido está ocupado, usa el siguiente libre", () => {
+    expect(
+      allocatePalletNumber(
+        [row("a", { pallet: 1 }), row("b", { pallet: 2 })],
+        2,
+      ),
+    ).toBe(3);
   });
 });

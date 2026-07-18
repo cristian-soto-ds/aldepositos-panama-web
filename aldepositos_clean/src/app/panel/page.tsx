@@ -318,7 +318,7 @@ export default function PanelPage() {
     const start = () => {
       pulse();
       if (intervalId != null) window.clearInterval(intervalId);
-      intervalId = window.setInterval(pulse, 20_000);
+      intervalId = window.setInterval(pulse, 45_000);
     };
     const stop = () => {
       if (intervalId != null) {

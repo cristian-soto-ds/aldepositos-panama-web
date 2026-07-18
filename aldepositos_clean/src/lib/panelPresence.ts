@@ -1,6 +1,10 @@
 /**
  * Presencia de operadores en el panel (misma sala vía Supabase Realtime).
  * Sustituye BroadcastChannel, que solo comparte estado entre pestañas del mismo navegador.
+ *
+ * Importante: Supabase aplica rate-limit a `presence.track`. Sin throttle, 2+
+ * inventariadores en el mismo RA disparan `ClientPresenceRateLimitReached` y
+ * dejan de sincronizar.
  */
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -20,6 +24,8 @@ export type WorkPresenceEntry = {
 };
 
 const PRESENCE_CHANNEL = "aldepositos-work-presence-v1";
+/** Mínimo entre tracks idénticos / heartbeats (ms). */
+const PRESENCE_TRACK_MIN_INTERVAL_MS = 20_000;
 
 declare global {
   interface Window {
@@ -48,6 +54,10 @@ let subscribePromise: Promise<void> | null = null;
 let lastPayload: Omit<WorkPresenceEntry, "updatedAt"> | null = null;
 /** Snapshot de membership para no emitir si solo cambia el timestamp. */
 let lastMembershipKey = "";
+let lastTrackedKey = "";
+let lastTrackAt = 0;
+let trackInFlight = false;
+let pendingTrackTimer: ReturnType<typeof setTimeout> | null = null;
 
 function membershipKey(entries: WorkPresenceEntry[]): string {
   if (entries.length === 0) return "";
@@ -58,6 +68,17 @@ function membershipKey(entries: WorkPresenceEntry[]): string {
     )
     .sort()
     .join("|");
+}
+
+function payloadKey(entry: Omit<WorkPresenceEntry, "updatedAt">): string {
+  return [
+    entry.tabId,
+    entry.userKey,
+    entry.userLabel,
+    entry.avatarUrl ?? "",
+    entry.ra,
+    entry.module,
+  ].join("\t");
 }
 
 function emit(entries: WorkPresenceEntry[]) {
@@ -150,7 +171,7 @@ async function ensureRealtimeSubscribed(): Promise<RealtimeChannel | null> {
         if (status === "SUBSCRIBED") {
           resolve();
           scheduleEmitFromChannel();
-          void flushTrackNow();
+          void flushTrackNow(true);
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn(
             "[AlDepósitos presencia] Realtime no disponible:",
@@ -167,9 +188,26 @@ async function ensureRealtimeSubscribed(): Promise<RealtimeChannel | null> {
   return realtimeChannel;
 }
 
-async function flushTrackNow(): Promise<void> {
+async function flushTrackNow(force = false): Promise<void> {
+  if (trackInFlight) return;
   const ch = await ensureRealtimeSubscribed();
   if (!ch || !lastPayload) return;
+
+  const key = payloadKey(lastPayload);
+  const now = Date.now();
+  const unchanged = key === lastTrackedKey;
+
+  // Heartbeat idéntico: respeta intervalo mínimo.
+  if (!force && unchanged && now - lastTrackAt < PRESENCE_TRACK_MIN_INTERVAL_MS) {
+    return;
+  }
+  // Contenido cambió (RA/módulo): permitir track, pero no más de 1/s para ráfagas.
+  if (!force && !unchanged && now - lastTrackAt < 1_000) {
+    scheduleTrack(true);
+    return;
+  }
+
+  trackInFlight = true;
   try {
     await ch.track({
       userKey: lastPayload.userKey,
@@ -179,26 +217,57 @@ async function flushTrackNow(): Promise<void> {
       module: lastPayload.module,
       tabId: lastPayload.tabId,
     });
+    lastTrackedKey = key;
+    lastTrackAt = Date.now();
   } catch (e) {
     console.warn("[AlDepósitos presencia] track falló:", e);
+  } finally {
+    trackInFlight = false;
   }
+}
+
+function scheduleTrack(forceContentChange: boolean) {
+  if (pendingTrackTimer) {
+    clearTimeout(pendingTrackTimer);
+    pendingTrackTimer = null;
+  }
+  if (forceContentChange) {
+    const wait = Math.max(0, 1_000 - (Date.now() - lastTrackAt));
+    if (wait === 0) {
+      void flushTrackNow(true);
+      return;
+    }
+    pendingTrackTimer = setTimeout(() => {
+      pendingTrackTimer = null;
+      void flushTrackNow(true);
+    }, wait);
+    return;
+  }
+  const wait = Math.max(0, PRESENCE_TRACK_MIN_INTERVAL_MS - (Date.now() - lastTrackAt));
+  pendingTrackTimer = setTimeout(() => {
+    pendingTrackTimer = null;
+    void flushTrackNow(false);
+  }, wait);
 }
 
 /**
  * Publica presencia del cliente actual. Mismo tabId en toda la ventana (ver
- * `getSharedWorkPresenceTabId`).
+ * `getSharedWorkPresenceTabId`). Throttled para no saturar Realtime.
  */
 export function publishWorkPresence(entry: Omit<WorkPresenceEntry, "updatedAt">): void {
   if (typeof window === "undefined") return;
   const tabId = entry.tabId || getSharedWorkPresenceTabId();
-  lastPayload = {
+  const next = {
     ...entry,
     tabId,
     ra: (entry.ra ?? "").trim(),
     module: entry.module,
     avatarUrl: entry.avatarUrl?.trim() || null,
   };
-  void flushTrackNow();
+  const prevKey = lastPayload ? payloadKey(lastPayload) : "";
+  const nextKey = payloadKey(next);
+  lastPayload = next;
+  scheduleTrack(prevKey !== nextKey);
 }
 
 /** Quita la presencia de este cliente (p. ej. al salir de un módulo). */
@@ -207,6 +276,11 @@ export async function clearWorkPresence(tabId: string): Promise<void> {
   if (tabId !== getSharedWorkPresenceTabId()) return;
 
   lastPayload = null;
+  lastTrackedKey = "";
+  if (pendingTrackTimer) {
+    clearTimeout(pendingTrackTimer);
+    pendingTrackTimer = null;
+  }
   // No resetear lastMembershipKey a "": emit([]) debe notificar ("" === "" lo saltaría).
 
   const ch = realtimeChannel;

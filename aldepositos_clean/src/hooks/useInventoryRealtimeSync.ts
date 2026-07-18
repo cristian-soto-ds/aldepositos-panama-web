@@ -80,6 +80,8 @@ export function useInventoryRealtimeSync<TRow>({
 }: InventoryRealtimeSyncOptions<TRow>) {
   const [remoteUpdatePending, setRemoteUpdatePending] = useState(false);
   const lastRemoteMeasureHashRef = useRef("");
+  /** Evita rebroadcast del estado que acabamos de recibir/fusionar (eco → rate-limit). */
+  const lastLivePublishedHashRef = useRef("");
   const pendingRemoteTaskRef = useRef<Task | null>(null);
   const selectedId = selectedTask?.id ?? null;
   const prevSelectedIdRef = useRef<string | null>(null);
@@ -91,6 +93,7 @@ export function useInventoryRealtimeSync<TRow>({
     lastRemoteMeasureHashRef.current = remote
       ? JSON.stringify(remote.measureData ?? [])
       : "";
+    lastLivePublishedHashRef.current = "";
     pendingRemoteTaskRef.current = null;
     setRemoteUpdatePending(false);
   }, [selectedId, tasks]);
@@ -179,6 +182,10 @@ export function useInventoryRealtimeSync<TRow>({
 
       setMeasureRows(newRows);
       latestRowsRef.current = newRows;
+      // Si vino de otro cliente (live o BD), no reenviamos el mismo contenido.
+      if (fromLive || shouldMerge) {
+        lastLivePublishedHashRef.current = buildHash(newRows);
+      }
       const nextTask: Task = {
         ...(latestTaskRef.current && latestTaskRef.current.id === remote.id
           ? latestTaskRef.current
@@ -378,7 +385,9 @@ export function useInventoryRealtimeSync<TRow>({
     if (!selectedId || !key) return;
     const hash = buildHash(measureRows);
     if (hash === lastSavedHashRef.current) return;
+    if (hash === lastLivePublishedHashRef.current) return;
     const meta = getLiveTaskMeta(measureRows);
+    lastLivePublishedHashRef.current = hash;
     scheduleTaskLivePublish({
       taskId: selectedId,
       userKey: key,

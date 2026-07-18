@@ -9,7 +9,8 @@ import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 
 export const COLLAB_CHANNEL = "aldepositos-collab-v1";
-export const COLLAB_PUBLISH_DEBOUNCE_MS = 220;
+/** Debounce alto: con 2+ inventariadores, 80–220 ms satura Realtime. */
+export const COLLAB_PUBLISH_DEBOUNCE_MS = 900;
 
 export type TaskLiveUpdate = {
   type: "task";
@@ -48,7 +49,29 @@ let channel: RealtimeChannel | null = null;
 let subscribePromise: Promise<void> | null = null;
 const publishTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const seqByTabKey = new Map<string, number>();
+const lastPublishedHashByKey = new Map<string, string>();
+let publishInFlight = false;
+const publishQueue: Array<() => Promise<void>> = [];
 
+async function drainPublishQueue() {
+  if (publishInFlight) return;
+  publishInFlight = true;
+  try {
+    while (publishQueue.length > 0) {
+      const job = publishQueue.shift();
+      if (!job) break;
+      try {
+        await job();
+      } catch (e) {
+        console.warn("[AlDepósitos collab] publish falló:", e);
+      }
+      // Pequeña pausa entre envíos para no disparar rate-limit del cliente.
+      await new Promise((r) => setTimeout(r, 120));
+    }
+  } finally {
+    publishInFlight = false;
+  }
+}
 function ensureChannel(): Promise<void> {
   if (subscribePromise) return subscribePromise;
   subscribePromise = new Promise((resolve) => {
@@ -121,25 +144,41 @@ async function publishTaskLiveUpdate(params: {
   completeRowCount?: number;
   referenceMode?: string;
 }) {
-  await ensureChannel();
-  if (!channel) return;
-  const tabId = getSharedWorkPresenceTabId();
-  const update: TaskLiveUpdate = {
-    type: "task",
-    taskId: params.taskId,
-    tabId,
-    userKey: params.userKey,
-    measureData: JSON.parse(JSON.stringify(params.measureData)),
+  const contentHash = JSON.stringify({
+    measureData: params.measureData,
     currentBultos: params.currentBultos,
     status: params.status,
     capturedWeight: params.capturedWeight,
     rowCount: params.rowCount,
     completeRowCount: params.completeRowCount,
     referenceMode: params.referenceMode,
-    seq: nextSeq(`${tabId}:task:${params.taskId}`),
-    at: Date.now(),
-  };
-  await channel.send({ type: "broadcast", event: "live", payload: update });
+  });
+  const dedupeKey = `task:${params.taskId}`;
+  if (lastPublishedHashByKey.get(dedupeKey) === contentHash) return;
+  lastPublishedHashByKey.set(dedupeKey, contentHash);
+
+  publishQueue.push(async () => {
+    await ensureChannel();
+    if (!channel) return;
+    const tabId = getSharedWorkPresenceTabId();
+    const update: TaskLiveUpdate = {
+      type: "task",
+      taskId: params.taskId,
+      tabId,
+      userKey: params.userKey,
+      measureData: JSON.parse(JSON.stringify(params.measureData)),
+      currentBultos: params.currentBultos,
+      status: params.status,
+      capturedWeight: params.capturedWeight,
+      rowCount: params.rowCount,
+      completeRowCount: params.completeRowCount,
+      referenceMode: params.referenceMode,
+      seq: nextSeq(`${tabId}:task:${params.taskId}`),
+      at: Date.now(),
+    };
+    await channel.send({ type: "broadcast", event: "live", payload: update });
+  });
+  void drainPublishQueue();
 }
 
 export function scheduleOrderLivePublish(params: {

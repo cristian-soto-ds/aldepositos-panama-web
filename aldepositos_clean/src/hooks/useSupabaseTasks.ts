@@ -60,10 +60,9 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
         });
       } catch (e) {
         console.error(e);
-        // eslint-disable-next-line no-alert
-        alert(
-          "No se pudieron cargar las órdenes desde Supabase. Revisa la tabla `tasks` y las políticas RLS.",
-        );
+        // No alertar en cada fallo: con rate-limit / cuota de Realtime o red
+        // intermitente el alert bloquea la captura multi-usuario.
+        setTasksLoading(false);
       } finally {
         setTasksLoading(false);
       }

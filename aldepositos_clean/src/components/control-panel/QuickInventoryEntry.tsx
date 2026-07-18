@@ -274,7 +274,7 @@ const CATALOG_DEBOUNCE_MS = 500;
 const QUICK_AUTOSAVE_MS = 900;
 /** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
 const QUICK_DRAFT_PERSIST_MS = 2000;
-const QUICK_PRESENCE_HEARTBEAT_MS = 28_000;
+const QUICK_PRESENCE_HEARTBEAT_MS = 45_000;
 // Reintentos con backoff cuando el guardado en el servidor falla (red caída, etc.).
 const AUTOSAVE_RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000];
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";

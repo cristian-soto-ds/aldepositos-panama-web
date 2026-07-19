@@ -55,6 +55,9 @@ export function mergeCollectionOrderIntoTask(
   const provider = pickText(task.provider, order.proveedor, EMPTY_TEXT_LABELS, overwrite);
   if (provider !== undefined) next.provider = provider;
 
+  const brand = pickText(task.brand, order.marca, EMPTY_TEXT_LABELS, overwrite);
+  if (brand !== undefined) next.brand = brand;
+
   const subClient = pickText(task.subClient, order.expedidor, EMPTY_TEXT_LABELS, overwrite);
   if (subClient !== undefined) next.subClient = subClient;
 

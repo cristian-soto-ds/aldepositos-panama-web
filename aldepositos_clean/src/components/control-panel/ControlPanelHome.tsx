@@ -54,9 +54,9 @@ function formatNumber(n: number): string {
 }
 
 function moduleLabel(t: Task["type"]): string {
-  if (t === "quick") return "Ingreso rápido";
+  if (t === "quick") return "Inventarios";
   if (t === "detailed") return "Ingreso detallado";
-  if (t === "airway") return "Ingreso rápido";
+  if (t === "airway") return "Inventarios";
   return "Sin módulo";
 }
 
@@ -70,9 +70,9 @@ function statusLabel(status: string): string {
 }
 
 function moduleShort(t: WorkPresenceEntry["module"]): string {
-  if (t === "quick") return "Rápido";
+  if (t === "quick") return "Inventarios";
   if (t === "detailed") return "Detallado";
-  if (t === "airway") return "Rápido";
+  if (t === "airway") return "Inventarios";
   if (t === "none") return "Panel";
   return "—";
 }
@@ -647,7 +647,7 @@ export function ControlPanelHome({
             primary={formatNumber(activeOrders)}
             primaryLabel="RAs activas"
             rows={[
-              { label: "Rápido", value: dashboard.byType.quick },
+              { label: "Inventarios", value: dashboard.byType.quick },
               { label: "Detallado", value: dashboard.byType.detailed },
               { label: "Completadas", value: dashboard.completed },
             ]}
@@ -863,7 +863,7 @@ export function ControlPanelHome({
             </h3>
             <div className="space-y-3">
               <SidebarBar
-                label="Rápido"
+                label="Inventarios"
                 count={dashboard.byType.quick}
                 total={dashboard.byType.quick + dashboard.byType.detailed}
                 color="bg-[#16263F]"

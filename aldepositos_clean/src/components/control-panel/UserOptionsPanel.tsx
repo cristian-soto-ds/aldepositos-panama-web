@@ -215,7 +215,7 @@ export function UserOptionsPanel({
             className="panel-input w-full rounded-xl px-3 py-2.5 text-sm font-bold outline-none focus:border-blue-500"
           >
             <option value="dashboard">Panel principal</option>
-            <option value="quick-entry">Ingreso rápido</option>
+            <option value="quick-entry">Inventarios</option>
             <option value="reports">Reportes</option>
             <option value="options">Opciones de usuario</option>
           </select>

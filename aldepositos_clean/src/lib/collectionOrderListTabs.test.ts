@@ -11,6 +11,7 @@ function order(
   cliente: string,
   opts: {
     proveedor?: string;
+    marca?: string;
     linkedRaNumbers?: string[];
     receptionStatus?: CollectionOrder["receptionStatus"];
   } = {},
@@ -19,6 +20,7 @@ function order(
     id,
     cliente,
     proveedor: opts.proveedor ?? "",
+    marca: opts.marca,
     lines: [],
     status: "draft",
     linkedRaNumbers: opts.linkedRaNumbers ?? [],
@@ -45,6 +47,12 @@ describe("pestaña de órdenes sin inventario", () => {
     expect(isOrderWithoutInventory(order("1", "Otro", { proveedor: "PM CARGO" }))).toBe(
       true,
     );
+  });
+
+  it("reconoce el nombre en marca (número de seguimiento)", () => {
+    expect(
+      isOrderWithoutInventory(order("1", "Otro cliente", { marca: "X10" })),
+    ).toBe(true);
   });
 
   it("deja en recepción las órdenes sin inventario que aún no llegaron", () => {

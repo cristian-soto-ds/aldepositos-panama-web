@@ -154,7 +154,7 @@ export function ReferenceCatalogModule() {
           </div>
           <p className="max-w-xl text-xs font-medium text-slate-600 dark:text-slate-400 md:text-sm">
             Maestro WMS: número de parte, medidas y peso. Se usa para autocompletar
-            en ingreso rápido y detallado. Clave única: número normalizado (mayúsculas,
+            en inventarios y detallado. Clave única: número normalizado (mayúsculas,
             sin espacios extra).
           </p>
         </div>

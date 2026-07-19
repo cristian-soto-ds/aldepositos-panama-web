@@ -37,6 +37,11 @@ export type CollectionOrder = {
   /** Cliente / consignatario */
   cliente: string;
   proveedor: string;
+  /**
+   * Marca / Nº de seguimiento (columna Magaya «Número de seguimiento»).
+   * Se usa como marca al pasar al RA.
+   */
+  marca?: string;
   /** Nombre del expedidor (documento Magaya / HTM). */
   expedidor?: string;
   /** Fecha de entrega indicada en el documento origen. */

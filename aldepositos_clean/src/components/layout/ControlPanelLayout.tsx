@@ -141,7 +141,7 @@ export function ControlPanelLayout({
           </p>
           <NavItem
             icon={<NavIcon Icon={Box} />}
-            text="Ingreso Rápido"
+            text="Inventarios"
             active={currentView === "quick-entry"}
             onClick={() => {
               setCurrentView("quick-entry");

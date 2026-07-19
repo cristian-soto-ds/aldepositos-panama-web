@@ -18,8 +18,10 @@ import {
   Plus,
   Recycle,
   Ruler,
+  Search,
   Smartphone,
   Trash2,
+  X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
 import { useSharedNow } from "@/hooks/useSharedNow";
@@ -121,7 +123,7 @@ import {
   normalizePartNumber,
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
-import { raClientGroupLabel } from "@/lib/collectionOrderToTask";
+import { formatRaFieldLabel, raClientGroupLabel } from "@/lib/collectionOrderToTask";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -280,6 +282,11 @@ function createEmptyMeasureRow(): MeasureRow {
 const CATALOG_DEBOUNCE_MS = 500;
 /** Debounce a Supabase: agrupa altas rápidas de filas en un solo guardado. */
 const QUICK_AUTOSAVE_MS = 900;
+/**
+ * Tras borrar filas en ráfaga, espera un instante antes de flush a BD.
+ * Evita solapar CAS/ecos y el falso «otro operador» al borrar rápido.
+ */
+const QUICK_DELETE_FLUSH_MS = 280;
 /** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
 const QUICK_DRAFT_PERSIST_MS = 2000;
 const QUICK_PRESENCE_HEARTBEAT_MS = 45_000;
@@ -725,7 +732,12 @@ export function QuickInventoryEntry({
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [leavePromptOpen, setLeavePromptOpen] = useState(false);
-  const [clientFilter, setClientFilter] = useState<string>("Todos");
+  /** Campo activo del filtro de lista (como el label «Cliente» intercambiable). */
+  const [listFilterField, setListFilterField] = useState<
+    "client" | "provider" | "brand"
+  >("client");
+  const [listFilterValue, setListFilterValue] = useState<string>("Todos");
+  const [searchQuery, setSearchQuery] = useState("");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [autosaveTick, setAutosaveTick] = useState(0);
@@ -738,6 +750,7 @@ export function QuickInventoryEntry({
   );
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryAttemptsRef = useRef(0);
   const isSavingRef = useRef(false);
@@ -749,6 +762,17 @@ export function QuickInventoryEntry({
   // Espejo de flushAutosave para poder invocarlo desde funciones/efectos definidos
   // antes que él (p. ej. clearTask) sin problemas de orden de declaración.
   const flushAutosaveRef = useRef<() => void>(() => {});
+  /** Agrupa borrados en ráfaga en un solo flush a BD. */
+  const scheduleDeleteFlush = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (deleteFlushTimerRef.current) {
+      clearTimeout(deleteFlushTimerRef.current);
+    }
+    deleteFlushTimerRef.current = setTimeout(() => {
+      deleteFlushTimerRef.current = null;
+      flushAutosaveRef.current();
+    }, QUICK_DELETE_FLUSH_MS);
+  }, []);
   const activeTaskIdRef = useRef<string | null>(null);
   const latestRowsRef = useRef<MeasureRow[]>([]);
   const latestTaskRef = useRef<Task | null>(null);
@@ -778,10 +802,9 @@ export function QuickInventoryEntry({
   >({});
   const catalogSeqRef = useRef<Record<string, number>>({});
   const onLocalSaveCompletedRef = useRef<() => void>(() => {});
-  // IDs de filas eliminadas localmente que aún podrían venir en un eco atrasado
-  // de la BD/en vivo. Se filtran de cualquier estado remoto entrante hasta que la
-  // BD confirme la eliminación (deja de traerlas). Evita que una fila borrada
-  // "reaparezca" y entre en bucle de borrado.
+  // IDs de filas eliminadas localmente. Se mantienen como tombstones hasta
+  // cambiar de RA: si se limpian al confirmar en BD, un eco atrasado las
+  // reinserta como «altas remotas» y la UI “regresa” filas borradas.
   const pendingDeletionIdsRef = useRef<Set<string>>(new Set());
   /** IDs vistos en el último remoto (live o BD) — detecta borrados antes del baseline. */
   const lastSeenRemoteIdsRef = useRef<Set<string>>(new Set());
@@ -796,18 +819,13 @@ export function QuickInventoryEntry({
               JSON.parse(JSON.stringify(remote.measureData)) as MeasureRow[],
             )
           : [];
-      // Autoridad local sobre eliminaciones: si el estado remoto todavía trae una
-      // fila que acabamos de borrar (eco atrasado), la quitamos. Cuando la BD ya no
-      // la incluye, damos la eliminación por confirmada y limpiamos el guard.
+      // Tombstones locales: si el remoto aún trae una fila que borramos, la
+      // quitamos del merge. NO limpiamos aquí al ausentarse en el remoto —
+      // un eco atrasado posterior volvería a insertarla como «alta remota».
+      // Se confirman/limpian tras un autosave exitoso.
       const pendingDel = pendingDeletionIdsRef.current;
       if (pendingDel.size > 0) {
-        const remoteIds = new Set(taskRows.map((r) => r.id));
-        for (const id of Array.from(pendingDel)) {
-          if (!remoteIds.has(id)) pendingDel.delete(id);
-        }
-        if (pendingDel.size > 0) {
-          taskRows = taskRows.filter((r) => !pendingDel.has(r.id));
-        }
+        taskRows = taskRows.filter((r) => !pendingDel.has(r.id));
       }
       const incomingSnapshot = taskHasImportedReferences(taskRows)
         ? buildSourceReferenceSnapshot(taskRows, taskRows)
@@ -906,6 +924,10 @@ export function QuickInventoryEntry({
     pendingDeletionIdsRef.current.clear();
     lastSeenRemoteIdsRef.current = new Set();
     pendingLocalCreationIdsRef.current.clear();
+    if (deleteFlushTimerRef.current) {
+      clearTimeout(deleteFlushTimerRef.current);
+      deleteFlushTimerRef.current = null;
+    }
     if (!selectedTask) return;
     setMeasureRows((prev) => {
       const next = stripQuickRowsForPersist(prev);
@@ -1058,19 +1080,97 @@ export function QuickInventoryEntry({
     [moduleTasks],
   );
 
-  const clients = useMemo(() => Object.keys(groupedTasks), [groupedTasks]);
+  const clients = useMemo(() => Object.keys(groupedTasks).sort(), [groupedTasks]);
   const totalModuleTasks = moduleTasks.length;
 
-  const displayedTasks = useMemo(() => {
-    if (clientFilter !== "Todos" && clients.includes(clientFilter)) {
-      return groupedTasks[clientFilter] ?? moduleTasks;
+  const providerOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of moduleTasks) {
+      const label = formatRaFieldLabel(task.provider);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
     }
-    return moduleTasks;
-  }, [moduleTasks, groupedTasks, clientFilter, clients]);
+    return [...counts.entries()].sort(([a], [b]) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [moduleTasks]);
+
+  const brandOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of moduleTasks) {
+      const label = formatRaFieldLabel(task.brand);
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort(([a], [b]) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [moduleTasks]);
+
+  const listFilterOptions = useMemo(() => {
+    if (listFilterField === "provider") return providerOptions;
+    if (listFilterField === "brand") return brandOptions;
+    return clients.map((c) => [c, groupedTasks[c]?.length ?? 0] as const);
+  }, [
+    listFilterField,
+    providerOptions,
+    brandOptions,
+    clients,
+    groupedTasks,
+  ]);
+
+  const displayedTasks = useMemo(() => {
+    let list = moduleTasks;
+
+    if (listFilterValue !== "Todos") {
+      if (listFilterField === "client") {
+        list = groupedTasks[listFilterValue] ?? list;
+      } else if (listFilterField === "provider") {
+        list = list.filter(
+          (t) => formatRaFieldLabel(t.provider) === listFilterValue,
+        );
+      } else {
+        list = list.filter(
+          (t) => formatRaFieldLabel(t.brand) === listFilterValue,
+        );
+      }
+    }
+
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) => {
+        const haystack = [
+          String(t.ra ?? ""),
+          String(t.mainClient ?? ""),
+          String(t.provider ?? ""),
+          String(t.brand ?? ""),
+          String(t.subClient ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+
+    return list;
+  }, [
+    moduleTasks,
+    groupedTasks,
+    listFilterField,
+    listFilterValue,
+    searchQuery,
+  ]);
+
+  const hasActiveListFilters =
+    listFilterValue !== "Todos" || searchQuery.trim().length > 0;
+
+  const clearListFilters = useCallback(() => {
+    setListFilterField("client");
+    setListFilterValue("Todos");
+    setSearchQuery("");
+  }, []);
 
   useEffect(() => {
     setListVisibleCount(RA_LIST_PAGE_SIZE);
-  }, [viewMode, clientFilter]);
+  }, [viewMode, listFilterField, listFilterValue, searchQuery]);
 
   const visibleListTasks = useMemo(() => {
     if (displayedTasks.length <= RA_LIST_VIRTUALIZE_THRESHOLD) {
@@ -1787,9 +1887,7 @@ export function QuickInventoryEntry({
       latestRowsRef.current = next;
       return next;
     });
-    if (typeof window !== "undefined") {
-      window.setTimeout(() => flushAutosaveRef.current(), 0);
-    }
+    scheduleDeleteFlush();
   };
 
   const deletePallet = (palletNum: number) => {
@@ -1828,11 +1926,9 @@ export function QuickInventoryEntry({
         latestRowsRef.current = normalized;
         return normalized;
       });
-      if (typeof window !== "undefined") {
-        window.setTimeout(() => flushAutosaveRef.current(), 0);
-      }
+      scheduleDeleteFlush();
     },
-    [referenceMode],
+    [referenceMode, scheduleDeleteFlush],
   );
 
   const updateRowValue = useCallback(
@@ -2304,6 +2400,8 @@ export function QuickInventoryEntry({
           persistedRows,
           mergeOpts,
         );
+        // Si hubo borrados/edits durante el save, la UI ya tiene lo más nuevo;
+        // el merge con tombstones evita reintroducir filas del eco.
         setMeasureRows(uiMerged);
         latestRowsRef.current = uiMerged;
         setSelectedTask((prev) => {
@@ -2452,6 +2550,10 @@ export function QuickInventoryEntry({
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("beforeunload", flush);
       document.removeEventListener("visibilitychange", onVisibility);
+      if (deleteFlushTimerRef.current) {
+        clearTimeout(deleteFlushTimerRef.current);
+        deleteFlushTimerRef.current = null;
+      }
       flush();
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
@@ -2626,9 +2728,9 @@ export function QuickInventoryEntry({
           <div className="mb-2 shrink-0 space-y-2 sm:mb-4 sm:space-y-4 md:mb-6 md:space-y-6">
             <div className="flex flex-row items-center justify-between gap-2 sm:gap-4">
               <div>
-                <h2 className="flex items-center gap-1.5 text-base font-bold text-[#16263F] dark:text-slate-100 sm:gap-2 sm:text-fluid-title md:gap-3">
-                  <Box className="h-4 w-4 shrink-0 text-[#16263F] dark:text-slate-100 sm:icon-lg" />
-                  Ingreso rápido
+                <h2 className="flex items-center gap-2 text-2xl font-black tracking-tight text-[#16263F] dark:text-slate-100 sm:gap-3 sm:text-3xl md:text-4xl">
+                  <Box className="h-7 w-7 shrink-0 text-[#16263F] dark:text-slate-100 sm:h-8 sm:w-8 md:h-9 md:w-9" />
+                  Inventarios
                 </h2>
               </div>
               <button
@@ -2647,7 +2749,7 @@ export function QuickInventoryEntry({
                 type="button"
                 onClick={() => {
                   setViewMode("pending");
-                  setClientFilter("Todos");
+                  clearListFilters();
                 }}
                 className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "pending"
@@ -2661,7 +2763,7 @@ export function QuickInventoryEntry({
                 type="button"
                 onClick={() => {
                   setViewMode("priority");
-                  setClientFilter("Todos");
+                  clearListFilters();
                 }}
                 className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "priority"
@@ -2676,7 +2778,7 @@ export function QuickInventoryEntry({
                 type="button"
                 onClick={() => {
                   setViewMode("completed");
-                  setClientFilter("Todos");
+                  clearListFilters();
                 }}
                 className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "completed"
@@ -2688,27 +2790,73 @@ export function QuickInventoryEntry({
               </button>
             </div>
 
-            {clients.length > 0 && (
-              <div className="flex items-center gap-1.5 sm:gap-3">
-                <label
-                  htmlFor="quick-client-filter"
-                  className="shrink-0 text-[8px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 sm:text-[10px]"
-                >
-                  Cliente
-                </label>
-                <select
-                  id="quick-client-filter"
-                  value={clientFilter}
-                  onChange={(e) => setClientFilter(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
-                >
-                  <option value="Todos">TODOS ({totalModuleTasks})</option>
-                  {clients.map((c) => (
-                    <option key={c} value={c}>
-                      {c} ({groupedTasks[c].length})
-                    </option>
-                  ))}
-                </select>
+            {totalModuleTasks > 0 && (
+              <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
+                  <label className="sr-only" htmlFor="quick-list-filter-field">
+                    Filtrar por
+                  </label>
+                  <select
+                    id="quick-list-filter-field"
+                    value={listFilterField}
+                    onChange={(e) => {
+                      setListFilterField(
+                        e.target.value as "client" | "provider" | "brand",
+                      );
+                      setListFilterValue("Todos");
+                    }}
+                    className="shrink-0 appearance-none rounded-lg border-0 bg-transparent py-1 pr-5 text-[8px] font-black uppercase tracking-wider text-slate-500 outline-none dark:text-slate-400 sm:text-[10px]"
+                    style={{
+                      backgroundImage:
+                        "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 0 center",
+                    }}
+                    title="Cambiar tipo de filtro"
+                  >
+                    <option value="client">Cliente</option>
+                    <option value="provider">Proveedor</option>
+                    <option value="brand">Marca</option>
+                  </select>
+                  <select
+                    id="quick-list-filter-value"
+                    value={listFilterValue}
+                    onChange={(e) => setListFilterValue(e.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-md sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
+                  >
+                    <option value="Todos">TODOS ({totalModuleTasks})</option>
+                    {listFilterOptions.map(([label, count]) => (
+                      <option key={label} value={label}>
+                        {label} ({count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 sm:w-52 sm:shrink-0 sm:rounded-xl sm:px-3 sm:py-2">
+                  <Search
+                    className="h-3.5 w-3.5 shrink-0 text-slate-400 sm:h-4 sm:w-4"
+                    aria-hidden
+                  />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Buscar"
+                    className="min-w-0 flex-1 bg-transparent text-[11px] font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500 sm:text-xs"
+                    aria-label="Buscar"
+                  />
+                  {searchQuery.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery("")}
+                      className="rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+                      title="Limpiar búsqueda"
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
@@ -2717,13 +2865,13 @@ export function QuickInventoryEntry({
             <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
               {displayedTasks.length === 0 ? (
                 <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center font-bold text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500 md:p-16">
-                  No hay órdenes{" "}
-                  {viewMode === "completed"
-                    ? "completadas"
-                    : viewMode === "priority"
-                      ? "marcadas como prioridad para contenedor"
-                      : "pendientes regulares"}
-                  .
+                  {hasActiveListFilters
+                    ? "Ningún RA coincide con la búsqueda o los filtros."
+                    : viewMode === "completed"
+                      ? "No hay órdenes completadas."
+                      : viewMode === "priority"
+                        ? "No hay órdenes marcadas como prioridad para contenedor."
+                        : "No hay órdenes pendientes regulares."}
                 </div>
               ) : (
                 <>

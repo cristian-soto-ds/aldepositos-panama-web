@@ -82,6 +82,10 @@ import {
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
+import {
+  HtmImportResultModal,
+  type HtmImportResultSummary,
+} from "@/components/modals/HtmImportResultModal";
 import { classifyHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
@@ -403,6 +407,9 @@ export function CollectionOrderModule({
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
   const [htmImportOpen, setHtmImportOpen] = useState(false);
   const [htmImportBusy, setHtmImportBusy] = useState(false);
+  const [htmImportResult, setHtmImportResult] = useState<HtmImportResultSummary | null>(
+    null,
+  );
   const [saveBusy, setSaveBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
@@ -928,12 +935,15 @@ export function CollectionOrderModule({
       orders,
     );
     if (toCreate.length === 0 && toUpdate.length === 0) {
-      alert(
-        unchangedNumeros.length > 0
-          ? "Todas las órdenes del archivo ya existen y están al día. No se hicieron cambios."
-          : "No hay órdenes para importar.",
-      );
       setHtmImportOpen(false);
+      setHtmImportResult({
+        created: 0,
+        updated: 0,
+        unchanged: unchangedNumeros.length,
+        failed: 0,
+        emptyReason:
+          unchangedNumeros.length > 0 ? "all-up-to-date" : "nothing-to-import",
+      });
       return;
     }
     setHtmImportBusy(true);
@@ -961,17 +971,12 @@ export function CollectionOrderModule({
       }
       await reloadOrders();
       setHtmImportOpen(false);
-
-      const parts: string[] = [];
-      if (created > 0) parts.push(`${created} creada(s)`);
-      if (updated > 0) parts.push(`${updated} actualizada(s) con los cambios del documento`);
-      if (unchangedNumeros.length > 0) parts.push(`${unchangedNumeros.length} sin cambios`);
-      if (fail > 0) parts.push(`${fail} con error`);
-      alert(
-        parts.length > 0
-          ? `Importación HTM: ${parts.join(", ")}.`
-          : "Importación HTM completada.",
-      );
+      setHtmImportResult({
+        created,
+        updated,
+        unchanged: unchangedNumeros.length,
+        failed: fail,
+      });
     } finally {
       setHtmImportBusy(false);
     }
@@ -1121,9 +1126,10 @@ export function CollectionOrderModule({
 
   const tasksEligibleForCollectionTransfer = useMemo(() => {
     if (!editing) return [];
-    return tasks.filter(
-      (t) => !taskIsBlockedForCollectionOrder(t, editing.id, orders),
-    );
+    return tasks.filter((t) => {
+      if (t.status === "completed") return false;
+      return !taskIsBlockedForCollectionOrder(t, editing.id, orders);
+    });
   }, [tasks, editing, orders]);
 
   const transferTargetsExcluded =
@@ -1148,6 +1154,10 @@ export function CollectionOrderModule({
     if (!task) {
        
       alert("RA no encontrado.");
+      return;
+    }
+    if (task.status === "completed") {
+      alert("Este RA ya está completado. Elija otro RA disponible.");
       return;
     }
     if (taskIsBlockedForCollectionOrder(task, editing.id, orders)) {
@@ -1547,6 +1557,12 @@ export function CollectionOrderModule({
           busy={htmImportBusy}
           onCancel={() => setHtmImportOpen(false)}
           onConfirm={(imported) => void confirmHtmImport(imported)}
+        />
+
+        <HtmImportResultModal
+          open={htmImportResult != null}
+          summary={htmImportResult}
+          onClose={() => setHtmImportResult(null)}
         />
       </div>
 
@@ -2104,7 +2120,7 @@ export function CollectionOrderModule({
             </div>
 
             {/* Datos de la orden — una fila ancha */}
-            <div className="grid min-w-0 flex-1 grid-cols-2 items-end gap-x-4 gap-y-2.5 px-3 py-3 sm:px-4 lg:grid-cols-4">
+            <div className="grid min-w-0 flex-1 grid-cols-2 items-end gap-x-4 gap-y-2.5 px-3 py-3 sm:px-4 lg:grid-cols-5">
               <div className="min-w-0">
                 <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
                   Nº orden
@@ -2114,6 +2130,17 @@ export function CollectionOrderModule({
                   onChange={(ev) => updateEditing({ numero: ev.target.value })}
                   className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-bold text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                   placeholder={`Ej. ${suggestedNumber}`}
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="mb-1 block text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                  Marca
+                </label>
+                <input
+                  value={e.marca ?? ""}
+                  onChange={(ev) => updateEditing({ marca: ev.target.value })}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-1.5 text-sm font-medium text-[#16263F] outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="Nº de seguimiento"
                 />
               </div>
               <div className="min-w-0">

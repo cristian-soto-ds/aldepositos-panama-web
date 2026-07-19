@@ -420,7 +420,7 @@ function StatRow({
       </div>
 
       <div className="mb-3 flex flex-wrap gap-1.5">
-        <MixChip label="Rápido" count={stat.quickCount} tone="blue" />
+        <MixChip label="Inventarios" count={stat.quickCount} tone="blue" />
         <MixChip label="Detallado" count={stat.detailedCount} tone="violet" />
         <MixChip label="Con refs" count={stat.modeWith} tone="emerald" />
         <MixChip label="Sin refs" count={stat.modeWithout} tone="amber" />

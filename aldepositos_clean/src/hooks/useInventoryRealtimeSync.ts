@@ -63,6 +63,10 @@ type InventoryRealtimeSyncOptions<TRow> = {
  * - Broadcast en vivo (~80 ms) mientras otro operador escribe
  * - Supabase Realtime / refetch al guardar en BD
  * - Merge concurrente para no pisar medidas de otro inventariador
+ *
+ * Nota: durante autosave no se muestra el banner «otro operador» — se encola
+ * el remoto y se fusiona al terminar el guardado (evita falsos positivos al
+ * borrar/editar en ráfaga).
  */
 export function useInventoryRealtimeSync<TRow>({
   tasks,
@@ -271,8 +275,9 @@ export function useInventoryRealtimeSync<TRow>({
       };
 
       if (isSavingRef.current) {
+        // Cola silenciosa: el banner amarillo durante autosave (borrados rápidos)
+        // era un falso positivo del eco propio y al aplicarlo “regresaba” filas.
         pendingRemoteTaskRef.current = remote;
-        setRemoteUpdatePending(true);
         return;
       }
 
@@ -302,8 +307,7 @@ export function useInventoryRealtimeSync<TRow>({
   }, [applyRemote]);
 
   const onLocalSaveCompleted = useCallback(() => {
-    // Tras guardar, si quedó un remoto pendiente (otro usuario midió durante el
-    // save), fusionarlo en vez de descartarlo.
+    // Tras guardar, fusionar en silencio cualquier remoto que llegó durante el save.
     const pending = pendingRemoteTaskRef.current;
     if (pending) {
       pendingRemoteTaskRef.current = null;
@@ -383,8 +387,9 @@ export function useInventoryRealtimeSync<TRow>({
     }
 
     if (isSavingRef.current) {
+      // Eco de BD / otro save mientras autosaveamos: encolar sin banner.
+      // (Borrados en ráfaga mantienen isSaving=true casi continuo.)
       pendingRemoteTaskRef.current = remote;
-      setRemoteUpdatePending(true);
       return;
     }
 

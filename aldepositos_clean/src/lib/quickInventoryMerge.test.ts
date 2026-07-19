@@ -133,6 +133,23 @@ describe("mergeConcurrentQuickRows", () => {
     expect(merged[0]).toMatchObject({ l: "10.00" });
   });
 
+  it("deletedIds evita que un eco atrasado reintroduzca filas ya borradas", () => {
+    // Tras guardar, el baseline ya no tiene las filas borradas; un eco viejo
+    // aún las trae. Sin tombstones el merge las trataría como altas remotas.
+    const baseline = [row("1", { referencia: "A", bultos: "1", l: "5" })];
+    const local = [row("1", { referencia: "A", bultos: "1", l: "5" })];
+    const remote = [
+      row("1", { referencia: "A", bultos: "1", l: "5" }),
+      row("gone-a", { referencia: "X", bultos: "2" }),
+      row("gone-b", { referencia: "Y", bultos: "3" }),
+    ];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      deletedIds: ["gone-a", "gone-b"],
+    });
+    expect(merged.map((r) => r.id)).toEqual(["1"]);
+  });
+
   it("sin deletedIds, conserva alta local vacía no presente en remoto", () => {
     const baseline = [row("1", { referencia: "A", bultos: "1" })];
     const local = [

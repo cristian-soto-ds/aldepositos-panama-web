@@ -108,7 +108,7 @@ export function ManualEntryModal({
             mainClient: emptyFields.mainClient,
             provider: emptyFields.provider,
             subClient: emptyFields.subClient,
-            brand: formData.brand.trim() || emptyFields.brand,
+            brand: emptyFields.brand,
             expectedBultos: emptyFields.expectedBultos,
             originalExpectedBultos: emptyFields.originalExpectedBultos,
             expectedCbm: emptyFields.expectedCbm,
@@ -222,7 +222,7 @@ export function ManualEntryModal({
                     onChange={handleChange}
                     className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100 cursor-pointer"
                   >
-                    <option value="quick">Ingreso Rápido</option>
+                    <option value="quick">Inventarios</option>
                   </select>
                 </div>
               </div>
@@ -288,37 +288,23 @@ export function ManualEntryModal({
             </>
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                    Número de RA *
-                  </label>
-                  <input
-                    required
-                    autoFocus
-                    name="ra"
-                    value={formData.ra}
-                    onChange={handleChange}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
-                    placeholder="Ej: 54069"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                    Marca
-                  </label>
-                  <input
-                    name="brand"
-                    value={formData.brand}
-                    onChange={handleChange}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
-                    placeholder="Ej: NIKE"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                  Número de RA *
+                </label>
+                <input
+                  required
+                  autoFocus
+                  name="ra"
+                  value={formData.ra}
+                  onChange={handleChange}
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-[#16263F] dark:text-slate-100"
+                  placeholder="Ej: 54069"
+                />
               </div>
               <p className="rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm leading-relaxed text-slate-600 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-slate-300">
-                Solo necesitas el número de RA (y opcionalmente la marca). Cliente, proveedor,
-                bultos y demás datos se completan al asignar una orden de recolección a este RA.
+                Solo necesitas el número de RA. Cliente, proveedor, marca, bultos y demás
+                datos se completan al asignar una orden de recolección a este RA.
               </p>
             </>
           )}

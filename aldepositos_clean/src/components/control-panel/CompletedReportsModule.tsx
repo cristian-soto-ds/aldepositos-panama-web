@@ -542,7 +542,7 @@ export function CompletedReportsModule({
                     onChange={(v) => setTypeFilter(v as TypeFilter)}
                   >
                     <option value="Todos">TODOS LOS MÓDULOS</option>
-                    <option value="quick">Ingreso Rápido</option>
+                    <option value="quick">Inventarios</option>
                     <option value="detailed">Ingreso Detallado</option>
                   </FilterSelect>
 
@@ -624,7 +624,7 @@ export function CompletedReportsModule({
                 const isSelected = selectedReportIds.includes(t.id);
                 const moduleName =
                   t.type === "quick"
-                    ? "RÁPIDO"
+                    ? "INVENTARIOS"
                     : t.type === "detailed"
                       ? "DETALLADO"
                       : "AÉREA";

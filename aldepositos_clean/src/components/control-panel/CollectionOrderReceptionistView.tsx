@@ -326,6 +326,14 @@ export function CollectionOrderReceptionistView({
                     ) : null}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] sm:gap-x-2 sm:text-[11px]">
+                    {o.marca?.trim() ? (
+                      <span className="min-w-0 max-w-full truncate font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 sm:text-[9px]">
+                          Marca{" "}
+                        </span>
+                        {o.marca}
+                      </span>
+                    ) : null}
                     {o.proveedor?.trim() ? (
                       <span className="min-w-0 max-w-full truncate font-semibold text-slate-600 dark:text-slate-300">
                         <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 sm:text-[9px]">

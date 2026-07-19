@@ -1,6 +1,6 @@
 /**
  * Importación de órdenes de recolección desde documento HTM / HTML (Magaya «CARGA POR LLEGAR»).
- * Campos: Número, Nombre Expedidor, Nombre Consignatario, Piezas, Peso (kg), Volumen (m³), Nombre Proveedor
+ * Campos: Número, Expedidor, Consignatario, Piezas, Peso, Volumen, Proveedor, Número de seguimiento (marca)
  */
 
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
@@ -10,6 +10,8 @@ export type ParsedOrHtmRow = {
   expedidor: string;
   cliente: string;
   proveedor: string;
+  /** Número de seguimiento Magaya → marca en la OR. */
+  marca: string;
   piezas: number;
   pesoKg: number;
   volumenM3: number;
@@ -27,6 +29,7 @@ type FieldKey =
   | "expedidor"
   | "cliente"
   | "proveedor"
+  | "marca"
   | "piezas"
   | "peso"
   | "volumen"
@@ -43,6 +46,18 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     "cliente consignatario",
   ],
   proveedor: ["nombre proveedor", "proveedor"],
+  marca: [
+    "numero de seguimiento",
+    "número de seguimiento",
+    "n° de seguimiento",
+    "nº de seguimiento",
+    "no. de seguimiento",
+    "nro. de seguimiento",
+    "nro de seguimiento",
+    "seguimiento",
+    "tracking",
+    "marca",
+  ],
   piezas: ["piezas", "bultos", "cantidad"],
   peso: ["peso (kg)", "peso kg", "peso total (kg)", "peso total", "peso"],
   volumen: [
@@ -97,6 +112,8 @@ function matchField(label: string): FieldKey | null {
       const a = normLabel(alias);
       if (!a) continue;
       if (n === a) return key;
+      // «Número» no debe absorber «Número de seguimiento».
+      if (key === "numero" && n.includes("seguimiento")) continue;
       if (n.includes(a) && a.length > bestLen) {
         bestKey = key;
         bestLen = a.length;
@@ -152,7 +169,7 @@ export function filterNewHtmCollectionOrders(
  * Plan de importación HTM comparando contra las órdenes existentes:
  * - toCreate: órdenes nuevas (número OR no existe todavía).
  * - toUpdate: órdenes que ya existen pero cuyo documento trae cambios
- *   (proveedor, cliente, expedidor, fecha, bultos, peso o cubicaje).
+ *   (proveedor, cliente, expedidor, marca, fecha, bultos, peso o cubicaje).
  *   Se conservan las líneas, estado, RAs vinculados e id del operador.
  * - unchangedNumeros: existentes sin cambios respecto al documento.
  */
@@ -196,6 +213,11 @@ function mergeHtmDocumentIntoExisting(
   const expedidor = docStr(incoming.expedidor);
   if (expedidor && expedidor !== docStr(existing.expedidor)) {
     merged.expedidor = expedidor;
+    changed = true;
+  }
+  const marca = docStr(incoming.marca);
+  if (marca && marca !== docStr(existing.marca)) {
+    merged.marca = marca;
     changed = true;
   }
   const fechaEntrega = docStr(incoming.fechaEntrega);
@@ -288,6 +310,30 @@ function buildColMap(headerCells: string[]): Partial<Record<FieldKey, number>> {
   return map;
 }
 
+/** Parsea filas ya extraídas (útil en tests y sin DOM). */
+export function parseHtmRowsFromCellMatrix(
+  headerCells: string[],
+  dataRows: string[][],
+  clienteFallback = "",
+): ParsedOrHtmRow[] {
+  const colMap = buildColMap(headerCells);
+  if (colMap.numero === undefined) return [];
+  const out: ParsedOrHtmRow[] = [];
+  let currentCliente = clienteFallback;
+  for (const cells of dataRows) {
+    if (isSkippableDataRow(cells)) {
+      const groupCell = cells.find((c) => isGroupHeaderText(c));
+      if (groupCell) {
+        currentCliente = groupCell.replace(/\s*\(\d+\)\s*$/, "").trim();
+      }
+      continue;
+    }
+    const parsed = rowFromMappedCells(cells, colMap, currentCliente);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
 function rowFromMappedCells(
   cells: string[],
   colMap: Partial<Record<FieldKey, number>>,
@@ -305,6 +351,7 @@ function rowFromMappedCells(
   const expedidor = get("expedidor").trim();
   const cliente = get("cliente").trim() || clienteFallback;
   const proveedor = get("proveedor").trim();
+  const marca = get("marca").trim();
   const piezas = parseNum(get("piezas"));
   const pesoKg = parseNum(get("peso"));
   const volumenM3 = parseNum(get("volumen"));
@@ -315,6 +362,7 @@ function rowFromMappedCells(
     expedidor,
     cliente,
     proveedor,
+    marca,
     piezas,
     pesoKg,
     volumenM3,
@@ -387,6 +435,7 @@ function rowFromMagayaFixedColumns(
     pesoKg: parseNum(String(cells[6] ?? "")),
     volumenM3: parseNum(String(cells[7] ?? "")),
     proveedor: String(cells[8] ?? "").trim(),
+    marca: String(cells[9] ?? "").trim(),
     fechaEntrega: String(cells[2] ?? "").trim() || undefined,
   };
 }
@@ -510,6 +559,7 @@ export function collectionOrdersFromHtmRows(
       numero: row.numero.trim(),
       cliente: row.cliente.trim() || String(clienteGlobal ?? "").trim(),
       proveedor: row.proveedor.trim(),
+      marca: row.marca.trim() || undefined,
       expedidor: row.expedidor.trim() || undefined,
       fechaEntrega: row.fechaEntrega?.trim() || undefined,
       expectedBultos: bultos > 0 ? bultos : undefined,

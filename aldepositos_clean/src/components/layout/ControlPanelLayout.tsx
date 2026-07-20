@@ -4,12 +4,10 @@ import React, { ReactNode, useEffect, useRef, useState } from "react";
 import {
   LogOut,
   Menu,
-  Truck,
   LayoutDashboard,
   Box,
   X,
   ClipboardList,
-  PackageSearch,
   Settings,
   UserRound,
   UserCheck,
@@ -183,35 +181,11 @@ export function ControlPanelLayout({
             Logística y control
           </p>
           <NavItem
-            icon={<NavIcon Icon={PackageSearch} />}
-            text="Contenedores"
-            active={currentView === "container-reports"}
-            onClick={() => {
-              setCurrentView("container-reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
             icon={<NavIcon Icon={BookMarked} />}
             text="Catálogo de Referencias"
             active={currentView === "reference-catalog"}
             onClick={() => {
               setCurrentView("reference-catalog");
-              setSidebarOpen(false);
-            }}
-          />
-
-          <div className="my-3 border-b border-white/5 md:my-4" />
-
-          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
-            Salida
-          </p>
-          <NavItem
-            icon={<NavIcon Icon={Truck} />}
-            text="Entrega de Carga"
-            active={currentView === "dispatch"}
-            onClick={() => {
-              setCurrentView("dispatch");
               setSidebarOpen(false);
             }}
           />

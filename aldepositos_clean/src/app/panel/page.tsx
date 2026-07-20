@@ -56,17 +56,6 @@ const CompletedReportsModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
-const DispatchEntry = dynamic(
-  () => import("@/components/control-panel/DispatchEntry").then((m) => m.DispatchEntry),
-  { loading: () => <PanelModuleLoader /> },
-);
-const ContainerReportsModule = dynamic(
-  () =>
-    import("@/components/control-panel/ContainerReportsModule").then(
-      (m) => m.ContainerReportsModule,
-    ),
-  { loading: () => <PanelModuleLoader /> },
-);
 const ReferenceCatalogModule = dynamic(
   () =>
     import("@/components/control-panel/ReferenceCatalogModule").then(
@@ -144,19 +133,6 @@ export default function PanelPage() {
     enabled: !!userEmail,
     userKey: userEmail,
   });
-  const [containerToEdit, setContainerToEdit] = useState<{
-    loadedIds: string[];
-    containerInfo: {
-      type: string;
-      consignment: string;
-      number: string;
-      bl: string;
-      seal1: string;
-      seal2: string;
-      responsible: string;
-      date: string;
-    };
-  } | null>(null);
   const [modalState, setModalState] = useState<{
     isOpen: boolean;
     editingTask: Task | null;
@@ -526,63 +502,11 @@ export default function PanelPage() {
     }
   };
 
-  const handleEditContainer = async (container: {
-    info: {
-      type: string;
-      consignment: string;
-      number: string;
-      bl: string;
-      seal1: string;
-      seal2: string;
-      responsible: string;
-      date: string;
-    };
-    tasks: Task[];
-  }) => {
-    const taskIds = container.tasks.map((t) => t.id);
-    const updated: Task[] = tasks
-      .filter((t) => taskIds.includes(t.id))
-      .map((t) => ({
-        ...t,
-        dispatched: false,
-        containerDraft: true,
-        dispatchInfo: undefined,
-      }));
-    try {
-      if (updated.length > 0) {
-        await Promise.all(updated.map((t) => updateTask(t)));
-      }
-      setTasks((prev) =>
-        prev.map((t) =>
-          taskIds.includes(t.id)
-            ? {
-                ...t,
-                dispatched: false,
-                containerDraft: true,
-                dispatchInfo: undefined,
-              }
-            : t,
-        ),
-      );
-      setContainerToEdit({
-        loadedIds: taskIds,
-        containerInfo: container.info,
-      });
-      setCurrentView("dispatch");
-    } catch (e) {
-      console.error(e);
-      // eslint-disable-next-line no-alert
-      alert("No se pudo actualizar el contenedor en Supabase.");
-    }
-  };
-
   // Despacho / reportes / ranking: payload completo. Ingreso rápido: lista slim.
   useEffect(() => {
     if (!userEmail) return;
     const needsFull =
-      currentView === "dispatch" ||
       currentView === "reports" ||
-      currentView === "container-reports" ||
       currentView === "inventory-leaderboard";
     if (needsFull) {
       void reloadTasks({ includeMeasureData: true });
@@ -691,20 +615,6 @@ export default function PanelPage() {
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
           />
-        )}
-
-        {visibleView === "dispatch" && (
-          <DispatchEntry
-            tasks={tasks}
-            onUpdateTask={handleUpdateTask}
-            containerToEdit={containerToEdit}
-            clearEdit={() => setContainerToEdit(null)}
-            operatorDisplayName={userDisplayName}
-          />
-        )}
-
-        {visibleView === "container-reports" && (
-          <ContainerReportsModule tasks={tasks} onEditContainer={handleEditContainer} />
         )}
 
         {showOptionsModule && visibleView === "options" && (

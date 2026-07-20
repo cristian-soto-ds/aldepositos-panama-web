@@ -1004,6 +1004,11 @@ export function ReekonCaptureView({
                     ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."
                     : "Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea."}
                 </p>
+                {allowKeyboardMeasures ? (
+                  <p className="mt-1 text-center text-[11px] font-semibold text-violet-600 dark:text-violet-300">
+                    Modo teclado activo — podés escribir L / A / H
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex items-center justify-center gap-3 text-xs">

@@ -21,6 +21,12 @@ export type InventoryControlSettings = {
   updatedAt: string;
 };
 
+export type InventoryControlSaveResult = {
+  settings: InventoryControlSettings;
+  /** false si no se pudo escribir en Supabase (queda solo cache local de este navegador). */
+  remoteOk: boolean;
+};
+
 export function defaultInventoryControlSettings(): InventoryControlSettings {
   return {
     keyboardOperatorIds: [],
@@ -53,6 +59,15 @@ function sanitizeSettings(raw: unknown): InventoryControlSettings {
   };
 }
 
+function newerSettings(
+  a: InventoryControlSettings,
+  b: InventoryControlSettings,
+): InventoryControlSettings {
+  const ta = Date.parse(a.updatedAt) || 0;
+  const tb = Date.parse(b.updatedAt) || 0;
+  return tb >= ta ? b : a;
+}
+
 function readLocal(): InventoryControlSettings {
   if (typeof window === "undefined") return defaultInventoryControlSettings();
   try {
@@ -80,6 +95,8 @@ function writeLocal(state: InventoryControlSettings) {
 }
 
 export async function fetchInventoryControlSettings(): Promise<InventoryControlSettings> {
+  const local = readLocal();
+
   try {
     const { data, error } = await supabase
       .from("panel_settings")
@@ -90,7 +107,8 @@ export async function fetchInventoryControlSettings(): Promise<InventoryControlS
     if (error) throw error;
     const payload = (data as { payload?: unknown } | null)?.payload;
     if (payload != null) {
-      const next = sanitizeSettings(payload);
+      const remote = sanitizeSettings(payload);
+      const next = newerSettings(local, remote);
       writeLocal(next);
       return next;
     }
@@ -101,14 +119,13 @@ export async function fetchInventoryControlSettings(): Promise<InventoryControlS
     );
   }
 
-  const local = readLocal();
   writeLocal(local);
   return local;
 }
 
 export async function saveInventoryControlSettings(
   state: InventoryControlSettings,
-): Promise<InventoryControlSettings> {
+): Promise<InventoryControlSaveResult> {
   const next: InventoryControlSettings = {
     keyboardOperatorIds: [
       ...new Set(
@@ -129,18 +146,23 @@ export async function saveInventoryControlSettings(
       "[inventory-control] No se pudo guardar en Supabase; quedó en cache local.",
       error,
     );
+    return { settings: next, remoteOk: false };
   }
-  return next;
+  return { settings: next, remoteOk: true };
 }
 
 export async function setKeyboardOperatorEnabled(
   operatorId: string,
   enabled: boolean,
-): Promise<InventoryControlSettings> {
+): Promise<InventoryControlSaveResult> {
   if (!getInventariadorById(operatorId)) {
-    return fetchInventoryControlSettings();
+    return {
+      settings: await fetchInventoryControlSettings(),
+      remoteOk: true,
+    };
   }
-  const current = await fetchInventoryControlSettings();
+  // Preferir cache local (más reciente tras toggles) y no pisar con remoto viejo.
+  const current = newerSettings(readLocal(), await fetchInventoryControlSettings());
   const set = new Set(current.keyboardOperatorIds);
   if (enabled) set.add(operatorId);
   else set.delete(operatorId);
@@ -156,7 +178,9 @@ export function operatorAllowsKeyboardMeasures(
   userKey: string | null | undefined,
   userLabel: string | null | undefined,
 ): boolean {
-  const id = resolveInventariadorId(userLabel, userKey);
+  const id =
+    resolveInventariadorId(userLabel, userKey) ??
+    resolveInventariadorId(userKey, userLabel);
   if (!id) return false;
   return settings.keyboardOperatorIds.includes(id);
 }

@@ -219,12 +219,32 @@ export function InventoryControlModule({
   const handleToggleKeyboard = async (operatorId: string, enabled: boolean) => {
     setActionError(null);
     setTogglingId(operatorId);
+    // Optimistic: el switch no debe “rebotar” mientras guarda.
+    setSettings((prev) => {
+      const set = new Set(prev.keyboardOperatorIds);
+      if (enabled) set.add(operatorId);
+      else set.delete(operatorId);
+      return {
+        ...prev,
+        keyboardOperatorIds: [...set],
+        updatedAt: new Date().toISOString(),
+      };
+    });
     try {
-      const next = await setKeyboardOperatorEnabled(operatorId, enabled);
+      const { settings: next, remoteOk } = await setKeyboardOperatorEnabled(
+        operatorId,
+        enabled,
+      );
       setSettings(next);
+      if (!remoteOk) {
+        setActionError(
+          "El permiso quedó en este navegador, pero no se pudo guardar en Supabase. Ejecutá la migración 011_panel_settings.sql para que funcione en el celular de Claudio.",
+        );
+      }
     } catch (e) {
       console.error(e);
       setActionError("No se pudo guardar el permiso de teclado.");
+      void reloadSettings();
     } finally {
       setTogglingId(null);
     }

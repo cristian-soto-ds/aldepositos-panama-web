@@ -16,11 +16,7 @@ import {
 } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { downloadRelacionCargaExcel } from "@/lib/exportRelacionCargaExcel";
-import {
-  cubicajeM3FromDims,
-  formatCubicaje2,
-  sumCubicajeM3,
-} from "@/lib/measureDecimals";
+import { sumCubicajeM3 } from "@/lib/measureDecimals";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -394,108 +390,31 @@ export function DispatchEntry({
   };
 
   const getDetailedRows = (): DetailedRow[] => {
-    const rows: DetailedRow[] = [];
-    loadedTasks.forEach((t) => {
-      const detailedOneRa =
-        t.type === "detailed" &&
-        t.status !== "pending" &&
-        Array.isArray(t.measureData) &&
-        t.measureData.length > 0;
+    return loadedTasks.map((t) => {
+      const isPending = t.status === "pending";
+      const bultos = isPending
+        ? t.expectedBultos
+        : t.currentBultos || t.expectedBultos;
+      const tw = getTaskWeight(t);
+      const tc = getTaskCbm(t);
 
-      if (detailedOneRa) {
-        const bultos = t.currentBultos || t.expectedBultos;
-        const tw = getTaskWeight(t);
-        const tc = getTaskCbm(t);
-        rows.push({
-          id: t.id,
-          ra: t.ra,
-          partial: t.status === "partial" ? "SÍ" : "NO",
-          provider: t.provider || "N/A",
-          subClient: t.subClient || "N/A",
-          brand: t.brand || "N/A",
-          date: t.date || containerInfo.date,
-          ref: `RA-${t.ra}`,
-          desc: normalizeDispatchDescription(t.notes),
-          bultos,
-          weight: tw > 0 ? tw.toFixed(2) : "",
-          cbm: tc.toFixed(2),
-        });
-        return;
-      }
-
-      if (t.measureData && t.measureData.length > 0 && t.status !== "pending") {
-        let perRefWeightPerBundle = 0;
-        if (t.weightMode === "by_reference") {
-          const totalBultos = t.measureData.reduce((acc: number, row: any) => {
-            const b = parseFloat(String(row.bultos ?? 0)) || 0;
-            return acc + b;
-          }, 0);
-          if (totalBultos > 0) {
-            perRefWeightPerBundle =
-              (parseFloat(String(t.expectedWeight ?? 0)) || 0) / totalBultos;
-          }
-        }
-
-        t.measureData.forEach((m: any, idx: number) => {
-          const bultos = parseFloat(String(m.bultos ?? 0)) || 0;
-          const l = parseFloat(String(m.l ?? 0)) || 0;
-          const w = parseFloat(String(m.w ?? 0)) || 0;
-          const h = parseFloat(String(m.h ?? 0)) || 0;
-          const cbm = cubicajeM3FromDims(l, w, h, bultos, m.reempaque === true);
-
-          let lineWeight = 0;
-          if (t.weightMode === "per_bundle") {
-            const rowWeight = parseFloat(String(m.weight ?? 0)) || 0;
-            lineWeight = bultos * rowWeight;
-          } else if (t.weightMode === "by_reference" && perRefWeightPerBundle > 0) {
-            lineWeight = bultos * perRefWeightPerBundle;
-          }
-
-          const desc = normalizeDispatchDescription(t.notes, m.descripcion);
-
-          rows.push({
-            id: `${t.id}-${idx}`,
-            ra: t.ra,
-            partial: t.status === "partial" ? "SÍ" : "NO",
-            provider: t.provider || "N/A",
-            subClient: t.subClient || "N/A",
-            brand: t.brand || "N/A",
-            date: t.date || containerInfo.date,
-            ref: m.referencia || "S/R",
-            desc,
-            bultos,
-            weight:
-              lineWeight > 0
-                ? lineWeight.toFixed(2)
-                : "",
-            cbm: formatCubicaje2(cbm),
-          });
-        });
-      } else {
-        rows.push({
-          id: t.id,
-          ra: t.ra,
-          partial: t.status === "partial" ? "SÍ" : "NO",
-          provider: t.provider || "N/A",
-          subClient: t.subClient || "N/A",
-          brand: t.brand || "N/A",
-          date: t.date || containerInfo.date,
-          ref: "N/A",
-          desc:
-            t.status === "pending"
-              ? "PRIORIDAD (PENDIENTE DE INGRESO)"
-              : normalizeDispatchDescription(t.notes),
-          bultos:
-            t.status === "pending"
-              ? t.expectedBultos
-              : t.currentBultos || t.expectedBultos,
-          weight: String(getTaskWeight(t)),
-          cbm: getTaskCbm(t).toFixed(2),
-        });
-      }
+      return {
+        id: t.id,
+        ra: t.ra,
+        partial: t.status === "partial" ? "SÍ" : "NO",
+        provider: t.provider || "N/A",
+        subClient: t.subClient || "N/A",
+        brand: t.brand || "N/A",
+        date: t.date || containerInfo.date,
+        ref: `RA-${t.ra}`,
+        desc: isPending
+          ? "PRIORIDAD (PENDIENTE DE INGRESO)"
+          : normalizeDispatchDescription(t.notes),
+        bultos,
+        weight: tw > 0 ? tw.toFixed(2) : "",
+        cbm: tc.toFixed(2),
+      };
     });
-
-    return rows;
   };
 
   const detailedRows = getDetailedRows();
@@ -981,9 +900,6 @@ export function DispatchEntry({
                   <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded uppercase text-[9px] font-black tracking-widest">
                     {loadedTasks.length} RAs
                   </span>
-                  <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded uppercase text-[9px] font-black tracking-widest">
-                    {detailedRows.length} Líneas
-                  </span>
                 </div>
               </div>
 
@@ -1127,7 +1043,7 @@ export function DispatchEntry({
                         <td className="px-3 py-2.5 text-center">
                           <button
                             type="button"
-                            onClick={() => handleToggleLoad(row.id.split("-")[0]!)}
+                            onClick={() => handleToggleLoad(row.id)}
                             className="w-5 h-5 rounded bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
                           >
                             <X size={12} />

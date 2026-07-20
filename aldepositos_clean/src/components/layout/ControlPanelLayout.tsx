@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Route,
   Trophy,
+  PauseCircle,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -244,6 +245,15 @@ export function ControlPanelLayout({
             active={currentView === "inventory-leaderboard"}
             onClick={() => {
               setCurrentView("inventory-leaderboard");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<NavIcon Icon={PauseCircle} />}
+            text="Control inventarios"
+            active={currentView === "inventory-control"}
+            onClick={() => {
+              setCurrentView("inventory-control");
               setSidebarOpen(false);
             }}
           />

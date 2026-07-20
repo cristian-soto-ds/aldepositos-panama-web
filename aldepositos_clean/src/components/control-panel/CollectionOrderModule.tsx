@@ -822,7 +822,10 @@ export function CollectionOrderModule({
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = setTimeout(() => {
         autoSaveTimerRef.current = null;
-        void persistOrder({ order, showAlerts: false });
+        // Siempre el borrador actual (clics rápidos en Agregar línea).
+        const latest = editingRef.current;
+        if (!latest) return;
+        void persistOrder({ order: latest, showAlerts: false });
       }, ORDER_AUTOSAVE_MS);
     },
     [persistOrder, userEmail],

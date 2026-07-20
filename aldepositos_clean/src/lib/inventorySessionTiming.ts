@@ -72,6 +72,15 @@ export function resumeInventory(
 }
 
 /**
+ * Quita la pausa desde control (supervisor): cierra el reloj de pausa y deja
+ * el RA en `pending` (sin badge «En curso»), listo para que alguien lo tome.
+ */
+export function releaseInventoryPause(task: Task, at?: string | Date): Task {
+  const closed = resumeInventory(task, "in_progress", at);
+  return { ...closed, status: "pending" };
+}
+
+/**
  * Cierra pausa abierta al completar (acumula ms). El caller fija `status: "completed"`.
  */
 export function closeOpenPauseOnComplete(

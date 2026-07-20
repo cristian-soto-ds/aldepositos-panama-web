@@ -109,6 +109,13 @@ const InventoryLeaderboardModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const InventoryControlModule = dynamic(
+  () =>
+    import("@/components/control-panel/InventoryControlModule").then(
+      (m) => m.InventoryControlModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -676,6 +683,13 @@ export default function PanelPage() {
             tasks={tasks}
             userDisplayName={userDisplayName}
             userEmail={userEmail}
+          />
+        )}
+
+        {visibleView === "inventory-control" && (
+          <InventoryControlModule
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
           />
         )}
 

@@ -71,13 +71,9 @@ function RaTaskCardInner({
   const captured = Math.max(0, t.currentBultos || 0);
   const showCaptureProgress = captured > 0 || (t.completeRowCount ?? 0) > 0;
   const capturedWeight = t.capturedWeight ?? 0;
-  const bultosLabel = showCaptureProgress
-    ? expected > 0
-      ? `${captured}/${expected}`
-      : String(captured)
-    : expected > 0
-      ? String(expected)
-      : "—";
+  // Total declarado del RA (sin fracción capturado/declarado).
+  const bultosLabel =
+    expected > 0 ? String(expected) : captured > 0 ? String(captured) : "—";
 
   return (
     <div

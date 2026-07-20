@@ -74,6 +74,8 @@ type ReekonCaptureViewProps = {
   isSaving: boolean;
   /** Estado de sincronización enriquecido (última sync, conexión, cola). */
   syncStatus?: SyncStatus;
+  /** Si true: L/A/H editables con teclado (sin cinta). */
+  allowKeyboardMeasures?: boolean;
 };
 
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
@@ -108,7 +110,13 @@ function strVal(v: string | number | undefined): string {
  * Para dimensiones (cinta REEKON): al pulsar Enter se confirma el borrador ANTES
  * de avanzar de campo/línea, para no perder la última medida (el Alto).
  */
-function focusTapeField(el: HTMLInputElement) {
+function focusTapeField(el: HTMLInputElement, allowKeyboard = false) {
+  if (allowKeyboard) {
+    el.readOnly = false;
+    el.focus({ preventScroll: true });
+    el.select();
+    return;
+  }
   el.readOnly = true;
   el.focus({ preventScroll: true });
   el.select();
@@ -123,6 +131,7 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
   value,
   onCommit,
   isDimension = false,
+  allowKeyboard = false,
   onTapeKeyDown,
 }: {
   rowId: string;
@@ -130,12 +139,15 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
   value: string;
   onCommit: (rowId: string, field: "weight" | DimField, value: string) => void;
   isDimension?: boolean;
+  /** Si true (y es dimensión): teclado decimal en vez de cinta HID. */
+  allowKeyboard?: boolean;
   onTapeKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const [draft, setDraft] = useState(value);
   const focusedRef = useRef(false);
   const draftRef = useRef(value);
   const replaceOnTypeRef = useRef(false);
+  const tapeMode = isDimension && !allowKeyboard;
 
   useEffect(() => {
     if (!focusedRef.current) {
@@ -156,8 +168,8 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
   return (
     <input
       type="text"
-      inputMode={isDimension ? "none" : "decimal"}
-      readOnly={isDimension}
+      inputMode={tapeMode ? "none" : "decimal"}
+      readOnly={tapeMode}
       autoComplete="off"
       autoCorrect="off"
       spellCheck={false}
@@ -169,17 +181,15 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
       value={draft}
       placeholder="0.00"
       onTouchStart={
-        isDimension
+        tapeMode
           ? (e) => {
-              // Android: marcar readOnly ANTES del focus del toque evita Gboard/SwiftKey.
               e.currentTarget.readOnly = true;
             }
           : undefined
       }
       onFocus={(e) => {
         focusedRef.current = true;
-        if (isDimension) {
-          // Mantener readOnly y cerrar teclado si venía de Bultos/Peso.
+        if (tapeMode) {
           e.currentTarget.readOnly = true;
           replaceOnTypeRef.current = true;
           e.currentTarget.select();
@@ -188,10 +198,11 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
           vk?.hide?.();
           return;
         }
+        e.currentTarget.readOnly = false;
         e.currentTarget.select();
       }}
       onChange={
-        isDimension
+        tapeMode
           ? undefined
           : (e) => {
               const next = sanitizeMeasureTyping(e.target.value);
@@ -207,34 +218,34 @@ const ReekonMeasureInput = memo(function ReekonMeasureInput({
       onKeyDown={
         isDimension
           ? (e) => {
-              // HID de la cinta: readOnly bloquea onChange; aplicamos teclas a mano.
-              if (e.key === "Backspace") {
-                e.preventDefault();
-                replaceOnTypeRef.current = false;
-                const next = draftRef.current.slice(0, -1);
-                draftRef.current = next;
-                setDraft(next);
-                return;
-              }
-              if (e.key === "Delete") {
-                e.preventDefault();
-                replaceOnTypeRef.current = false;
-                draftRef.current = "";
-                setDraft("");
-                return;
-              }
-              if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                e.preventDefault();
-                const next = sanitizeMeasureTyping(
-                  replaceOnTypeRef.current ? e.key : draftRef.current + e.key,
-                );
-                replaceOnTypeRef.current = false;
-                draftRef.current = next;
-                setDraft(next);
-                return;
+              if (tapeMode) {
+                if (e.key === "Backspace") {
+                  e.preventDefault();
+                  replaceOnTypeRef.current = false;
+                  const next = draftRef.current.slice(0, -1);
+                  draftRef.current = next;
+                  setDraft(next);
+                  return;
+                }
+                if (e.key === "Delete") {
+                  e.preventDefault();
+                  replaceOnTypeRef.current = false;
+                  draftRef.current = "";
+                  setDraft("");
+                  return;
+                }
+                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  e.preventDefault();
+                  const next = sanitizeMeasureTyping(
+                    replaceOnTypeRef.current ? e.key : draftRef.current + e.key,
+                  );
+                  replaceOnTypeRef.current = false;
+                  draftRef.current = next;
+                  setDraft(next);
+                  return;
+                }
               }
               if (e.key === "Enter" && onTapeKeyDown) {
-                // Confirmar borrador ANTES de avanzar (no perder el Alto).
                 commit(draftRef.current);
                 onTapeKeyDown(e);
               }
@@ -331,6 +342,7 @@ export function ReekonCaptureView({
   autosaveState,
   isSaving,
   syncStatus,
+  allowKeyboardMeasures = false,
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
@@ -447,24 +459,31 @@ export function ReekonCaptureView({
     }
   }, [activeRowId, measureRows, onActiveRowChange]);
 
-  const focusDim = useCallback((field: DimField) => {
-    const el = formRef.current?.querySelector<HTMLInputElement>(
-      `input[data-reekon-field="${field}"]`,
-    );
-    if (!el) return;
-    // Si el foco venía de Bultos/Peso, blur primero para cerrar el teclado virtual.
-    const active = document.activeElement;
-    if (
-      active instanceof HTMLInputElement &&
-      active !== el &&
-      !active.dataset.reekonField
-    ) {
-      active.blur();
-      window.setTimeout(() => focusTapeField(el), 30);
-      return;
-    }
-    focusTapeField(el);
-  }, []);
+  const focusDim = useCallback(
+    (field: DimField) => {
+      const el = formRef.current?.querySelector<HTMLInputElement>(
+        `input[data-reekon-field="${field}"]`,
+      );
+      if (!el) return;
+      // Si el foco venía de Bultos/Peso, blur primero para cerrar el teclado virtual (modo cinta).
+      const active = document.activeElement;
+      if (
+        !allowKeyboardMeasures &&
+        active instanceof HTMLInputElement &&
+        active !== el &&
+        !active.dataset.reekonField
+      ) {
+        active.blur();
+        window.setTimeout(
+          () => focusTapeField(el, allowKeyboardMeasures),
+          30,
+        );
+        return;
+      }
+      focusTapeField(el, allowKeyboardMeasures);
+    },
+    [allowKeyboardMeasures],
+  );
 
   // Tras cambiar de línea con la cinta, enfocar Largo automáticamente.
   useEffect(() => {
@@ -956,7 +975,9 @@ export function ReekonCaptureView({
 
               <div>
                 <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Medidas con la cinta (Largo → Ancho → Alto)
+                  {allowKeyboardMeasures
+                    ? "Medidas con teclado (Largo → Ancho → Alto)"
+                    : "Medidas con la cinta (Largo → Ancho → Alto)"}
                 </label>
                 <div className="reekon-measure-grid">
                   {DIM_ORDER.map((dim) => (
@@ -970,6 +991,7 @@ export function ReekonCaptureView({
                         value={String(activeRow[dim] ?? "")}
                         onCommit={onUpdateRow}
                         isDimension
+                        allowKeyboard={allowKeyboardMeasures}
                         onTapeKeyDown={(e) =>
                           handleDimensionKeyDown(e, dim, formRef.current, finishMeasuresAndAdvance)
                         }
@@ -978,7 +1000,9 @@ export function ReekonCaptureView({
                   ))}
                 </div>
                 <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                  Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea.
+                  {allowKeyboardMeasures
+                    ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."
+                    : "Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea."}
                 </p>
               </div>
 
@@ -1129,6 +1153,7 @@ export function ReekonCaptureView({
         onSelectRow={selectRow}
         completedCount={completedCount}
         faltantes={faltantes}
+        activePallet={palletized ? activePalletNum : null}
       />
     </div>
   );

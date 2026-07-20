@@ -213,18 +213,38 @@ export function useInventoryRealtimeSync<TRow>({
         return;
       }
 
-      setMeasureRows(newRows);
-      latestRowsRef.current = newRows;
+      // Functional: no pisar altas locales que llegaron tras calcular newRows.
+      let appliedRows = newRows;
+      setMeasureRows((prev) => {
+        const prevHash = buildHash(prev);
+        const computedHash = buildHash(newRows);
+        if (prevHash === computedHash) {
+          appliedRows = prev;
+          return prev;
+        }
+        const dirtyNow = prevHash !== lastSavedHashRef.current;
+        const shouldRemerge =
+          Boolean(mergeRowsWithRemote) &&
+          (dirtyNow || fromLive || preferRemoteUpdates) &&
+          prev.length > 0;
+        const next =
+          shouldRemerge && mergeRowsWithRemote
+            ? mergeRowsWithRemote(prev, remoteRows, { fromLive })
+            : newRows;
+        appliedRows = next;
+        latestRowsRef.current = next;
+        return next;
+      });
       // Si vino de otro cliente (live o BD), no reenviamos el mismo contenido.
       if (fromLive || shouldMerge) {
-        lastLivePublishedHashRef.current = buildHash(newRows);
+        lastLivePublishedHashRef.current = buildHash(appliedRows);
       }
       const nextTask: Task = {
         ...(latestTaskRef.current && latestTaskRef.current.id === remote.id
           ? latestTaskRef.current
           : remote),
         ...remote,
-        measureData: newRows as unknown[],
+        measureData: appliedRows as unknown[],
       };
       setSelectedTask(nextTask);
       latestTaskRef.current = nextTask;
@@ -232,7 +252,7 @@ export function useInventoryRealtimeSync<TRow>({
       // Si fusionamos estando dirty, NO marcamos como guardado: el autosave
       // persistirá el resultado unido. Si estábamos limpios, sí.
       if (!fromLive && !isDirty) {
-        lastSavedHashRef.current = buildHash(newRows);
+        lastSavedHashRef.current = buildHash(appliedRows);
       }
       lastRemoteMeasureHashRef.current = JSON.stringify(remote.measureData ?? []);
       pendingRemoteTaskRef.current = null;

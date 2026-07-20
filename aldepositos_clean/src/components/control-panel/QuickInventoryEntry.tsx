@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
+import { useAllowKeyboardMeasures } from "@/hooks/useAllowKeyboardMeasures";
 import { useSharedNow } from "@/hooks/useSharedNow";
 
 const ReekonCaptureView = dynamic(
@@ -699,6 +700,10 @@ export function QuickInventoryEntry({
   );
   /** Correctores (p. ej. Cristian) editan/guardan medidas sin atribución. */
   const canEditCapture = canEditInventoryCapture(
+    presenceUserKey,
+    presenceUserLabel,
+  );
+  const allowKeyboardMeasures = useAllowKeyboardMeasures(
     presenceUserKey,
     presenceUserLabel,
   );
@@ -1629,6 +1634,8 @@ export function QuickInventoryEntry({
       return;
     }
     const newId = generateId();
+    // Protege altas rápidas: un eco/autosave no debe borrar la fila nueva.
+    pendingLocalCreationIdsRef.current.add(newId);
     setMeasureRows((prev) => {
       const autoRef = referenceMode !== "with";
       const nextRef = autoRef ? nextConsecutiveReference(prev) : "";
@@ -1656,9 +1663,8 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
-    if (typeof window !== "undefined") {
-      window.setTimeout(() => flushAutosaveRef.current(), 0);
-    }
+    // No flush inmediato: el debounce (QUICK_AUTOSAVE_MS) agrupa clics rápidos
+    // en un solo guardado y evita que el eco del save pise filas nuevas.
   };
 
   /**
@@ -1682,6 +1688,7 @@ export function QuickInventoryEntry({
           referenceMode === "palletized" ? Math.max(1, maxPalletNumber(kept)) : undefined;
         const additions: MeasureRow[] = lines.map((l) => {
           const id = generateId();
+          pendingLocalCreationIdsRef.current.add(id);
           if (!firstNewId) firstNewId = id;
           return {
             id,
@@ -1699,7 +1706,9 @@ export function QuickInventoryEntry({
             ...(pallet ? { pallet } : {}),
           };
         });
-        return [...kept, ...additions];
+        const next = [...kept, ...additions];
+        latestRowsRef.current = next;
+        return next;
       });
       if (firstNewId) setExpandedRowId(firstNewId);
     } catch (err) {
@@ -1756,9 +1765,7 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
-    if (typeof window !== "undefined") {
-      window.setTimeout(() => flushAutosaveRef.current(), 0);
-    }
+    // Debounce vía useEffect; no flush inmediato (clics rápidos de paleta).
   };
 
   /** Números de paleta actualmente presentes (propios y de otros inventariadores). */
@@ -1803,6 +1810,7 @@ export function QuickInventoryEntry({
   /** Paletizado: añade una fila dentro de una paleta concreta (la inserta al final de su grupo). */
   const addRowToPallet = (palletNum: number) => {
     const newId = generateId();
+    pendingLocalCreationIdsRef.current.add(newId);
     setMeasureRows((prev) => {
       // Hereda el peso ya asignado a la paleta (se captura una sola vez por paleta).
       const existingPalletWeight =
@@ -1844,9 +1852,7 @@ export function QuickInventoryEntry({
     if (captureLayout === "reekon") {
       setExpandedRowId(newId);
     }
-    if (typeof window !== "undefined") {
-      window.setTimeout(() => flushAutosaveRef.current(), 0);
-    }
+    // Debounce vía useEffect; no flush inmediato (clics rápidos en Agregar).
   };
 
   /** Paletizado: elimina una paleta completa (todas sus filas) y renumera el resto. */
@@ -2393,23 +2399,34 @@ export function QuickInventoryEntry({
       }
 
       if (activeTaskIdRef.current === task.id) {
-        const localNow = stripQuickRowsForPersist(latestRowsRef.current);
-        const uiMerged = mergeConcurrentQuickRows(
-          baselineAtSave,
-          localNow,
-          persistedRows,
-          mergeOpts,
-        );
-        // Si hubo borrados/edits durante el save, la UI ya tiene lo más nuevo;
-        // el merge con tombstones evita reintroducir filas del eco.
-        setMeasureRows(uiMerged);
-        latestRowsRef.current = uiMerged;
-        setSelectedTask((prev) => {
-          const base = prev && prev.id === updatedTask.id ? prev : updatedTask;
+        // Functional: si el usuario agregó filas mientras el save corría,
+        // `prev` / latestRowsRef ya las tienen; un replace absoluto las borraba.
+        let uiMergedForTask: MeasureRow[] = persistedRows;
+        setMeasureRows((prev) => {
+          const localNow = stripQuickRowsForPersist(
+            latestRowsRef.current.length >= prev.length
+              ? latestRowsRef.current
+              : prev,
+          );
+          const uiMerged = mergeConcurrentQuickRows(
+            baselineAtSave,
+            localNow,
+            persistedRows,
+            mergeOpts,
+          );
+          latestRowsRef.current = uiMerged;
+          uiMergedForTask = uiMerged;
+          return uiMerged;
+        });
+        setSelectedTask((taskPrev) => {
+          const base =
+            taskPrev && taskPrev.id === updatedTask.id
+              ? taskPrev
+              : updatedTask;
           return {
             ...base,
             ...updatedTask,
-            measureData: uiMerged as unknown[],
+            measureData: uiMergedForTask as unknown[],
           };
         });
         serverBaselineRowsRef.current = JSON.parse(
@@ -2492,15 +2509,30 @@ export function QuickInventoryEntry({
 
   useEffect(() => {
     if (!selectedTask) return;
-    latestRowsRef.current = measureRows;
+    // No pisar altas síncronas del ref que aún no pintó React (clics rápidos).
+    const stateIds = new Set(measureRows.map((r) => String(r.id)));
+    const refHasNewerCreates = latestRowsRef.current.some(
+      (r) =>
+        pendingLocalCreationIdsRef.current.has(String(r.id)) &&
+        !stateIds.has(String(r.id)),
+    );
+    if (!refHasNewerCreates) {
+      latestRowsRef.current = measureRows;
+    }
     latestTaskRef.current = selectedTask;
+    const rowsForPersist = latestRowsRef.current;
     const hash = JSON.stringify({
-      rows: measureRows,
+      rows: rowsForPersist,
       referenceMode,
       captureLayout,
     });
     pendingAutosaveHashRef.current = hash;
-    persistQuickDraft(selectedTask.id, measureRows, referenceMode, captureLayout);
+    persistQuickDraft(
+      selectedTask.id,
+      rowsForPersist,
+      referenceMode,
+      captureLayout,
+    );
     const dirty = hash !== lastSavedHashRef.current;
     setPendingCount(dirty ? 1 : 0);
     if (!dirty) return;
@@ -2597,25 +2629,40 @@ export function QuickInventoryEntry({
       const serverTask = await fetchTaskById(selectedTask.id);
       if (serverTask) {
         const serverRows = prepareRowsFromRemote(serverTask);
+        const mergeOpts = {
+          deletedIds: pendingDeletionIdsRef.current,
+          protectIds: pendingLocalCreationIdsRef.current,
+        };
+        const baseline = serverBaselineRowsRef.current;
+        const localNow = stripQuickRowsForPersist(latestRowsRef.current);
         rowsForSave = mergeConcurrentQuickRows(
-          serverBaselineRowsRef.current,
-          stripQuickRowsForPersist(measureRows),
+          baseline,
+          localNow,
           serverRows,
-          {
-            deletedIds: pendingDeletionIdsRef.current,
-            protectIds: pendingLocalCreationIdsRef.current,
-          },
+          mergeOpts,
         );
         serverBaselineRowsRef.current = JSON.parse(
           JSON.stringify(serverRows),
         ) as MeasureRow[];
-        if (
-          JSON.stringify(rowsForSave) !==
-          JSON.stringify(stripQuickRowsForPersist(measureRows))
-        ) {
-          setMeasureRows(rowsForSave);
-          latestRowsRef.current = rowsForSave;
+        if (JSON.stringify(rowsForSave) !== JSON.stringify(localNow)) {
+          setMeasureRows((prev) => {
+            // Re-merge por si hubo altas mientras corría el fetch.
+            const freshLocal = stripQuickRowsForPersist(
+              latestRowsRef.current.length >= prev.length
+                ? latestRowsRef.current
+                : prev,
+            );
+            const merged = mergeConcurrentQuickRows(
+              baseline,
+              freshLocal,
+              serverRows,
+              mergeOpts,
+            );
+            latestRowsRef.current = merged;
+            return merged;
+          });
         }
+        rowsForSave = latestRowsRef.current;
       }
     } catch {
       /* continuar con filas locales */
@@ -3032,6 +3079,7 @@ export function QuickInventoryEntry({
             pendingCount,
             isOnline,
           }}
+          allowKeyboardMeasures={allowKeyboardMeasures}
         />
         </div>
         {leavePromptOpen ? (

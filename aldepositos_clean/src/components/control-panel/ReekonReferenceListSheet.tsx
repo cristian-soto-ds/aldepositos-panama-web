@@ -21,6 +21,11 @@ type ReekonReferenceListSheetProps = {
   faltantes: number;
   /** Filtro inicial al abrir (por defecto pendientes). */
   initialFilter?: FilterId;
+  /**
+   * Modo paletizado: si se pasa, la lista solo muestra filas de esa paleta
+   * (la que está midiendo el inventariador).
+   */
+  activePallet?: number | null;
 };
 
 function palletOf(row: QuickMeasureRow): number {
@@ -135,6 +140,7 @@ export function ReekonReferenceListSheet({
   completedCount,
   faltantes,
   initialFilter = "pending",
+  activePallet = null,
 }: ReekonReferenceListSheetProps) {
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [query, setQuery] = useState("");
@@ -142,6 +148,8 @@ export function ReekonReferenceListSheet({
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const palletized = referenceMode === "palletized";
+  const scopePallet =
+    palletized && activePallet != null && activePallet > 0 ? activePallet : null;
   const { height: viewportHeight, bottomInset } = useVisualViewportMetrics(open);
 
   useEffect(() => {
@@ -167,23 +175,30 @@ export function ReekonReferenceListSheet({
     return () => window.clearTimeout(t);
   }, [open, searchFocused, bottomInset]);
 
+  const scopedRows = useMemo(() => {
+    if (scopePallet == null) return measureRows;
+    return measureRows.filter((r) => palletOf(r) === scopePallet);
+  }, [measureRows, scopePallet]);
+
   const entries = useMemo(() => {
-    return measureRows.map((row, index) => {
+    return scopedRows.map((row) => {
+      const index = measureRows.findIndex((r) => r.id === row.id);
+      const safeIndex = index >= 0 ? index : 0;
       const done = isQuickRowComplete(row);
       const reemp = row.reempaque === true;
-      const label = rowLabel(row, index, referenceMode, measureRows);
+      const label = rowLabel(row, safeIndex, referenceMode, measureRows);
       const desc = strVal(row.descripcion);
       return {
         row,
-        index,
+        index: safeIndex,
         done,
         reemp,
         label,
         summary: rowSummary(row, reemp),
-        searchBlob: `${label} ${desc} L${index + 1} #${index + 1}`.toLowerCase(),
+        searchBlob: `${label} ${desc} L${safeIndex + 1} #${safeIndex + 1} P${palletOf(row)}`.toLowerCase(),
       };
     });
-  }, [measureRows, referenceMode]);
+  }, [scopedRows, measureRows, referenceMode]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -199,7 +214,13 @@ export function ReekonReferenceListSheet({
     return list;
   }, [entries, filter, query]);
 
-  const pendingCount = measureRows.length - completedCount;
+  const scopedCompleted = useMemo(
+    () => scopedRows.filter((r) => isQuickRowComplete(r)).length,
+    [scopedRows],
+  );
+  const scopedPending = scopedRows.length - scopedCompleted;
+  const displayCompleted = scopePallet != null ? scopedCompleted : completedCount;
+  const displayPending = scopePallet != null ? scopedPending : measureRows.length - completedCount;
 
   if (!open) return null;
 
@@ -241,12 +262,16 @@ export function ReekonReferenceListSheet({
                 id="reekon-ref-list-title"
                 className="text-sm font-bold text-slate-900 dark:text-slate-100 sm:text-base"
               >
-                Elegir referencia
+                {scopePallet != null
+                  ? `Elegir referencia · Paleta ${scopePallet}`
+                  : "Elegir referencia"}
               </h2>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              {completedCount} completas · {pendingCount} pendientes
-              {faltantes > 0 ? ` · faltan ${faltantes} bultos` : ""}
+              {displayCompleted} completas · {displayPending} pendientes
+              {faltantes > 0 && scopePallet == null
+                ? ` · faltan ${faltantes} bultos`
+                : ""}
             </p>
           </div>
           <button
@@ -294,8 +319,8 @@ export function ReekonReferenceListSheet({
                 f.id === "all"
                   ? entries.length
                   : f.id === "pending"
-                    ? pendingCount
-                    : completedCount;
+                    ? displayPending
+                    : displayCompleted;
               return (
                 <button
                   key={f.id}
@@ -326,7 +351,9 @@ export function ReekonReferenceListSheet({
             <p className="py-8 text-center text-sm text-slate-500 dark:text-slate-400">
               {query.trim()
                 ? "No hay coincidencias. Probá otro código."
-                : "No hay líneas en este filtro."}
+                : scopePallet != null
+                  ? `No hay líneas en la paleta ${scopePallet} con este filtro.`
+                  : "No hay líneas en este filtro."}
             </p>
           ) : (
             <ul className="flex flex-col gap-1.5 py-2">
@@ -339,9 +366,11 @@ export function ReekonReferenceListSheet({
                       onClick={() => handleSelect(row.id)}
                       className={`w-full rounded-xl border px-3 py-2.5 text-left transition active:scale-[0.99] ${
                         isActive
-                          ? "border-[#16263F] bg-slate-100 shadow-sm dark:border-slate-400 dark:bg-slate-800"
+                          ? done
+                            ? "border-emerald-600 bg-emerald-100 shadow-sm dark:border-emerald-400 dark:bg-emerald-950/50"
+                            : "border-[#16263F] bg-slate-100 shadow-sm dark:border-slate-400 dark:bg-slate-800"
                           : done
-                            ? "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/40"
+                            ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
                             : reemp
                               ? "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60"
                               : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/60"
@@ -353,7 +382,7 @@ export function ReekonReferenceListSheet({
                             reemp
                               ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
                               : done
-                                ? "bg-[#16263F]/10 text-[#16263F] dark:bg-slate-700 dark:text-slate-200"
+                                ? "bg-emerald-500 text-white dark:bg-emerald-600"
                                 : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
                           }`}
                         >
@@ -367,15 +396,33 @@ export function ReekonReferenceListSheet({
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <span className="break-words text-[15px] font-bold leading-snug text-slate-900 dark:text-slate-100">
+                            <span
+                              className={`break-words text-[15px] font-bold leading-snug ${
+                                done
+                                  ? "text-emerald-900 dark:text-emerald-100"
+                                  : "text-slate-900 dark:text-slate-100"
+                              }`}
+                            >
                               {label}
                             </span>
-                            <span className="shrink-0 text-[10px] font-semibold tabular-nums text-slate-400">
+                            <span
+                              className={`shrink-0 text-[10px] font-semibold tabular-nums ${
+                                done
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-slate-400"
+                              }`}
+                            >
                               L{index + 1}
                               {palletized ? ` · P${palletOf(row)}` : ""}
                             </span>
                           </div>
-                          <p className="mt-0.5 break-words text-[12px] leading-snug text-slate-500 dark:text-slate-400">
+                          <p
+                            className={`mt-0.5 break-words text-[12px] leading-snug ${
+                              done
+                                ? "text-emerald-700 dark:text-emerald-300/80"
+                                : "text-slate-500 dark:text-slate-400"
+                            }`}
+                          >
                             {summary}
                           </p>
                         </div>

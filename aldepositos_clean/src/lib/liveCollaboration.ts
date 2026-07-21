@@ -218,19 +218,27 @@ async function publishOrderLiveUpdate(params: {
   userKey: string;
   lines: CollectionOrderLine[];
 }) {
-  await ensureChannel();
-  if (!channel) return;
-  const tabId = getSharedWorkPresenceTabId();
-  const update: OrderLiveUpdate = {
-    type: "order",
-    orderId: params.orderId,
-    tabId,
-    userKey: params.userKey,
-    lines: JSON.parse(JSON.stringify(params.lines)) as CollectionOrderLine[],
-    seq: nextSeq(`${tabId}:order:${params.orderId}`),
-    at: Date.now(),
-  };
-  await channel.send({ type: "broadcast", event: "live", payload: update });
+  const contentHash = JSON.stringify(params.lines);
+  const dedupeKey = `order:${params.orderId}`;
+  if (lastPublishedHashByKey.get(dedupeKey) === contentHash) return;
+  lastPublishedHashByKey.set(dedupeKey, contentHash);
+
+  publishQueue.push(async () => {
+    await ensureChannel();
+    if (!channel) return;
+    const tabId = getSharedWorkPresenceTabId();
+    const update: OrderLiveUpdate = {
+      type: "order",
+      orderId: params.orderId,
+      tabId,
+      userKey: params.userKey,
+      lines: JSON.parse(JSON.stringify(params.lines)) as CollectionOrderLine[],
+      seq: nextSeq(`${tabId}:order:${params.orderId}`),
+      at: Date.now(),
+    };
+    await channel.send({ type: "broadcast", event: "live", payload: update });
+  });
+  void drainPublishQueue();
 }
 
 export function isForeignLiveUpdate(

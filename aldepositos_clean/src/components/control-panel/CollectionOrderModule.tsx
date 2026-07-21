@@ -103,6 +103,7 @@ import {
   reconcileCollectionOrder,
   totalsFromCapturedLines,
 } from "@/lib/collectionOrderReconcile";
+import { mergeConcurrentCollectionLines } from "@/lib/collectionOrderLineMerge";
 import { supabase } from "@/lib/supabase";
 import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
 import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
@@ -113,8 +114,8 @@ import {
 } from "@/lib/geminiClientUsage";
 
 const generateId = () => Math.random().toString(36).slice(2, 11);
-const CATALOG_DEBOUNCE_MS = 500;
-const ORDER_AUTOSAVE_MS = 300;
+/** Autosave más lento: 300 ms pisaba filas nuevas y saturaba Realtime. */
+const ORDER_AUTOSAVE_MS = 1500;
 
 type CollectionOrderDeleteConfirm =
   | { kind: "single"; order: CollectionOrder }
@@ -453,14 +454,130 @@ export function CollectionOrderModule({
   const catalogSeqRef = useRef<Record<string, number>>({});
   const editingRef = useRef<CollectionOrder | null>(null);
   const isOrderSavingRef = useRef(false);
+  const saveGenerationRef = useRef(0);
   const lastSavedOrderHashRef = useRef("");
   const lastRemoteOrderHashRef = useRef("");
+  /** Evita rebroadcast del estado que acabamos de recibir/fusionar. */
+  const lastLivePublishedHashRef = useRef("");
+  /** Último snapshot persistido (baseline para merge a 3 vías). */
+  const serverBaselineLinesRef = useRef<CollectionOrderLine[]>([]);
   const pendingRemoteOrderRef = useRef<CollectionOrder | null>(null);
   const prevEditingIdRef = useRef<string | null>(null);
   const [remoteOrderUpdatePending, setRemoteOrderUpdatePending] = useState(false);
   const isEditingRef = useEditingFocusRef();
 
   editingRef.current = editing;
+
+  const applyMergedRemote = useCallback(
+    (remote: CollectionOrder, fromLive: boolean) => {
+      const current = editingRef.current;
+      if (!current || current.id !== remote.id) return;
+
+      const remoteLines = Array.isArray(remote.lines) ? remote.lines : [];
+      const localLines = current.lines;
+      const localHash = JSON.stringify(current);
+      const isDirty = localHash !== lastSavedOrderHashRef.current;
+      const remoteLinesHash = JSON.stringify(remoteLines);
+
+      // Mientras escribe: no reescribir el editor (congela el cursor / “se vuelve loco”).
+      // Se aplica al salir del campo o al guardar.
+      if (isEditingRef.current) {
+        pendingRemoteOrderRef.current = {
+          ...current,
+          ...(!isDirty ? remote : {}),
+          lines: remoteLines,
+          id: current.id,
+        };
+        lastRemoteOrderHashRef.current = remoteLinesHash;
+        setRemoteOrderUpdatePending(true);
+        return;
+      }
+
+      const mergedLines = mergeConcurrentCollectionLines(
+        serverBaselineLinesRef.current,
+        localLines,
+        remoteLines,
+      );
+      const mergedLinesHash = JSON.stringify(mergedLines);
+      const localLinesHash = JSON.stringify(localLines);
+
+      // Sin cambios de filas y sucio: no tocar React state.
+      if (mergedLinesHash === localLinesHash && isDirty) {
+        lastRemoteOrderHashRef.current = remoteLinesHash;
+        pendingRemoteOrderRef.current = null;
+        setRemoteOrderUpdatePending(false);
+        return;
+      }
+
+      // No pasar por normalizeCollectionOrderFields aquí: reformatea medidas y
+      // dispara setEditing en bucle (UI trabada al tipear).
+      const next: CollectionOrder = {
+        ...current,
+        ...(isDirty
+          ? {}
+          : {
+              cliente: remote.cliente,
+              proveedor: remote.proveedor,
+              marca: remote.marca,
+              expedidor: remote.expedidor,
+              notes: remote.notes,
+              expectedBultos: remote.expectedBultos,
+              expectedPesoKg: remote.expectedPesoKg,
+              expectedCbm: remote.expectedCbm,
+              numero: remote.numero,
+              status: remote.status,
+              receptionStatus: remote.receptionStatus,
+              linkedRaNumbers: remote.linkedRaNumbers,
+              updatedAt: remote.updatedAt,
+            }),
+        lines: mergedLines,
+        id: current.id,
+      };
+
+      const nextHash = JSON.stringify(next);
+      if (nextHash === localHash) {
+        lastRemoteOrderHashRef.current = remoteLinesHash;
+        if (!fromLive && !isDirty) {
+          serverBaselineLinesRef.current = JSON.parse(
+            JSON.stringify(remoteLines),
+          ) as CollectionOrderLine[];
+          lastSavedOrderHashRef.current = JSON.stringify(remote);
+        }
+        pendingRemoteOrderRef.current = null;
+        setRemoteOrderUpdatePending(false);
+        return;
+      }
+
+      setEditing(next);
+      editingRef.current = next;
+      lastRemoteOrderHashRef.current = remoteLinesHash;
+      lastLivePublishedHashRef.current = mergedLinesHash;
+      if (!fromLive && !isDirty) {
+        serverBaselineLinesRef.current = JSON.parse(
+          JSON.stringify(remoteLines),
+        ) as CollectionOrderLine[];
+        lastSavedOrderHashRef.current = nextHash;
+      }
+      pendingRemoteOrderRef.current = null;
+      setRemoteOrderUpdatePending(false);
+    },
+    [isEditingRef],
+  );
+
+  // Al salir de un input, aplicar el remoto pendiente (filas de otro usuario).
+  useEffect(() => {
+    const flushPending = () => {
+      window.setTimeout(() => {
+        if (isEditingRef.current) return;
+        const pending = pendingRemoteOrderRef.current;
+        if (!pending || !editingRef.current) return;
+        if (pending.id !== editingRef.current.id) return;
+        applyMergedRemote(pending, true);
+      }, 80);
+    };
+    document.addEventListener("focusout", flushPending);
+    return () => document.removeEventListener("focusout", flushPending);
+  }, [applyMergedRemote, isEditingRef]);
 
   useEffect(() => {
     const id = editing?.id ?? null;
@@ -469,6 +586,10 @@ export function CollectionOrderModule({
     const remote = id ? orders.find((o) => o.id === id) : null;
     lastRemoteOrderHashRef.current = remote ? JSON.stringify(remote.lines) : "";
     lastSavedOrderHashRef.current = remote ? JSON.stringify(remote) : "";
+    lastLivePublishedHashRef.current = "";
+    serverBaselineLinesRef.current = remote
+      ? (JSON.parse(JSON.stringify(remote.lines)) as CollectionOrderLine[])
+      : [];
     pendingRemoteOrderRef.current = null;
     setRemoteOrderUpdatePending(false);
   }, [editing?.id, orders]);
@@ -489,28 +610,25 @@ export function CollectionOrderModule({
     if (!current) return;
     const localHash = JSON.stringify(current);
     const isDirty = localHash !== lastSavedOrderHashRef.current;
-    const isEditing = isEditingRef.current;
 
-    if (isDirty && isEditing) {
-      pendingRemoteOrderRef.current = remote;
-      setRemoteOrderUpdatePending(true);
-      lastRemoteOrderHashRef.current = remoteLinesHash;
+    // Sucio: fusionar en silencio (no reemplazar). Así «Agregar línea» no pierde filas
+    // aunque el foco esté en el botón (isEditing=false).
+    if (isDirty) {
+      applyMergedRemote(remote, false);
       return;
     }
 
-    const normalizedRemote = normalizeCollectionOrderFields(remote);
-    setEditing(normalizedRemote);
-    lastSavedOrderHashRef.current = JSON.stringify(normalizedRemote);
-    lastRemoteOrderHashRef.current = remoteLinesHash;
-    pendingRemoteOrderRef.current = null;
-    setRemoteOrderUpdatePending(false);
-  }, [orders, editing?.id, isEditingRef]);
+    applyMergedRemote(remote, false);
+  }, [orders, editing?.id, applyMergedRemote]);
 
   useEffect(() => {
     const key = (userEmail ?? "").trim();
     if (!editing?.id || !key) return;
-    const hash = JSON.stringify(editing);
-    if (hash === lastSavedOrderHashRef.current) return;
+    const linesHash = JSON.stringify(editing.lines);
+    const fullHash = JSON.stringify(editing);
+    if (fullHash === lastSavedOrderHashRef.current) return;
+    if (linesHash === lastLivePublishedHashRef.current) return;
+    lastLivePublishedHashRef.current = linesHash;
     scheduleOrderLivePublish({
       orderId: editing.id,
       userKey: key,
@@ -529,48 +647,23 @@ export function CollectionOrderModule({
       const liveHash = JSON.stringify(update.lines);
       if (liveHash === lastRemoteOrderHashRef.current) return;
 
-      if (isOrderSavingRef.current) {
-        const current = editingRef.current;
-        if (current) {
-          pendingRemoteOrderRef.current = { ...current, lines: update.lines };
-        }
-        return;
-      }
-
       const current = editingRef.current;
       if (!current) return;
-      const isDirty = JSON.stringify(current) !== lastSavedOrderHashRef.current;
-      const isEditing = isEditingRef.current;
 
-      if (isDirty && isEditing) {
+      if (isOrderSavingRef.current) {
         pendingRemoteOrderRef.current = { ...current, lines: update.lines };
-        setRemoteOrderUpdatePending(true);
-        lastRemoteOrderHashRef.current = liveHash;
         return;
       }
 
-      const next = { ...current, lines: update.lines };
-      setEditing(next);
-      lastRemoteOrderHashRef.current = liveHash;
-      pendingRemoteOrderRef.current = null;
-      setRemoteOrderUpdatePending(false);
+      applyMergedRemote({ ...current, lines: update.lines }, true);
     });
-  }, [editing?.id, userEmail, isEditingRef]);
+  }, [editing?.id, userEmail, applyMergedRemote]);
 
   const applyPendingRemoteOrder = useCallback(() => {
     const remote = pendingRemoteOrderRef.current;
     if (!remote) return;
-    const normalizedRemote = normalizeCollectionOrderFields(
-      JSON.parse(JSON.stringify(remote)) as CollectionOrder,
-    );
-    setEditing(normalizedRemote);
-    lastSavedOrderHashRef.current = JSON.stringify(normalizedRemote);
-    lastRemoteOrderHashRef.current = JSON.stringify(normalizedRemote.lines);
-    pendingRemoteOrderRef.current = null;
-    setRemoteOrderUpdatePending(false);
-    setPendingUndTot({});
-    setPendingPesoTot({});
-  }, []);
+    applyMergedRemote(remote, true);
+  }, [applyMergedRemote]);
 
   useEffect(() => {
     const d = catalogDebounceRef;
@@ -692,19 +785,13 @@ export function CollectionOrderModule({
     });
   }, []);
 
-  const scheduleCatalogLookup = (rowId: string, raw: string) => {
-    const prevT = catalogDebounceRef.current[rowId];
-    if (prevT) clearTimeout(prevT);
-    catalogDebounceRef.current[rowId] = setTimeout(() => {
-      delete catalogDebounceRef.current[rowId];
-      void runCatalogLookup(rowId, raw);
-    }, CATALOG_DEBOUNCE_MS);
-  };
-
   const addRow = () => {
-    setEditing((prev) =>
-      prev ? { ...prev, lines: [...prev.lines, emptyLine()] } : prev,
-    );
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, lines: [...prev.lines, emptyLine()] };
+      editingRef.current = next;
+      return next;
+    });
   };
 
   const deleteRow = (lineId: string) => {
@@ -728,24 +815,39 @@ export function CollectionOrderModule({
     });
     setEditing((prev) => {
       if (!prev) return prev;
-      const next = prev.lines.filter((r) => r.id !== lineId);
-      return {
+      const filtered = prev.lines.filter((r) => r.id !== lineId);
+      const next = {
         ...prev,
-        lines: next.length > 0 ? next : [emptyLine()],
+        lines: filtered.length > 0 ? filtered : [emptyLine()],
       };
+      editingRef.current = next;
+      return next;
     });
   };
 
   const persistOrder = useCallback(
     async (params: { order: CollectionOrder; showAlerts: boolean }) => {
       const { order, showAlerts } = params;
+      const saveGen = ++saveGenerationRef.current;
       const normalizedOrder = normalizeCollectionOrderFields(order);
+
+      // Fusionar con lo último conocido en lista (eco atrasado no debe borrar altas).
+      const listRemote = orders.find((o) => o.id === normalizedOrder.id);
+      const linesForSave = listRemote
+        ? mergeConcurrentCollectionLines(
+            serverBaselineLinesRef.current,
+            normalizedOrder.lines,
+            listRemote.lines,
+          )
+        : normalizedOrder.lines;
+
       const maxExisting = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
       const suggested = String(maxExisting + 1);
       const numeroRaw = String(normalizedOrder.numero ?? "").trim();
       const numero = numeroRaw || suggested;
       const payload: CollectionOrder = {
         ...normalizedOrder,
+        lines: linesForSave,
         numero,
         updatedAt: new Date().toISOString(),
       };
@@ -756,21 +858,42 @@ export function CollectionOrderModule({
       try {
         if (exists) await updateCollectionOrder(payload);
         else await insertCollectionOrder(payload);
+
+        // Guardado obsoleto: otra escritura más nueva ya arrancó.
+        if (saveGen !== saveGenerationRef.current) {
+          setOrders((prev) => upsertCollectionOrderInList(prev, payload));
+          return;
+        }
+
         setOrders((prev) => upsertCollectionOrderInList(prev, payload));
         setEditing((prev) => {
           if (!prev || prev.id !== payload.id) return prev;
-          // El guardado (red) es asíncrono: si el usuario siguió escribiendo
-          // mientras se guardaba, NO pisamos su texto con la instantánea vieja.
-          if (JSON.stringify(prev) === snapshotHash) return payload;
-          // Sí conservamos sus ediciones; solo rellenamos el número de orden
-          // que el servidor pudo haber asignado cuando el campo estaba vacío.
-          if (!String(prev.numero ?? "").trim() && numero) {
-            return { ...prev, numero };
+          if (JSON.stringify(prev) === snapshotHash) {
+            editingRef.current = payload;
+            return payload;
           }
-          return prev;
+          // Conservar ediciones posteriores; integrar filas del payload (p. ej. altas remotas).
+          const mergedLines = mergeConcurrentCollectionLines(
+            serverBaselineLinesRef.current,
+            prev.lines,
+            payload.lines,
+          );
+          const next = {
+            ...prev,
+            lines: mergedLines,
+            ...(!String(prev.numero ?? "").trim() && numero
+              ? { numero }
+              : {}),
+          };
+          editingRef.current = next;
+          return next;
         });
+        serverBaselineLinesRef.current = JSON.parse(
+          JSON.stringify(payload.lines),
+        ) as CollectionOrderLine[];
         lastSavedOrderHashRef.current = JSON.stringify(payload);
         lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
+        lastLivePublishedHashRef.current = JSON.stringify(payload.lines);
         if (showAlerts) alert(`Orden guardada. Número: ${numero}.`);
       } catch (e) {
         console.error(e);
@@ -778,26 +901,18 @@ export function CollectionOrderModule({
           alert("No se pudo guardar. ¿Aplicaste la migración SQL `collection_orders` en Supabase?");
         }
       } finally {
-        isOrderSavingRef.current = false;
-        if (showAlerts) setSaveBusy(false);
-        const pending = pendingRemoteOrderRef.current;
-        if (
-          pending &&
-          editingRef.current &&
-          JSON.stringify(editingRef.current) === lastSavedOrderHashRef.current
-        ) {
-          const normalizedPending = normalizeCollectionOrderFields(
-            JSON.parse(JSON.stringify(pending)) as CollectionOrder,
-          );
-          setEditing(normalizedPending);
-          lastSavedOrderHashRef.current = JSON.stringify(normalizedPending);
-          lastRemoteOrderHashRef.current = JSON.stringify(normalizedPending.lines);
-          pendingRemoteOrderRef.current = null;
-          setRemoteOrderUpdatePending(false);
+        if (saveGen === saveGenerationRef.current) {
+          isOrderSavingRef.current = false;
+          const pending = pendingRemoteOrderRef.current;
+          if (pending && editingRef.current) {
+            pendingRemoteOrderRef.current = null;
+            applyMergedRemote(pending, true);
+          }
         }
+        if (showAlerts) setSaveBusy(false);
       }
     },
-    [orders],
+    [orders, applyMergedRemote],
   );
 
   const saveOrder = async () => {
@@ -822,9 +937,20 @@ export function CollectionOrderModule({
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = setTimeout(() => {
         autoSaveTimerRef.current = null;
-        // Siempre el borrador actual (clics rápidos en Agregar línea).
         const latest = editingRef.current;
         if (!latest) return;
+        // Una sola escritura en vuelo: si hay save activo, reintenta al terminar.
+        if (isOrderSavingRef.current) {
+          saveGenerationRef.current += 1; // invalida el save viejo al completar
+          autoSaveTimerRef.current = setTimeout(() => {
+            autoSaveTimerRef.current = null;
+            const again = editingRef.current;
+            if (again && !isOrderSavingRef.current) {
+              void persistOrder({ order: again, showAlerts: false });
+            }
+          }, 400);
+          return;
+        }
         void persistOrder({ order: latest, showAlerts: false });
       }, ORDER_AUTOSAVE_MS);
     },
@@ -2294,7 +2420,7 @@ export function CollectionOrderModule({
                                 return next;
                               });
                             }
-                            scheduleCatalogLookup(row.id, v);
+                            // Catálogo solo al salir del campo (evita parpadeos al tipear).
                           }}
                           onBlur={(ev) => {
                             const t = catalogDebounceRef.current[row.id];

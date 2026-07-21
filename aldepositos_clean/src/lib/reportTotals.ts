@@ -1,13 +1,13 @@
 import type { Task } from "@/lib/types/task";
 import {
+  cubicajeM3FromDims,
   formatCubicaje2,
+  parseMeasureNumber,
+  roundMeasureNearest,
   roundUpMeasure,
-  sumCubicajeM3,
 } from "@/lib/measureDecimals";
 import {
   isReferenceCaptureMode,
-  stripQuickRowsForPersist,
-  type QuickMeasureRow,
   type ReferenceCaptureMode,
 } from "@/lib/quickInventoryTypes";
 
@@ -37,6 +37,25 @@ export function reportRowPallet(row: Record<string, unknown>): number {
   return Math.max(1, Number(row.pallet) || 1);
 }
 
+/**
+ * CBM de una línea del reporte (= columna «Total CBM»).
+ * 1) L×W×H×bultos si hay medidas
+ * 2) si no, `volumenM3` de la línea (OR / import)
+ */
+export function reportLineTotalCbm(row: Record<string, unknown>): number {
+  if (row.reempaque === true) return 0;
+  const fromDims = cubicajeM3FromDims(row.l, row.w, row.h, row.bultos, false);
+  if (fromDims > 0) return fromDims;
+  const vol = parseMeasureNumber(row.volumenM3);
+  return vol > 0 ? roundMeasureNearest(vol) : 0;
+}
+
+/** Suma de los Total CBM de cada fila (misma cifra que el KPI «Volumen total»). */
+export function sumReportCubicajeM3(rows: Record<string, unknown>[]): number {
+  const total = rows.reduce((acc, row) => acc + reportLineTotalCbm(row), 0);
+  return roundMeasureNearest(total);
+}
+
 /** Suma el peso declarado por paleta (una sola vez por paleta). */
 function sumPalletWeight(rows: Record<string, unknown>[]): number {
   const seen = new Set<number>();
@@ -55,15 +74,10 @@ export function resolveTaskReferenceMode(task: Task): ReferenceCaptureMode | nul
 }
 
 export function computeReportData(task: Task): ReportComputed {
-  const rawRows = (task.measureData || []) as Record<string, unknown>[];
+  // Filas tal cual en BD: el reporte no debe strip/normalize (eso podía vaciar medidas).
+  const measureRows = (task.measureData || []) as Record<string, unknown>[];
   const isDetailed = task.type === "detailed";
   const isAirway = task.type === "airway";
-  const measureRows = isDetailed
-    ? rawRows
-    : (stripQuickRowsForPersist(rawRows as QuickMeasureRow[]) as Record<
-        string,
-        unknown
-      >[]);
   const storedMode = resolveTaskReferenceMode(task);
   const inferredPalletized =
     !isDetailed &&
@@ -71,19 +85,18 @@ export function computeReportData(task: Task): ReportComputed {
   const isPalletized =
     !isDetailed && (storedMode === "palletized" || (storedMode === null && inferredPalletized));
   const isWithoutReferences = !isDetailed && storedMode === "without";
-  // En paletizado el peso no va por fila (se muestra por paleta), así que no
-  // se usa la columna de peso por fila.
   const showWeightColumn =
     !isPalletized && (task.weightMode === "per_bundle" || isDetailed);
   const showReferenceColumn =
-    isDetailed || storedMode === "with" || (storedMode === null && !isPalletized && !isWithoutReferences);
+    isDetailed ||
+    storedMode === "with" ||
+    (storedMode === null && !isPalletized && !isWithoutReferences);
 
-  let totalWeight = task.expectedWeight || 0;
+  let totalWeight = 0;
   let totalUnidades = 0;
 
   if (isPalletized) {
-    const calcWeight = roundUpMeasure(sumPalletWeight(measureRows));
-    if (calcWeight > 0) totalWeight = calcWeight;
+    totalWeight = roundUpMeasure(sumPalletWeight(measureRows));
   } else if (isDetailed) {
     totalWeight = roundUpMeasure(
       measureRows.reduce(
@@ -102,16 +115,21 @@ export function computeReportData(task: Task): ReportComputed {
       0,
     );
   } else if (task.weightMode === "per_bundle") {
-    const calcWeight = roundUpMeasure(
-      measureRows.reduce(
-        (acc, row) =>
+    totalWeight = roundUpMeasure(
+      measureRows.reduce((acc, row) => {
+        if (row.reempaque === true) return acc;
+        return (
           acc +
           (parseFloat(String(row.weight ?? 0)) || 0) *
-            (parseFloat(String(row.bultos ?? 0)) || 0),
-        0,
-      ),
+            (parseFloat(String(row.bultos ?? 0)) || 0)
+        );
+      }, 0),
     );
-    if (calcWeight > 0) totalWeight = calcWeight;
+  }
+
+  // Sin peso capturado por fila: mostrar el declarado del RA (no dejar 0.00 engañoso).
+  if (totalWeight <= 0 && (task.expectedWeight || 0) > 0) {
+    totalWeight = roundUpMeasure(task.expectedWeight);
   }
 
   const totals: ReportTotals = {
@@ -119,7 +137,7 @@ export function computeReportData(task: Task): ReportComputed {
       (a, b) => a + (parseFloat(String(b.bultos ?? 0)) || 0),
       0,
     ),
-    cbm: formatCubicaje2(sumCubicajeM3(measureRows)) || "0.00",
+    cbm: formatCubicaje2(sumReportCubicajeM3(measureRows)) || "0.00",
     weight: roundUpMeasure(totalWeight),
     unidades: totalUnidades,
   };
@@ -158,4 +176,12 @@ export function reportModuleLabel(task: Task): string {
   if (mode === "without") return "rápido · sin referencias";
   if (mode === "palletized") return "rápido · paletizado";
   return "rápido";
+}
+
+/** Texto L/W/H en reporte: «—» si no hay captura (no «0»). */
+export function reportDimDisplay(value: unknown): string {
+  const n = parseMeasureNumber(value);
+  if (n <= 0) return "—";
+  const raw = String(value ?? "").trim();
+  return raw || String(n);
 }

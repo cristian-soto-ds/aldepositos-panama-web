@@ -11,6 +11,8 @@ import logoMark from "@/assets/brand/logo-aldepositos.png";
 import { PDF_EXPORT_WIDTH_PX } from "./reportsPdfExport";
 import {
   computeReportData,
+  reportDimDisplay,
+  reportLineTotalCbm,
   reportModuleLabel,
   reportPalletWeight,
   reportRowPallet,
@@ -560,7 +562,7 @@ export function ReportPdfExportLayout({
               const totalUnidades = bultos * undPerBulto;
               const pesoTotal = bultos * pesoPorBulto;
               const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
-              const cubicajeTotal = cubicajeM3FromDims(l, w, h, bultos, isReempaque);
+              const cubicajeTotal = reportLineTotalCbm(row);
               const bg = idx % 2 === 0 ? "#ffffff" : CELL_BG;
               return (
                 <tr key={idx} style={{ backgroundColor: bg }}>
@@ -599,13 +601,13 @@ export function ReportPdfExportLayout({
                     {row.reempaque ? "SI" : "-"}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
-                    {l}
+                    {reportDimDisplay(row.l)}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
-                    {w}
+                    {reportDimDisplay(row.w)}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
-                    {h}
+                    {reportDimDisplay(row.h)}
                   </td>
                   <td style={{ border: `1px solid ${BORDER}`, padding: 4, textAlign: "center" }}>
                     {formatCubicaje2(cbmPorBulto)}
@@ -690,13 +692,13 @@ export function ReportPdfExportLayout({
                 const h = parseFloat(String(row.h ?? 0)) || 0;
                 const b = parseFloat(String(row.bultos ?? 0)) || 0;
                 const isReempaque = row.reempaque === true;
-                const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+                const rowCbm = reportLineTotalCbm(row);
                 const bg = isReempaque
                   ? "#f5f3ff"
                   : palletRowNum % 2 === 0
                     ? CELL_BG
                     : "#ffffff";
-                const dash = (v: number) => (isReempaque ? "—" : String(v));
+                const dash = (v: number) => (isReempaque || v <= 0 ? "—" : String(v));
                 cells.push(
                   <tr key={`row-${idx}`} style={{ backgroundColor: bg }}>
                     <td
@@ -727,7 +729,7 @@ export function ReportPdfExportLayout({
                         color: MUTED,
                       }}
                     >
-                      {dash(l)}
+                      {isReempaque ? "—" : reportDimDisplay(row.l)}
                     </td>
                     <td
                       style={{
@@ -737,7 +739,7 @@ export function ReportPdfExportLayout({
                         color: MUTED,
                       }}
                     >
-                      {dash(w)}
+                      {isReempaque ? "—" : reportDimDisplay(row.w)}
                     </td>
                     <td
                       style={{
@@ -747,7 +749,7 @@ export function ReportPdfExportLayout({
                         color: MUTED,
                       }}
                     >
-                      {dash(h)}
+                      {isReempaque ? "—" : reportDimDisplay(row.h)}
                     </td>
                     <td
                       style={{
@@ -810,7 +812,7 @@ export function ReportPdfExportLayout({
               const h = parseFloat(String(row.h ?? 0)) || 0;
               const b = parseFloat(String(row.bultos ?? 0)) || 0;
               const isReempaque = row.reempaque === true;
-              const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+              const rowCbm = reportLineTotalCbm(row);
               const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
               const rowWeight = parseFloat(String(row.weight ?? 0)) || 0;
               const pesoTotal = roundUpMeasure(b * rowWeight);
@@ -877,7 +879,7 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {isReempaque ? "—" : String(row.l ?? 0)}
+                    {isReempaque ? "—" : reportDimDisplay(row.l)}
                   </td>
                   <td
                     style={{
@@ -887,7 +889,7 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {isReempaque ? "—" : String(row.w ?? 0)}
+                    {isReempaque ? "—" : reportDimDisplay(row.w)}
                   </td>
                   <td
                     style={{
@@ -897,7 +899,7 @@ export function ReportPdfExportLayout({
                       color: MUTED,
                     }}
                   >
-                    {isReempaque ? "—" : String(row.h ?? 0)}
+                    {isReempaque ? "—" : reportDimDisplay(row.h)}
                   </td>
                   <td
                     style={{
@@ -934,6 +936,43 @@ export function ReportPdfExportLayout({
                 </tr>
               );
             })}
+            {pageIndex === rowPages.length - 1 ? (
+              <tr style={{ backgroundColor: "#eff6ff" }}>
+                <td
+                  colSpan={
+                    1 +
+                    (showRefCol ? 1 : 0) +
+                    1 +
+                    (showWeightColumn ? 2 : 0) +
+                    3 +
+                    2
+                  }
+                  style={{
+                    border: `1px solid ${BORDER}`,
+                    padding: compact ? 6 : 8,
+                    textAlign: "right",
+                    fontWeight: 800,
+                    textTransform: "uppercase",
+                    fontSize: compact ? 8 : 9,
+                    color: BRAND,
+                  }}
+                >
+                  Suma cubicaje (Total CBM)
+                </td>
+                <td
+                  style={{
+                    border: `1px solid ${BORDER}`,
+                    padding: compact ? 6 : 8,
+                    textAlign: "center",
+                    fontWeight: 900,
+                    color: "#1e40af",
+                    fontSize: compact ? 11 : 13,
+                  }}
+                >
+                  {totals.cbm}
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       )}

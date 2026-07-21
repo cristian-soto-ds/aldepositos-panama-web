@@ -14,6 +14,8 @@ import {
 } from "@/lib/inventariadoresRoster";
 import { getPeriodBounds, type LeaderboardPeriod } from "@/lib/inventoryLeaderboard";
 import { inventoryCompletedByLabel } from "@/lib/taskContributors";
+import { fetchTaskById } from "@/lib/supabase";
+import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 import {
   ArrowLeft,
   Check,
@@ -149,15 +151,72 @@ export function CompletedReportsModule({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** Detalle hidratado por id (evita reporte sin L/W/H por lista slim). */
+  const [hydratedById, setHydratedById] = useState<Record<string, TaskModel>>(
+    {},
+  );
 
   let tasksToPrint: TaskModel[] = [];
   if (singleViewTask) {
-    tasksToPrint = [singleViewTask];
+    tasksToPrint = [hydratedById[singleViewTask.id] ?? singleViewTask];
   } else if (isViewingReports && selectedReportIds.length > 0) {
-    tasksToPrint = completedTasks.filter((t) =>
-      selectedReportIds.includes(t.id),
-    );
+    tasksToPrint = completedTasks
+      .filter((t) => selectedReportIds.includes(t.id))
+      .map((t) => hydratedById[t.id] ?? t);
   }
+
+  // Al abrir un reporte, asegurar measureData completo desde Supabase.
+  useEffect(() => {
+    const ids = singleViewTask
+      ? [singleViewTask.id]
+      : isViewingReports
+        ? selectedReportIds
+        : [];
+    if (ids.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, TaskModel> = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          const local =
+            tasks.find((t) => t.id === id) ??
+            (singleViewTask?.id === id ? singleViewTask : null);
+          if (local && !measureDataLooksEmpty(local.measureData)) {
+            const hasDims = (local.measureData as Record<string, unknown>[]).some(
+              (r) =>
+                Number(r.l) > 0 ||
+                Number(r.w) > 0 ||
+                Number(r.h) > 0 ||
+                Number(r.weight) > 0 ||
+                Number(r.volumenM3) > 0 ||
+                Number(r.pesoPorBulto) > 0,
+            );
+            if (hasDims) {
+              next[id] = local;
+              return;
+            }
+          }
+          try {
+            const full = await fetchTaskById(id);
+            if (full) next[id] = full;
+          } catch (e) {
+            console.warn("No se pudo hidratar el RA para reporte:", id, e);
+          }
+        }),
+      );
+      if (!cancelled && Object.keys(next).length > 0) {
+        setHydratedById((prev) => ({ ...prev, ...next }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    singleViewTask,
+    isViewingReports,
+    selectedReportIds,
+    tasks,
+  ]);
 
   const reportViewId = singleViewTask
     ? singleViewTask.id

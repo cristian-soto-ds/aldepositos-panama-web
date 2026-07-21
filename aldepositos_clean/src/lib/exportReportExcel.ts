@@ -11,6 +11,7 @@ async function loadExcelJS(): Promise<ExcelJSNamespace> {
 import logoMark from "@/assets/brand/logo-aldepositos.png";
 import {
   computeReportData,
+  reportLineTotalCbm,
   reportModuleLabel,
   reportPalletWeight,
   reportRowPallet,
@@ -200,7 +201,7 @@ function buildPalletizedRow(
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const b = parseFloat(String(row.bultos ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
-  const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+  const rowCbm = reportLineTotalCbm(row);
   return [
     lineNum,
     isReempaque ? "—" : b,
@@ -242,7 +243,7 @@ function buildQuickRow(
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const b = parseFloat(String(row.bultos ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
-  const rowCbm = cubicajeM3FromDims(l, w, h, b, isReempaque);
+  const rowCbm = reportLineTotalCbm(row);
   const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
   const rowWeight = parseFloat(String(row.weight ?? 0)) || 0;
   const pesoTotal = roundUpMeasure(b * rowWeight);
@@ -273,7 +274,7 @@ function buildDetailedRow(
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
   const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
-  const cubicajeTotal = cubicajeM3FromDims(l, w, h, bultos, isReempaque);
+  const cubicajeTotal = reportLineTotalCbm(row);
 
   return [
     idx + 1,

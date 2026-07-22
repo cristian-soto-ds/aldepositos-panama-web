@@ -95,7 +95,7 @@ function filterCompletedTrucks(
 }
 
 export function TruckDirectionModule() {
-  const { trucks, loading, reload } = useReceptionQueue();
+  const { trucks, setTrucks, loading } = useReceptionQueue();
   const { occupancy: rampOccupancy } = useRampOccupancy();
   const [reportBusy, setReportBusy] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
@@ -189,7 +189,16 @@ export function TruckDirectionModule() {
         const updated = await updateReceptionTruckStatus(id, status, {
           issueReceipt: needsReceipt,
         });
-        await reload();
+        // UI local inmediata (broadcast ya avisa a los demás).
+        if (updated) {
+          setTrucks((prev) => {
+            const idx = prev.findIndex((t) => t.id === updated.id);
+            if (idx < 0) return [...prev, updated];
+            const next = [...prev];
+            next[idx] = updated;
+            return next;
+          });
+        }
         if (updated?.warehouseReceiptNumber && needsReceipt) {
           printWarehouseReceipt(updated);
         }
@@ -197,7 +206,7 @@ export function TruckDirectionModule() {
         setMoveBusy(null);
       }
     },
-    [trucks, reload],
+    [trucks, setTrucks],
   );
 
   return (

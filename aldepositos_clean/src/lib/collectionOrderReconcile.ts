@@ -37,6 +37,11 @@ export function totalsFromCapturedLines(lines: CollectionOrderLine[]): CapturedL
   let referenciaCount = 0;
 
   for (const line of lines) {
+    if (line.reempaque === true) {
+      const hasRef = String(line.referencia ?? "").trim().length > 0;
+      if (hasRef) referenciaCount += 1;
+      continue;
+    }
     const b = Math.max(0, Math.round(parseN(line.bultos)));
     const hasRef = String(line.referencia ?? "").trim().length > 0;
     if (hasRef) referenciaCount += 1;

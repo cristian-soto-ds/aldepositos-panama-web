@@ -62,13 +62,12 @@ body {
   height: 100%;
   width: 38%;
   border-radius: 9999px;
+  /* Verde estilo ChatGPT (indeterminado suave) */
   background: linear-gradient(
     90deg,
-    #4285f4,
-    #9b72cb,
-    #d96570,
-    #f4b400,
-    #34a853
+    #10a37f 0%,
+    #19c37d 45%,
+    #10a37f 100%
   );
   animation: collection-order-ai-indeterminate 1.35s ease-in-out infinite;
 }

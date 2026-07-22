@@ -21,6 +21,10 @@ import {
 } from "@/lib/collectionOrders";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import { supabase } from "@/lib/supabase";
+import {
+  publishReceptionTruckLive,
+  subscribeReceptionLive,
+} from "@/lib/receptionLogistics/receptionLiveSync";
 
 function isTruck(value: unknown): value is ReceptionTruck {
   return (
@@ -145,12 +149,14 @@ export async function saveReceptionTrucks(trucks: ReceptionTruck[]): Promise<voi
 }
 
 export async function upsertReceptionTruck(truck: ReceptionTruck): Promise<void> {
-  const trucks = await fetchReceptionTrucks();
-  const idx = trucks.findIndex((t) => t.id === truck.id);
-  const merged = [...trucks];
+  const local = readLocalSnapshot().trucks;
+  const idx = local.findIndex((t) => t.id === truck.id);
+  const merged = [...local];
+  const isInsert = idx < 0;
   if (idx >= 0) merged[idx] = truck;
   else merged.push(truck);
   writeLocalSnapshot(merged);
+  publishReceptionTruckLive(isInsert ? "INSERT" : "UPDATE", truck.id, truck);
   try {
     const { error } = await supabase.from(RECEPTION_TABLE).upsert({
       id: truck.id,
@@ -164,9 +170,10 @@ export async function upsertReceptionTruck(truck: ReceptionTruck): Promise<void>
 }
 
 export async function removeReceptionTruckById(id: string): Promise<void> {
-  const trucks = await fetchReceptionTrucks();
-  const merged = trucks.filter((t) => t.id !== id);
+  const local = readLocalSnapshot().trucks;
+  const merged = local.filter((t) => t.id !== id);
   writeLocalSnapshot(merged);
+  publishReceptionTruckLive("DELETE", id, null);
   try {
     const { error } = await supabase.from(RECEPTION_TABLE).delete().eq("id", id);
     if (error) throw error;
@@ -208,8 +215,13 @@ export async function updateReceptionTruckStatus(
   status: ReceptionStatusId,
   options?: { issueReceipt?: boolean },
 ): Promise<ReceptionTruck | null> {
-  const trucks = await fetchReceptionTrucks();
-  const idx = trucks.findIndex((t) => t.id === truckId);
+  // Preferir snapshot local (instantáneo). Si falta, un fetch puntual.
+  let trucks = readLocalSnapshot().trucks;
+  let idx = trucks.findIndex((t) => t.id === truckId);
+  if (idx < 0) {
+    trucks = await fetchReceptionTrucks();
+    idx = trucks.findIndex((t) => t.id === truckId);
+  }
   if (idx < 0) return null;
 
   const now = new Date().toISOString();
@@ -233,47 +245,28 @@ export async function updateReceptionTruckStatus(
         ? generateWarehouseReceiptNumber(prev.plate)
         : prev.warehouseReceiptNumber,
   };
+
+  // Persistencia + broadcast inmediato (los demás ven el movimiento al instante).
+  await upsertReceptionTruck(next);
+
+  // Sincronizar OR en segundo plano (no bloquea la UI ni el broadcast).
   if (next.collectionOrderId || next.id.startsWith("or-co-")) {
-    await syncReceptionStatusToCollectionOrder(next, status);
+    void syncReceptionStatusToCollectionOrder(next, status);
   }
-  trucks[idx] = next;
-  await saveReceptionTrucks(trucks);
   return next;
 }
 
-const RECEPTION_REALTIME_CHANNEL_ID = "reception-trucks-live";
+const RECEPTION_POLL_MS = 4_000;
 
 let receptionQueueListeners = new Set<() => void>();
-let receptionQueueChannel: ReturnType<typeof supabase.channel> | null = null;
 let receptionQueueIntervalId: number | null = null;
 let receptionBroadcastChannel: BroadcastChannel | null = null;
+let receptionLiveUnsub: (() => void) | null = null;
 
 function notifyReceptionQueueListeners() {
   for (const listener of receptionQueueListeners) {
     listener();
   }
-}
-
-function ensureReceptionQueueChannel() {
-  if (receptionQueueChannel) return;
-  try {
-    receptionQueueChannel = supabase
-      .channel(RECEPTION_REALTIME_CHANNEL_ID)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: RECEPTION_TABLE },
-        () => notifyReceptionQueueListeners(),
-      )
-      .subscribe();
-  } catch {
-    receptionQueueChannel = null;
-  }
-}
-
-function teardownReceptionQueueChannelIfIdle() {
-  if (receptionQueueListeners.size > 0 || !receptionQueueChannel) return;
-  void supabase.removeChannel(receptionQueueChannel);
-  receptionQueueChannel = null;
 }
 
 export function subscribeReceptionQueue(onSync: () => void): () => void {
@@ -297,15 +290,20 @@ export function subscribeReceptionQueue(onSync: () => void): () => void {
     receptionQueueIntervalId = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       notifyReceptionQueueListeners();
-    }, 15_000);
+    }, RECEPTION_POLL_MS);
   }
 
-  ensureReceptionQueueChannel();
+  // Realtime + broadcast: avisa para un refetch de consistencia (el parche
+  // inmediato lo aplica useReceptionQueue vía subscribeReceptionLive).
+  if (!receptionLiveUnsub) {
+    receptionLiveUnsub = subscribeReceptionLive(() => {
+      notifyReceptionQueueListeners();
+    });
+  }
 
   return () => {
     receptionQueueListeners.delete(onSync);
     window.removeEventListener("storage", onStorage);
-    teardownReceptionQueueChannelIfIdle();
 
     if (receptionQueueListeners.size === 0) {
       if (receptionQueueIntervalId != null) {
@@ -315,6 +313,10 @@ export function subscribeReceptionQueue(onSync: () => void): () => void {
       if (receptionBroadcastChannel) {
         receptionBroadcastChannel.close();
         receptionBroadcastChannel = null;
+      }
+      if (receptionLiveUnsub) {
+        receptionLiveUnsub();
+        receptionLiveUnsub = null;
       }
     }
   };

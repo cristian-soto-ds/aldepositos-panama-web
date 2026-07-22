@@ -3,7 +3,9 @@ import {
   cubicajeM3FromDims,
   formatCubicaje2,
   formatMeasure2,
+  formatWeightPrecise,
   normalizeMeasureFieldsOnRow,
+  preserveDocumentNumber,
 } from "@/lib/measureDecimals";
 
 function parseN(v: unknown): number {
@@ -27,8 +29,17 @@ export function normalizeCollectionOrderLineMeasures(
   ) as CollectionOrderLine;
 }
 
-/** Unidades totales = bultos × und/bulto (admite und/bulto decimal para cuadrar totales exactos p. ej. 140÷3). */
+/**
+ * Unidades totales de la línea.
+ * Si hay `unidadesTotales` de factura, ese valor manda (aunque und/bulto sea 48 decorativo).
+ * Si no, bultos × und/bulto.
+ */
 export function unidadesTotalesFromLine(line: CollectionOrderLine): number {
+  const stored = parseN(line.unidadesTotales);
+  if (stored > 0) {
+    const r = Math.round(stored);
+    return Math.abs(stored - r) < 1e-3 ? r : stored;
+  }
   const b = parseN(line.bultos);
   const u = parseN(line.unidadesPorBulto);
   if (b <= 0 || u <= 0) return 0;
@@ -37,19 +48,29 @@ export function unidadesTotalesFromLine(line: CollectionOrderLine): number {
   return Math.abs(product - r) < 1e-3 ? r : product;
 }
 
-function formatUnidadesPorBultoFromTotal(tot: number, bultos: number): string {
-  const und = tot / bultos;
-  if (!Number.isFinite(und) || und <= 0) return "";
-  if (Math.abs(und - Math.round(und)) < 1e-9) {
-    return String(Math.round(und));
+/** Und/bulto fijo cuando Tot ÷ bultos no es entero (regla operativa / Magaya). */
+export const UND_BULTO_WHEN_TOT_NOT_DIVISIBLE = 48;
+
+/**
+ * Tot ÷ bultos: si es entero → ese cociente; si no → 48 (no inventar 312 ni decimales).
+ * El total de factura se guarda en `unidadesTotales`.
+ */
+export function formatUnidadesPorBultoFromTotal(
+  tot: number,
+  bultos: number,
+): string {
+  if (!Number.isFinite(tot) || !Number.isFinite(bultos) || tot <= 0 || bultos <= 0) {
+    return "";
   }
-  const rounded = Math.round(und * 1e8) / 1e8;
-  return rounded.toFixed(8).replace(/\.?0+$/, "");
+  if (tot % bultos === 0) {
+    return String(tot / bultos);
+  }
+  return String(UND_BULTO_WHEN_TOT_NOT_DIVISIBLE);
 }
 
 /**
- * Usuario edita unidades totales: recalcula und/bulto si hay bultos > 0.
- * No redondea a entero si el total no es múltiplo de los bultos (evita 140 → 47×3=141).
+ * Usuario edita unidades totales: guarda tot de factura y recalcula und/bulto.
+ * Si tot no es múltiplo de bultos → und=48 (decorativo); tot permanece exacto.
  */
 export function applyUnidadesTotalesToLine(
   line: CollectionOrderLine,
@@ -57,39 +78,60 @@ export function applyUnidadesTotalesToLine(
 ): CollectionOrderLine {
   const tot = parseIntN(unidadesTotalesRaw);
   const b = parseIntN(line.bultos);
-  if (b <= 0 || tot <= 0) {
-    return { ...line };
+  if (tot <= 0) {
+    return { ...line, unidadesTotales: "" };
   }
-  return { ...line, unidadesPorBulto: formatUnidadesPorBultoFromTotal(tot, b) };
+  if (b <= 0) {
+    return { ...line, unidadesTotales: String(tot) };
+  }
+  return {
+    ...line,
+    unidadesTotales: String(tot),
+    unidadesPorBulto: formatUnidadesPorBultoFromTotal(tot, b),
+  };
 }
 
-/** Peso total = bultos × peso por bulto */
+/** Peso total: factura (`pesoTotalKg`) manda; si no, bultos × peso/b. */
 export function pesoTotalFromLine(line: CollectionOrderLine): number {
+  const stored = parseN(line.pesoTotalKg);
+  if (stored > 0) return stored;
   return parseN(line.bultos) * parseN(line.pesoPorBulto);
 }
 
 /**
- * Usuario edita peso total: recalcula peso por bulto si hay bultos > 0.
+ * Usuario edita peso total: guarda el total de factura y deriva peso/b.
+ * No altera el total (fidelidad a factura).
  */
 export function applyPesoTotalToLine(
   line: CollectionOrderLine,
   pesoTotalRaw: string,
 ): CollectionOrderLine {
-  const total = parseN(pesoTotalRaw);
+  const raw = String(pesoTotalRaw ?? "").trim();
+  const total = parseN(raw);
   const b = parseN(line.bultos);
-  if (b <= 0 || total <= 0) {
-    return { ...line };
+  if (total <= 0) {
+    return { ...line, pesoTotalKg: "" };
   }
-  const pesoPorBulto = total / b;
-  return { ...line, pesoPorBulto: formatMeasure2(pesoPorBulto) };
+  const preserved = preserveDocumentNumber(raw) || String(total);
+  if (b <= 0) {
+    return { ...line, pesoTotalKg: preserved };
+  }
+  return {
+    ...line,
+    pesoTotalKg: preserved,
+    pesoPorBulto: formatWeightPrecise(total / b),
+  };
 }
 
 export function lineHasData(line: CollectionOrderLine): boolean {
   if (String(line.referencia ?? "").trim()) return true;
+  if (line.reempaque === true) return true;
   if (String(line.descripcion ?? "").trim()) return true;
   if (parseN(line.bultos) > 0) return true;
   if (parseN(line.unidadesPorBulto) > 0) return true;
+  if (parseN(line.unidadesTotales) > 0) return true;
   if (parseN(line.pesoPorBulto) > 0) return true;
+  if (parseN(line.pesoTotalKg) > 0) return true;
   if (parseN(line.pesoPiezaKg) > 0) return true;
   if (parseN(line.l) || parseN(line.w) || parseN(line.h)) return true;
   return false;
@@ -108,28 +150,42 @@ export function collectionLinesToDetailedMeasureData(
   lines: CollectionOrderLine[],
 ): Record<string, unknown>[] {
   return lines.filter(lineHasData).map((row) => {
+    const isReempaque = row.reempaque === true;
     const hasVol =
+      !isReempaque &&
       row.volumenM3 !== undefined &&
       row.volumenM3 !== "" &&
       String(row.volumenM3).trim() !== "";
-    const volumenM3 = hasVol ? row.volumenM3 : cubicajeTotalM3FromLine(row);
+    const volumenM3 = isReempaque
+      ? ""
+      : hasVol
+        ? row.volumenM3
+        : cubicajeTotalM3FromLine(row);
     return stripDetailedMeasureRow({
       id: row.id,
       referencia: String(row.referencia ?? "").trim(),
       descripcion: String(row.descripcion ?? "").trim(),
-      bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
-      unidadesPorBulto:
-        row.unidadesPorBulto === "" || row.unidadesPorBulto === undefined
+      bultos: isReempaque
+        ? ""
+        : row.bultos === "" || row.bultos === undefined
+          ? ""
+          : row.bultos,
+      unidadesPorBulto: isReempaque
+        ? ""
+        : row.unidadesPorBulto === "" || row.unidadesPorBulto === undefined
           ? ""
           : row.unidadesPorBulto,
-      pesoPorBulto:
-        row.pesoPorBulto === "" || row.pesoPorBulto === undefined ? "" : row.pesoPorBulto,
-      l: row.l ?? "",
-      w: row.w ?? "",
-      h: row.h ?? "",
+      pesoPorBulto: isReempaque
+        ? ""
+        : row.pesoPorBulto === "" || row.pesoPorBulto === undefined
+          ? ""
+          : row.pesoPorBulto,
+      l: isReempaque ? "" : (row.l ?? ""),
+      w: isReempaque ? "" : (row.w ?? ""),
+      h: isReempaque ? "" : (row.h ?? ""),
       volumenM3: volumenM3 ?? "",
       unidad: row.unidad ?? "",
-      reempaque: false,
+      reempaque: isReempaque,
       bultoContenedor: "",
       referenciasContenedor: "",
       referenciaContenedora: "",
@@ -140,6 +196,7 @@ export function collectionLinesToDetailedMeasureData(
 /**
  * Convierte líneas de recolección a filas para ingreso rápido / guía aérea.
  * Solo referencia y bultos: peso y medidas los captura el inventariado en almacén.
+ * Conserva `reempaque` para que el RA ya lo muestre marcado.
  */
 export function collectionLinesToQuickMeasureData(
   lines: CollectionOrderLine[],
@@ -148,13 +205,22 @@ export function collectionLinesToQuickMeasureData(
     .filter((row) => {
       const ref = String(row.referencia ?? "").trim();
       const bultos = parseN(row.bultos);
-      return ref.length > 0 || bultos > 0;
+      return ref.length > 0 || bultos > 0 || row.reempaque === true;
     })
-    .map((row) => ({
-      id: row.id,
-      referencia: String(row.referencia ?? "").trim(),
-      bultos: row.bultos === "" || row.bultos === undefined ? "" : row.bultos,
-    }));
+    .map((row) => {
+      const isReempaque = row.reempaque === true;
+      const out: Record<string, unknown> = {
+        id: row.id,
+        referencia: String(row.referencia ?? "").trim(),
+        bultos: isReempaque
+          ? ""
+          : row.bultos === "" || row.bultos === undefined
+            ? ""
+            : row.bultos,
+      };
+      if (isReempaque) out.reempaque = true;
+      return out;
+    });
 }
 
 /** Solo campos del módulo detallado (sin `weight` del ingreso rápido). */

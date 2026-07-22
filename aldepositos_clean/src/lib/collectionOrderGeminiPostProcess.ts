@@ -1,5 +1,10 @@
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import { normalizeCollectionOrderLineFromImport } from "@/lib/collectionOrderUnitNormalization";
+import {
+  normalizeJeansDescripcion,
+  rejectTejidoInferredFromProduct,
+  sanitizeMagayaOptionalText,
+} from "@/lib/aldeGptTerraDocumentExtract";
 
 function parseLooseN(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -43,8 +48,8 @@ function geminiLineFromNormalized(
   row: CollectionGeminiLine,
   normalized: ReturnType<typeof normalizeCollectionOrderLineFromImport>,
 ): CollectionGeminiLine {
-  const descripcion = stripMeasuresFromDescripcion(
-    String(normalized.descripcion ?? ""),
+  const descripcion = normalizeJeansDescripcion(
+    stripMeasuresFromDescripcion(String(normalized.descripcion ?? "")),
   );
   return {
     referencia: normalized.referencia,
@@ -62,7 +67,14 @@ function geminiLineFromNormalized(
     unidad: String(normalized.unidad ?? "").trim(),
     modelo: String(normalized.magayaModelo ?? "").trim(),
     paisOrigen: String(normalized.paisOrigen ?? "").trim(),
-    tejido: String(normalized.tejido ?? "").trim(),
+    tejido: rejectTejidoInferredFromProduct(
+      sanitizeMagayaOptionalText(
+        String(normalized.tejido ?? "").trim(),
+        "tejido",
+      ),
+      descripcion,
+      String(normalized.composicion ?? "").trim(),
+    ),
     talla: String(normalized.talla ?? "").trim(),
     forro: String(normalized.forro ?? "").trim(),
     genero: String(normalized.genero ?? "").trim(),

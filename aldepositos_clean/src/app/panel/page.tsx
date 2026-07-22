@@ -9,6 +9,7 @@ import {
   insertTasks,
   updateTask,
   deleteTaskById,
+  fetchTaskById,
 } from "@/lib/supabase";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
 import { measureDataLooksEmpty, toListTask } from "@/lib/taskListSlim";
@@ -144,6 +145,12 @@ export default function PanelPage() {
   });
   const [deleteRaId, setDeleteRaId] = useState<string | null>(null);
   const [deleteRaBusy, setDeleteRaBusy] = useState(false);
+  /**
+   * Mantener Orden de recolección montado tras la 1ª visita para que
+   * AldeGpt Terra / Alde.IA sigan extrayendo al cambiar de módulo.
+   */
+  const [collectionOrdersKeptAlive, setCollectionOrdersKeptAlive] =
+    useState(false);
   /** URL pública guardada en `perfiles.avatar_url` (Supabase). */
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
 
@@ -372,13 +379,35 @@ export default function PanelPage() {
     updatedTask: Task,
     options?: { skipRemote?: boolean },
   ) => {
+    // Protección: no escribir payload slim (measureData []) sobre un RA con captura.
+    let toSave = updatedTask;
+    if (measureDataLooksEmpty(updatedTask.measureData)) {
+      try {
+        const full = await fetchTaskById(updatedTask.id);
+        if (full && !measureDataLooksEmpty(full.measureData)) {
+          toSave = { ...updatedTask, measureData: full.measureData };
+        }
+      } catch {
+        /* si falla la lectura, seguimos con lo recibido */
+      }
+    }
+
     // Actualización optimista: no se revierte ante un fallo puntual de red.
     setTasks((prev) =>
-      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)),
+      prev.map((t) => {
+        if (t.id !== toSave.id) return t;
+        if (
+          measureDataLooksEmpty(toSave.measureData) &&
+          !measureDataLooksEmpty(t.measureData)
+        ) {
+          return { ...toSave, measureData: t.measureData };
+        }
+        return toSave;
+      }),
     );
     if (options?.skipRemote) return;
     try {
-      await updateTask(updatedTask);
+      await updateTask(toSave);
     } catch (e) {
       // No recargamos (evita pisar lo capturado con datos viejos del servidor).
       // Propagamos el error para que el autoguardado programe un reintento.
@@ -522,6 +551,12 @@ export default function PanelPage() {
     }
   }, [currentView, userEmail, reloadTasks]);
 
+  useEffect(() => {
+    if (currentView === "collection-orders") {
+      setCollectionOrdersKeptAlive(true);
+    }
+  }, [currentView]);
+
   if (loading || !userEmail) {
     return null;
   }
@@ -581,13 +616,23 @@ export default function PanelPage() {
           />
         )}
 
-        {visibleView === "collection-orders" && (
-          <CollectionOrderModule
-            tasks={tasks}
-            onUpdateTask={handleUpdateTask}
-            userEmail={userEmail}
-            userDisplayName={userDisplayName}
-          />
+        {collectionOrdersKeptAlive && (
+          <div
+            className={
+              visibleView === "collection-orders"
+                ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
+                : "hidden"
+            }
+            aria-hidden={visibleView !== "collection-orders"}
+            inert={visibleView !== "collection-orders" ? true : undefined}
+          >
+            <CollectionOrderModule
+              tasks={tasks}
+              onUpdateTask={handleUpdateTask}
+              userEmail={userEmail}
+              userDisplayName={userDisplayName}
+            />
+          </div>
         )}
 
         {visibleView === "receptionist" && (

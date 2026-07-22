@@ -50,6 +50,39 @@ export function formatMeasure2(value: unknown): string {
   return roundUpMeasure(n).toFixed(MEASURE_DECIMALS);
 }
 
+/**
+ * Peso derivado de un total de factura: hasta 6 decimales, redondeo al más
+ * cercano (NO hacia arriba). Así bultos × peso/b recupera el total del documento
+ * (ej. 487.73 ÷ 12 → 40.644167 → ×12 = 487.73, no 487.80).
+ */
+export function formatWeightPrecise(value: unknown, maxDecimals = 6): string {
+  if (value === "" || value === undefined || value === null) return "";
+  const n = parseMeasureNumber(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const factor = 10 ** maxDecimals;
+  const rounded = Math.round(n * factor + Number.EPSILON) / factor;
+  // Quita ceros finales innecesarios pero conserva precisión útil.
+  return String(rounded);
+}
+
+/** Conserva el número tal cual vino del documento (coma→punto, sin re-redondear). */
+export function preserveDocumentNumber(raw: unknown): string {
+  const t = String(raw ?? "")
+    .trim()
+    .replace(/\s/g, "")
+    .replace(",", ".");
+  if (!t) return "";
+  const n = parseFloat(t);
+  if (!Number.isFinite(n) || n < 0) return "";
+  // Mantener la representación del doc (hasta 4 decimales típicos de factura).
+  if (/^\d+(\.\d+)?$/.test(t)) {
+    const [intPart, dec = ""] = t.split(".");
+    if (!dec) return intPart!;
+    return `${intPart}.${dec.slice(0, 4)}`;
+  }
+  return String(roundMeasureNearest(n, 4));
+}
+
 /** Mientras el usuario escribe: limita a N decimales sin redondear aún. */
 export function sanitizeMeasureTyping(
   raw: string,

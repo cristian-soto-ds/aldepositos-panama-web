@@ -45,7 +45,6 @@ import {
   SyncStatusBadge,
   type AutosaveState,
 } from "@/components/control-panel/SyncStatusBadge";
-import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import { extractReferenciasBultosFromFile } from "@/lib/quickAiExtract";
 import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
@@ -716,7 +715,9 @@ export function QuickInventoryEntry({
       }
       if (viewMode === "priority") {
         return (
-          t.status === "pending" &&
+          (t.status === "pending" ||
+            t.status === "in_progress" ||
+            t.status === "paused") &&
           (t.containerDraft === true || t.dispatched === true)
         );
       }
@@ -979,8 +980,6 @@ export function QuickInventoryEntry({
   );
 
   const {
-    remoteUpdatePending,
-    applyPendingRemoteUpdate,
     onLocalSaveCompleted,
   } = useInventoryRealtimeSync({
     tasks,
@@ -1087,6 +1086,33 @@ export function QuickInventoryEntry({
 
   const clients = useMemo(() => Object.keys(groupedTasks).sort(), [groupedTasks]);
   const totalModuleTasks = moduleTasks.length;
+
+  /** Conteos por pestaña (independientes del filtro de lista). */
+  const inventoryTabCounts = useMemo(() => {
+    let pending = 0;
+    let priority = 0;
+    let completed = 0;
+    for (const t of tasks) {
+      if (!isQuickInventoryTask(t)) continue;
+      if (t.status === "completed") {
+        completed += 1;
+        continue;
+      }
+      if (
+        t.status !== "pending" &&
+        t.status !== "in_progress" &&
+        t.status !== "paused"
+      ) {
+        continue;
+      }
+      if (t.containerDraft === true || t.dispatched === true) {
+        priority += 1;
+      } else {
+        pending += 1;
+      }
+    }
+    return { pending, priority, completed };
+  }, [tasks]);
 
   const providerOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1199,6 +1225,28 @@ export function QuickInventoryEntry({
       }
     },
     [viewMode, openEditModal],
+  );
+
+  const onToggleContainerPriority = useCallback(
+    async (task: Task) => {
+      const next = !(task.containerDraft === true);
+      try {
+        // La lista suele venir slim (sin measureData). Hay que leer el RA completo
+        // antes de guardar o se borra el inventario en Supabase.
+        const full = await fetchTaskById(task.id);
+        const base = full ?? task;
+        await Promise.resolve(
+          (onUpdateTask as (t: Task) => unknown)({
+            ...base,
+            containerDraft: next,
+            ...(next ? {} : { dispatched: false }),
+          }),
+        );
+      } catch (e) {
+        console.error("No se pudo cambiar prioridad contenedor:", e);
+      }
+    },
+    [onUpdateTask],
   );
 
   const calculateTotals = () => {
@@ -2798,13 +2846,24 @@ export function QuickInventoryEntry({
                   setViewMode("pending");
                   clearListFilters();
                 }}
-                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
+                className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "pending"
                     ? "bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 }`}
               >
                 Pendientes
+                {inventoryTabCounts.pending > 0 ? (
+                  <span
+                    className={`rounded-full px-1 py-px text-[9px] font-bold tabular-nums sm:px-1.5 sm:text-[10px] ${
+                      viewMode === "pending"
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                        : "bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                    }`}
+                  >
+                    {inventoryTabCounts.pending}
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -2812,14 +2871,32 @@ export function QuickInventoryEntry({
                   setViewMode("priority");
                   clearListFilters();
                 }}
-                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
+                className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "priority"
                     ? "bg-red-500 text-white shadow-sm"
-                    : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                    : inventoryTabCounts.priority > 0
+                      ? "bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-300 dark:ring-red-900/50"
+                      : "text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
                 }`}
+                title={
+                  inventoryTabCounts.priority > 0
+                    ? `${inventoryTabCounts.priority} inventario(s) en prioridad contenedor`
+                    : "Prioridad contenedor"
+                }
               >
                 <span className="sm:hidden">Prioridad</span>
                 <span className="hidden sm:inline">Prioridad contenedor</span>
+                {inventoryTabCounts.priority > 0 ? (
+                  <span
+                    className={`rounded-full px-1 py-px text-[9px] font-black tabular-nums sm:px-1.5 sm:text-[10px] ${
+                      viewMode === "priority"
+                        ? "bg-white text-red-600"
+                        : "bg-red-500 text-white"
+                    }`}
+                  >
+                    {inventoryTabCounts.priority}
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -2827,13 +2904,24 @@ export function QuickInventoryEntry({
                   setViewMode("completed");
                   clearListFilters();
                 }}
-                className={`rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
+                className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
                   viewMode === "completed"
                     ? "bg-white text-emerald-600 shadow-sm dark:bg-slate-900"
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 }`}
               >
                 Completados
+                {inventoryTabCounts.completed > 0 ? (
+                  <span
+                    className={`rounded-full px-1 py-px text-[9px] font-bold tabular-nums sm:px-1.5 sm:text-[10px] ${
+                      viewMode === "completed"
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        : "bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                    }`}
+                  >
+                    {inventoryTabCounts.completed}
+                  </span>
+                ) : null}
               </button>
             </div>
 
@@ -2932,6 +3020,7 @@ export function QuickInventoryEntry({
                         onSelect={onSelectRaCard}
                         onEdit={onEditRaCard}
                         onDelete={onDeleteTask}
+                        onToggleContainerPriority={onToggleContainerPriority}
                       />
                     </div>
                   ))}
@@ -3001,11 +3090,6 @@ export function QuickInventoryEntry({
   if (captureLayout === "reekon") {
     return (
       <>
-        {remoteUpdatePending ? (
-          <div className="fixed inset-x-0 top-0 z-[10001] p-2">
-            <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
-          </div>
-        ) : null}
         <input
           ref={aiFileRef}
           type="file"
@@ -3160,9 +3244,6 @@ export function QuickInventoryEntry({
     <>
     <div className="flex h-full min-h-0 w-full flex-1 flex-col animate-fade">
       <div className="mb-2 shrink-0 space-y-2 px-0.5 md:px-0">
-        {remoteUpdatePending ? (
-          <RemoteSyncBanner onApply={applyPendingRemoteUpdate} />
-        ) : null}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"

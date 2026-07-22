@@ -14,6 +14,7 @@ function order(
     marca?: string;
     linkedRaNumbers?: string[];
     receptionStatus?: CollectionOrder["receptionStatus"];
+    sinInventario?: boolean;
   } = {},
 ): CollectionOrder {
   return {
@@ -25,6 +26,7 @@ function order(
     status: "draft",
     linkedRaNumbers: opts.linkedRaNumbers ?? [],
     receptionStatus: opts.receptionStatus,
+    sinInventario: opts.sinInventario,
     createdAt: "",
     updatedAt: "",
   };
@@ -91,5 +93,17 @@ describe("pestaña de órdenes sin inventario", () => {
     expect(ordersForCollectionListTab(orders, "linkedRa").map((o) => o.id)).toEqual([
       "with-ra",
     ]);
+  });
+
+  it("respeta el flag manual sinInventario", () => {
+    const flagged = order("manual", "Cliente normal", {
+      receptionStatus: RECEPTION_STATUS.COMPLETADO,
+      sinInventario: true,
+    });
+    expect(isOrderWithoutInventory(flagged)).toBe(true);
+    expect(ordersForCollectionListTab([flagged], "noInventory").map((o) => o.id)).toEqual([
+      "manual",
+    ]);
+    expect(ordersForCollectionListTab([flagged], "warehouse")).toEqual([]);
   });
 });

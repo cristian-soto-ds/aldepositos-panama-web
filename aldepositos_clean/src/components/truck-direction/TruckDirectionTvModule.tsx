@@ -73,7 +73,8 @@ function TvAutoScrollQueueList({
     }
 
     return () => ro.disconnect();
-  }, [itemCount, children]);
+    // Solo re-medir cuando cambia la cantidad de ítems (no en cada tick del reloj).
+  }, [itemCount]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -392,6 +393,65 @@ type TruckDirectionTvModuleProps = {
   loading?: boolean;
 };
 
+/** Reloj aislado: no re-renderiza el tablero completo cada segundo (evita trabas en fullscreen). */
+function TvLiveClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    let timeoutId = 0;
+    let cancelled = false;
+
+    const schedule = () => {
+      // Alinear al siguiente segundo exacto (evita deriva y saltos de setInterval).
+      const delay = Math.max(16, 1000 - (Date.now() % 1000));
+      timeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        setNow(new Date());
+        schedule();
+      }, delay);
+    };
+
+    setNow(new Date());
+    schedule();
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible" && !cancelled) {
+        setNow(new Date());
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  const timeStr = now.toLocaleTimeString("es-PA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const dateStr = now.toLocaleDateString("es-PA", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+
+  return (
+    <div className="hidden text-right sm:block">
+      <p className="flex items-center justify-end gap-2 text-2xl font-black tabular-nums tracking-tight text-[#16263F] md:text-3xl">
+        <Clock3 className="h-6 w-6 shrink-0 text-amber-600" aria-hidden />
+        <span suppressHydrationWarning>{timeStr}</span>
+      </p>
+      <p className="mt-0.5 text-xs font-medium capitalize text-slate-500">
+        {dateStr}
+      </p>
+    </div>
+  );
+}
+
 export function TruckDirectionTvModule({
   onClose,
   trucks: trucksFromParent,
@@ -404,18 +464,12 @@ export function TruckDirectionTvModule({
   const loading = embedded ? (loadingFromParent ?? false) : internalQueue.loading;
   const { occupancy: rampOccupancy } = useRampOccupancy();
   const [fullscreen, setFullscreen] = useState(false);
-  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFs);
     onFs();
     return () => document.removeEventListener("fullscreenchange", onFs);
-  }, []);
-
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(t);
   }, []);
 
   const trucksByColumn = useMemo(() => {
@@ -461,17 +515,6 @@ export function TruckDirectionTvModule({
       ),
     [trucksByColumn],
   );
-
-  const timeStr = now.toLocaleTimeString("es-PA", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const dateStr = now.toLocaleDateString("es-PA", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
 
   const exitFullscreen = async () => {
     try {
@@ -526,13 +569,7 @@ export function TruckDirectionTvModule({
           </p>
         </div>
 
-        <div className="hidden text-right sm:block">
-          <p className="flex items-center justify-end gap-2 text-2xl font-black tabular-nums tracking-tight text-[#16263F] md:text-3xl">
-            <Clock3 className="h-6 w-6 text-amber-600" aria-hidden />
-            {timeStr}
-          </p>
-          <p className="mt-0.5 text-xs font-medium capitalize text-slate-500">{dateStr}</p>
-        </div>
+        <TvLiveClock />
 
         <div className="flex shrink-0 items-center gap-2">
           <button

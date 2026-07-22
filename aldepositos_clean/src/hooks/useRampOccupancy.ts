@@ -10,8 +10,9 @@ import {
   setRampOccupancy,
   subscribeRampOccupancy,
 } from "@/lib/receptionLogistics/rampOccupancyRepository";
+import { subscribeReceptionLive } from "@/lib/receptionLogistics/receptionLiveSync";
 
-const RAMP_OCCUPANCY_RELOAD_DEBOUNCE_MS = 400;
+const RAMP_OCCUPANCY_RELOAD_DEBOUNCE_MS = 900;
 
 export function useRampOccupancy(enabled = true) {
   const [occupancy, setOccupancy] = useState<RampOccupancyState | null>(null);
@@ -48,6 +49,11 @@ export function useRampOccupancy(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
 
+    const unsubLive = subscribeReceptionLive((change) => {
+      if (change.kind !== "ramp") return;
+      setOccupancy(change.occupancy);
+    });
+
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleReload = () => {
       if (debounceTimer != null) clearTimeout(debounceTimer);
@@ -60,6 +66,7 @@ export function useRampOccupancy(enabled = true) {
     const unsubscribe = subscribeRampOccupancy(scheduleReload);
     return () => {
       if (debounceTimer != null) clearTimeout(debounceTimer);
+      unsubLive();
       unsubscribe();
     };
   }, [enabled, reload]);

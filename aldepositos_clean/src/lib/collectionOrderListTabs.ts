@@ -23,6 +23,7 @@ function normalizePartyName(value: unknown): string {
 
 /** Clientes/proveedores/marcas que, por ahora, no pasan por el proceso de inventario. */
 export function isOrderWithoutInventory(order: CollectionOrder): boolean {
+  if (order.sinInventario === true) return true;
   return [order.cliente, order.proveedor, order.marca].some((value) =>
     NO_INVENTORY_PARTIES.has(normalizePartyName(value)),
   );

@@ -12,12 +12,13 @@ import {
   Save,
   Send,
   Trash2,
+  Recycle,
   CheckCircle2,
   AlertTriangle,
   ChevronRight,
+  CheckSquare,
 } from "lucide-react";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
-import { RemoteSyncBanner } from "@/components/control-panel/RemoteSyncBanner";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
@@ -42,12 +43,13 @@ import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOr
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import {
   countOrdersForCollectionListTab,
+  isOrderInWarehouse,
+  isOrderWithoutInventory,
   orderHasLinkedRa,
   ordersForCollectionListTab,
   type CollectionOrderListTab,
 } from "@/lib/collectionOrderListTabs";
 import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders";
-import { useEditingFocusRef } from "@/hooks/useInventoryRealtimeSync";
 import {
   getSharedWorkPresenceTabId,
 } from "@/lib/panelPresence";
@@ -79,6 +81,15 @@ import {
   CollectionOrderGeminiPanel,
   type CollectionOrderGeminiJobState,
 } from "@/components/control-panel/CollectionOrderGeminiPanel";
+import { GeneralChatGptPanel } from "@/components/control-panel/GeneralChatGptPanel";
+import { AldeGptTerraIcon } from "@/components/ui/AldeGptTerraBrand";
+import { ALDEGPT_TERRA_DISPLAY_NAME } from "@/lib/aldeGptTerraBrand";
+import {
+  aldeGptTerraLineToImportInput,
+  collectionLineDedupeKey,
+  ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
+  type AldeGptTerraLine,
+} from "@/lib/aldeGptTerraDocumentExtract";
 import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
@@ -223,8 +234,15 @@ function CollectionOrderAiAnalyzingStrip(props: {
   dense?: boolean;
   /** Una sola fila: barra flexible + texto (menos alto). */
   inlineRow?: boolean;
+  brand?: "gemini" | "terra";
 }) {
-  const { label, className, dense, inlineRow } = props;
+  const { label, className, dense, inlineRow, brand = "gemini" } = props;
+  const BrandIcon =
+    brand === "terra" ? (
+      <AldeGptTerraIcon size={14} className="shrink-0" />
+    ) : (
+      <GeminiSparkIcon size={14} className="shrink-0" />
+    );
   if (inlineRow) {
     return (
       <div
@@ -238,7 +256,7 @@ function CollectionOrderAiAnalyzingStrip(props: {
             <div className="collection-order-ai-progress-fill" />
           </div>
           <p className="flex shrink-0 items-center gap-1.5 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200">
-            <GeminiSparkIcon size={14} className="shrink-0" />
+            {BrandIcon}
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-slate-500" aria-hidden />
             <span className="max-w-[14rem] truncate sm:max-w-[20rem]">{label}</span>
           </p>
@@ -263,6 +281,7 @@ function CollectionOrderAiAnalyzingStrip(props: {
             : "mt-1.5 flex items-center gap-2 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200"
         }
       >
+        {BrandIcon}
         <Loader2
           className={dense ? "h-3 w-3 shrink-0 animate-spin" : "h-3.5 w-3.5 shrink-0 animate-spin"}
           aria-hidden
@@ -274,20 +293,31 @@ function CollectionOrderAiAnalyzingStrip(props: {
 }
 
 /** Una línea: barra corta + texto (lista de órdenes, poco espacio). */
-function CollectionOrderAiAnalyzingInline() {
+function CollectionOrderAiAnalyzingInline(props: {
+  brand?: "gemini" | "terra";
+}) {
+  const brand = props.brand ?? "gemini";
+  const title =
+    brand === "terra"
+      ? `${ALDEGPT_TERRA_DISPLAY_NAME} está analizando el documento`
+      : `${AI_ASSISTANT_DISPLAY_NAME} está analizando el documento`;
   return (
     <div
       className="inline-flex min-w-0 max-w-[11rem] shrink-0 flex-col gap-0.5 rounded-lg border border-slate-200 bg-white px-1.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-900 sm:max-w-[13rem]"
       role="status"
       aria-live="polite"
       aria-busy="true"
-      title={`${AI_ASSISTANT_DISPLAY_NAME} está analizando el documento`}
+      title={title}
     >
       <div className="relative h-1 w-full min-w-[4.5rem] overflow-hidden rounded-full bg-slate-200/90 dark:bg-slate-700/60">
         <div className="collection-order-ai-progress-fill" />
       </div>
       <span className="flex items-center gap-1 text-[8px] font-semibold leading-none tracking-wide text-slate-600 dark:text-slate-300">
-        <GeminiSparkIcon size={10} className="shrink-0" />
+        {brand === "terra" ? (
+          <AldeGptTerraIcon size={10} className="shrink-0" />
+        ) : (
+          <GeminiSparkIcon size={10} className="shrink-0" />
+        )}
         <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" aria-hidden />
         <span className="truncate">Analizando…</span>
       </span>
@@ -320,13 +350,50 @@ function mergePendingTotalsIntoLines(
   });
 }
 
+/**
+ * Filas para Descargar CSV / Magaya: aplica und captura pendientes y expone
+ * `unidadesTotales` (= piezas totales extraídas) para la columna Cantidad.
+ */
+function linesForInventarioExport(
+  lines: CollectionOrderLine[],
+  unitsMode: "per_bundle" | "total",
+  weightMode: "per_bundle" | "total",
+  pendingUnd: Record<string, string>,
+  pendingPeso: Record<string, string>,
+): Record<string, unknown>[] {
+  return mergePendingTotalsIntoLines(
+    lines,
+    unitsMode,
+    weightMode,
+    pendingUnd,
+    pendingPeso,
+  ).map((row) => {
+    let totPiezas = 0;
+    if (unitsMode === "total") {
+      const raw = pendingUnd[row.id];
+      if (raw !== undefined && String(raw).trim() !== "") {
+        totPiezas =
+          Math.round(parseFloat(sanitizeIntegerInput(raw)) || 0) || 0;
+      }
+    }
+    if (totPiezas <= 0) {
+      // Preferir tot de factura guardado (311) sobre bultos×und (48×6=288).
+      totPiezas = Math.round(unidadesTotalesFromLine(row)) || 0;
+    }
+    const base = row as unknown as Record<string, unknown>;
+    return totPiezas > 0 ? { ...base, unidadesTotales: totPiezas } : { ...base };
+  });
+}
+
 const emptyLine = (): CollectionOrderLine => ({
   id: generateId(),
   referencia: "",
   descripcion: "",
   bultos: "",
   unidadesPorBulto: "",
+  unidadesTotales: "",
   pesoPorBulto: "",
+  pesoTotalKg: "",
   pesoPiezaKg: "",
   l: "",
   w: "",
@@ -338,7 +405,36 @@ const emptyLine = (): CollectionOrderLine => ({
   forro: "",
   genero: "",
   composicion: "",
+  reempaque: false,
 });
+
+/** Fila placeholder sin datos (la OR arranca con una). */
+function isBlankCollectionOrderLine(line: CollectionOrderLine): boolean {
+  if (line.reempaque === true) return false;
+  const hasText = [
+    line.referencia,
+    line.descripcion,
+    line.unidadesPorBulto,
+    line.unidadesTotales,
+    line.pesoPorBulto,
+    line.pesoTotalKg,
+    line.pesoPiezaKg,
+    line.l,
+    line.w,
+    line.h,
+    line.magayaModelo,
+  ].some((v) => String(v ?? "").trim().length > 0);
+  if (hasText) return false;
+  const bultos = parseFloat(String(line.bultos ?? "").replace(",", ".")) || 0;
+  return bultos <= 0;
+}
+
+/** Solo líneas con dato útil (sin placeholders vacíos al final). */
+function withoutBlankCollectionLines(
+  lines: CollectionOrderLine[],
+): CollectionOrderLine[] {
+  return lines.filter((l) => !isBlankCollectionOrderLine(l));
+}
 
 function newDraftOrder(): CollectionOrder {
   const now = new Date().toISOString();
@@ -348,7 +444,7 @@ function newDraftOrder(): CollectionOrder {
     cliente: "",
     proveedor: "",
     notes: "",
-    lines: [emptyLine()],
+    lines: [],
     status: "draft",
     linkedRaNumbers: [],
     createdAt: now,
@@ -417,6 +513,17 @@ export function CollectionOrderModule({
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [geminiOpen, setGeminiOpen] = useState(false);
+  const [chatGptOpen, setChatGptOpen] = useState(false);
+  const [terraJobByOrderId, setTerraJobByOrderId] = useState<
+    Record<
+      string,
+      {
+        busy: boolean;
+        pendingFileName: string | null;
+        progress: { current: number; total: number } | null;
+      }
+    >
+  >({});
   const [geminiJobByOrderId, setGeminiJobByOrderId] = useState<
     Record<string, CollectionOrderGeminiJobState>
   >({});
@@ -443,6 +550,8 @@ export function CollectionOrderModule({
   const [expectedCbmDraft, setExpectedCbmDraft] = useState<string | null>(null);
   /** Selección múltiple en la lista de órdenes (eliminar en lote). */
   const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
+  /** Los checkboxes solo aparecen tras pulsar «Seleccionar». */
+  const [listSelectMode, setListSelectMode] = useState(false);
   const [listTab, setListTab] = useState<CollectionOrderListTab>("general");
   const [deleteConfirm, setDeleteConfirm] = useState<CollectionOrderDeleteConfirm | null>(
     null,
@@ -453,6 +562,7 @@ export function CollectionOrderModule({
   const catalogDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const catalogSeqRef = useRef<Record<string, number>>({});
   const editingRef = useRef<CollectionOrder | null>(null);
+  const ordersRef = useRef<CollectionOrder[]>([]);
   const isOrderSavingRef = useRef(false);
   const saveGenerationRef = useRef(0);
   const lastSavedOrderHashRef = useRef("");
@@ -461,123 +571,90 @@ export function CollectionOrderModule({
   const lastLivePublishedHashRef = useRef("");
   /** Último snapshot persistido (baseline para merge a 3 vías). */
   const serverBaselineLinesRef = useRef<CollectionOrderLine[]>([]);
+  /** Remoto encolado solo mientras hay un save en curso. */
   const pendingRemoteOrderRef = useRef<CollectionOrder | null>(null);
   const prevEditingIdRef = useRef<string | null>(null);
-  const [remoteOrderUpdatePending, setRemoteOrderUpdatePending] = useState(false);
-  const isEditingRef = useEditingFocusRef();
 
   editingRef.current = editing;
+  ordersRef.current = orders;
 
-  const applyMergedRemote = useCallback(
-    (remote: CollectionOrder, fromLive: boolean) => {
-      const current = editingRef.current;
-      if (!current || current.id !== remote.id) return;
+  const applyMergedRemote = useCallback((remote: CollectionOrder, fromLive: boolean) => {
+    const current = editingRef.current;
+    if (!current || current.id !== remote.id) return;
 
-      const remoteLines = Array.isArray(remote.lines) ? remote.lines : [];
-      const localLines = current.lines;
-      const localHash = JSON.stringify(current);
-      const isDirty = localHash !== lastSavedOrderHashRef.current;
-      const remoteLinesHash = JSON.stringify(remoteLines);
+    const remoteLines = Array.isArray(remote.lines) ? remote.lines : [];
+    const localLines = current.lines;
+    const localHash = JSON.stringify(current);
+    const isDirty = localHash !== lastSavedOrderHashRef.current;
+    const remoteLinesHash = JSON.stringify(remoteLines);
 
-      // Mientras escribe: no reescribir el editor (congela el cursor / “se vuelve loco”).
-      // Se aplica al salir del campo o al guardar.
-      if (isEditingRef.current) {
-        pendingRemoteOrderRef.current = {
-          ...current,
-          ...(!isDirty ? remote : {}),
-          lines: remoteLines,
-          id: current.id,
-        };
-        lastRemoteOrderHashRef.current = remoteLinesHash;
-        setRemoteOrderUpdatePending(true);
-        return;
-      }
+    // Siempre fusionar en vivo (sin banner ni clic): merge a 3 vías conserva
+    // lo que cada operador está tipando y aplica filas/campos del otro.
+    const mergedLines = mergeConcurrentCollectionLines(
+      serverBaselineLinesRef.current,
+      localLines,
+      remoteLines,
+    );
+    const mergedLinesHash = JSON.stringify(mergedLines);
+    const localLinesHash = JSON.stringify(localLines);
 
-      const mergedLines = mergeConcurrentCollectionLines(
-        serverBaselineLinesRef.current,
-        localLines,
-        remoteLines,
-      );
-      const mergedLinesHash = JSON.stringify(mergedLines);
-      const localLinesHash = JSON.stringify(localLines);
-
-      // Sin cambios de filas y sucio: no tocar React state.
-      if (mergedLinesHash === localLinesHash && isDirty) {
-        lastRemoteOrderHashRef.current = remoteLinesHash;
-        pendingRemoteOrderRef.current = null;
-        setRemoteOrderUpdatePending(false);
-        return;
-      }
-
-      // No pasar por normalizeCollectionOrderFields aquí: reformatea medidas y
-      // dispara setEditing en bucle (UI trabada al tipear).
-      const next: CollectionOrder = {
-        ...current,
-        ...(isDirty
-          ? {}
-          : {
-              cliente: remote.cliente,
-              proveedor: remote.proveedor,
-              marca: remote.marca,
-              expedidor: remote.expedidor,
-              notes: remote.notes,
-              expectedBultos: remote.expectedBultos,
-              expectedPesoKg: remote.expectedPesoKg,
-              expectedCbm: remote.expectedCbm,
-              numero: remote.numero,
-              status: remote.status,
-              receptionStatus: remote.receptionStatus,
-              linkedRaNumbers: remote.linkedRaNumbers,
-              updatedAt: remote.updatedAt,
-            }),
-        lines: mergedLines,
-        id: current.id,
-      };
-
-      const nextHash = JSON.stringify(next);
-      if (nextHash === localHash) {
-        lastRemoteOrderHashRef.current = remoteLinesHash;
-        if (!fromLive && !isDirty) {
-          serverBaselineLinesRef.current = JSON.parse(
-            JSON.stringify(remoteLines),
-          ) as CollectionOrderLine[];
-          lastSavedOrderHashRef.current = JSON.stringify(remote);
-        }
-        pendingRemoteOrderRef.current = null;
-        setRemoteOrderUpdatePending(false);
-        return;
-      }
-
-      setEditing(next);
-      editingRef.current = next;
+    // Sin cambios de filas y sucio: no tocar React state.
+    if (mergedLinesHash === localLinesHash && isDirty) {
       lastRemoteOrderHashRef.current = remoteLinesHash;
-      lastLivePublishedHashRef.current = mergedLinesHash;
+      pendingRemoteOrderRef.current = null;
+      return;
+    }
+
+    // No pasar por normalizeCollectionOrderFields aquí: reformatea medidas y
+    // dispara setEditing en bucle (UI trabada al tipear).
+    const next: CollectionOrder = {
+      ...current,
+      ...(isDirty
+        ? {}
+        : {
+            cliente: remote.cliente,
+            proveedor: remote.proveedor,
+            marca: remote.marca,
+            expedidor: remote.expedidor,
+            notes: remote.notes,
+            expectedBultos: remote.expectedBultos,
+            expectedPesoKg: remote.expectedPesoKg,
+            expectedCbm: remote.expectedCbm,
+            numero: remote.numero,
+            status: remote.status,
+            receptionStatus: remote.receptionStatus,
+            linkedRaNumbers: remote.linkedRaNumbers,
+            updatedAt: remote.updatedAt,
+          }),
+      lines: mergedLines,
+      id: current.id,
+    };
+
+    const nextHash = JSON.stringify(next);
+    if (nextHash === localHash) {
+      lastRemoteOrderHashRef.current = remoteLinesHash;
       if (!fromLive && !isDirty) {
         serverBaselineLinesRef.current = JSON.parse(
           JSON.stringify(remoteLines),
         ) as CollectionOrderLine[];
-        lastSavedOrderHashRef.current = nextHash;
+        lastSavedOrderHashRef.current = JSON.stringify(remote);
       }
       pendingRemoteOrderRef.current = null;
-      setRemoteOrderUpdatePending(false);
-    },
-    [isEditingRef],
-  );
+      return;
+    }
 
-  // Al salir de un input, aplicar el remoto pendiente (filas de otro usuario).
-  useEffect(() => {
-    const flushPending = () => {
-      window.setTimeout(() => {
-        if (isEditingRef.current) return;
-        const pending = pendingRemoteOrderRef.current;
-        if (!pending || !editingRef.current) return;
-        if (pending.id !== editingRef.current.id) return;
-        applyMergedRemote(pending, true);
-      }, 80);
-    };
-    document.addEventListener("focusout", flushPending);
-    return () => document.removeEventListener("focusout", flushPending);
-  }, [applyMergedRemote, isEditingRef]);
+    setEditing(next);
+    editingRef.current = next;
+    lastRemoteOrderHashRef.current = remoteLinesHash;
+    lastLivePublishedHashRef.current = mergedLinesHash;
+    if (!fromLive && !isDirty) {
+      serverBaselineLinesRef.current = JSON.parse(
+        JSON.stringify(remoteLines),
+      ) as CollectionOrderLine[];
+      lastSavedOrderHashRef.current = nextHash;
+    }
+    pendingRemoteOrderRef.current = null;
+  }, []);
 
   useEffect(() => {
     const id = editing?.id ?? null;
@@ -591,7 +668,6 @@ export function CollectionOrderModule({
       ? (JSON.parse(JSON.stringify(remote.lines)) as CollectionOrderLine[])
       : [];
     pendingRemoteOrderRef.current = null;
-    setRemoteOrderUpdatePending(false);
   }, [editing?.id, orders]);
 
   useEffect(() => {
@@ -603,18 +679,6 @@ export function CollectionOrderModule({
 
     if (isOrderSavingRef.current) {
       pendingRemoteOrderRef.current = remote;
-      return;
-    }
-
-    const current = editingRef.current;
-    if (!current) return;
-    const localHash = JSON.stringify(current);
-    const isDirty = localHash !== lastSavedOrderHashRef.current;
-
-    // Sucio: fusionar en silencio (no reemplazar). Así «Agregar línea» no pierde filas
-    // aunque el foco esté en el botón (isEditing=false).
-    if (isDirty) {
-      applyMergedRemote(remote, false);
       return;
     }
 
@@ -659,12 +723,6 @@ export function CollectionOrderModule({
     });
   }, [editing?.id, userEmail, applyMergedRemote]);
 
-  const applyPendingRemoteOrder = useCallback(() => {
-    const remote = pendingRemoteOrderRef.current;
-    if (!remote) return;
-    applyMergedRemote(remote, true);
-  }, [applyMergedRemote]);
-
   useEffect(() => {
     const d = catalogDebounceRef;
     return () => {
@@ -690,6 +748,7 @@ export function CollectionOrderModule({
     setExpectedPesoDraft(null);
     setExpectedCbmDraft(null);
     setSelectedOrderIds({});
+    setListSelectMode(false);
   };
 
   const openEdit = (o: CollectionOrder) => {
@@ -705,7 +764,7 @@ export function CollectionOrderModule({
     setUndBultoDraft({});
     setExpectedPesoDraft(null);
     setExpectedCbmDraft(null);
-    setSelectedOrderIds({});
+    // No borrar la selección: si vuelves a la lista con «Lista», se conserva.
   };
 
   const backToList = () => {
@@ -717,8 +776,12 @@ export function CollectionOrderModule({
     setUndBultoDraft({});
     setExpectedPesoDraft(null);
     setExpectedCbmDraft(null);
-    setSelectedOrderIds({});
     void reloadOrders();
+  };
+
+  const exitListSelectMode = () => {
+    setListSelectMode(false);
+    setSelectedOrderIds({});
   };
 
   const getGeminiJob = (orderId: string): CollectionOrderGeminiJobState => {
@@ -751,6 +814,47 @@ export function CollectionOrderModule({
     });
   };
 
+  /** Marca/desmarca reempaque: limpia bultos, peso y medidas (igual que en RA). */
+  const toggleLineReempaque = (lineId: string) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lines: prev.lines.map((row) => {
+          if (row.id !== lineId) return row;
+          const nextFlag = !row.reempaque;
+          if (nextFlag) {
+            return {
+              ...row,
+              reempaque: true,
+              bultos: "",
+              unidadesPorBulto: "",
+              pesoPorBulto: "",
+              pesoPiezaKg: "",
+              l: "",
+              w: "",
+              h: "",
+              volumenM3: "",
+            };
+          }
+          return { ...row, reempaque: false };
+        }),
+      };
+    });
+    setPendingUndTot((p) => {
+      if (!(lineId in p)) return p;
+      const next = { ...p };
+      delete next[lineId];
+      return next;
+    });
+    setPendingPesoTot((p) => {
+      if (!(lineId in p)) return p;
+      const next = { ...p };
+      delete next[lineId];
+      return next;
+    });
+  };
+
   const runCatalogLookup = useCallback(async (rowId: string, rawReferencia: string) => {
     const key = normalizePartNumber(rawReferencia);
     if (!key) {
@@ -780,7 +884,28 @@ export function CollectionOrderModule({
       if (!prev) return prev;
       return {
         ...prev,
-        lines: prev.lines.map((r) => (r.id === rowId ? { ...r, ...patch } : r)),
+        lines: prev.lines.map((r) => {
+          if (r.id !== rowId) return r;
+          // No pisar cantidades/peso ya puestos por Terra / Alde.IA / el usuario.
+          const next = { ...r };
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === undefined || value === null || value === "") continue;
+            const cur = String(
+              (r as Record<string, unknown>)[key] ?? "",
+            ).trim();
+            const preserveQty = [
+              "unidadesPorBulto",
+              "bultos",
+              "pesoPorBulto",
+              "pesoPiezaKg",
+              "descripcion",
+            ].includes(key);
+            if (preserveQty && cur) continue;
+            (next as Record<string, unknown>)[key] = value;
+          }
+          if (patch.referencia) next.referencia = patch.referencia;
+          return next;
+        }),
       };
     });
   }, []);
@@ -818,7 +943,7 @@ export function CollectionOrderModule({
       const filtered = prev.lines.filter((r) => r.id !== lineId);
       const next = {
         ...prev,
-        lines: filtered.length > 0 ? filtered : [emptyLine()],
+        lines: withoutBlankCollectionLines(filtered),
       };
       editingRef.current = next;
       return next;
@@ -985,6 +1110,62 @@ export function CollectionOrderModule({
       return;
     }
     setDeleteConfirm({ kind: "bulk", orders: selected });
+  };
+
+  /** Pasa OR de bodega → Sin inventario (marcadas a mano; ya no piden RA). */
+  const markOrdersSinInventario = async (targets: CollectionOrder[]) => {
+    const eligible = targets.filter(
+      (o) =>
+        isOrderInWarehouse(o) &&
+        !orderHasLinkedRa(o) &&
+        !isOrderWithoutInventory(o),
+    );
+    if (eligible.length === 0) {
+      alert(
+        "Seleccioná órdenes en bodega (sin RA) que aún no estén en Sin inventario.",
+      );
+      return;
+    }
+    const ok = window.confirm(
+      eligible.length === 1
+        ? `¿Pasar la orden #${eligible[0]!.numero ?? eligible[0]!.id.slice(0, 8)} a Sin inventario?\n\nÚsala cuando ya se procesó fuera del flujo de RA / inventario.`
+        : `¿Pasar ${eligible.length} órdenes a Sin inventario?\n\nÚsalo cuando ya se procesaron fuera del flujo de RA / inventario.`,
+    );
+    if (!ok) return;
+
+    let failed = 0;
+    const updatedIds: string[] = [];
+    for (const o of eligible) {
+      const next: CollectionOrder = {
+        ...o,
+        sinInventario: true,
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        await updateCollectionOrder(next);
+        updatedIds.push(o.id);
+        setOrders((prev) => upsertCollectionOrderInList(prev, next));
+      } catch (e) {
+        console.error(e);
+        failed += 1;
+      }
+    }
+    setSelectedOrderIds((prev) => {
+      const next = { ...prev };
+      for (const id of updatedIds) delete next[id];
+      return next;
+    });
+    if (failed > 0) {
+      alert(
+        `${failed} orden(es) no se pudieron actualizar. Revisá la conexión y reintentá.`,
+      );
+      void reloadOrders();
+    }
+  };
+
+  const moveSelectedToNoInventory = () => {
+    const selected = orders.filter((o) => selectedOrderIds[o.id] === true);
+    void markOrdersSinInventario(selected);
   };
 
   const confirmDeleteOrders = async () => {
@@ -1196,7 +1377,13 @@ export function CollectionOrderModule({
         .then(({ rows: enriched, catalogMatched }) => {
           setEditing((prev) =>
             prev
-              ? { ...prev, lines: [...prev.lines, ...enriched] }
+              ? {
+                  ...prev,
+                  lines: withoutBlankCollectionLines([
+                    ...prev.lines,
+                    ...enriched,
+                  ]),
+                }
               : prev,
           );
            
@@ -1374,14 +1561,393 @@ export function CollectionOrderModule({
     }
   };
 
+  const getTerraJob = (oid: string) =>
+    terraJobByOrderId[oid] ?? {
+      busy: false,
+      pendingFileName: null,
+      progress: null,
+    };
+
+  const patchTerraJob = (
+    oid: string,
+    patch: Partial<{
+      busy: boolean;
+      pendingFileName: string | null;
+      progress: { current: number; total: number } | null;
+    }>,
+  ) => {
+    setTerraJobByOrderId((prev) => {
+      const cur = prev[oid] ?? {
+        busy: false,
+        pendingFileName: null,
+        progress: null,
+      };
+      return { ...prev, [oid]: { ...cur, ...patch } };
+    });
+  };
+
+  /**
+   * Aplica líneas Terra a una OR concreta (sigue funcionando si saliste a la lista
+   * u abriste otra orden, como Alde.IA).
+   */
+  const applyTerraLinesForOrderId = useCallback(
+    (targetOrderId: string, incoming: AldeGptTerraLine[]) => {
+      const useful = incoming.filter((row) => {
+        const ref = String(row.referencia ?? "").trim();
+        const desc = String(row.descripcion ?? "").trim();
+        if (ref || desc) return true;
+        if (row.reempaque === true) return true;
+        const b =
+          parseFloat(String(row.bultos ?? "").replace(",", ".")) || 0;
+        const und =
+          parseFloat(String(row.unidadesPorBulto ?? "").replace(",", ".")) || 0;
+        const tot =
+          parseFloat(String(row.unidadesTotales ?? "").replace(",", ".")) || 0;
+        const pb =
+          parseFloat(String(row.pesoPorBulto ?? "").replace(",", ".")) || 0;
+        const pt =
+          parseFloat(String(row.pesoTotalKg ?? "").replace(",", ".")) || 0;
+        return b > 0 || und > 0 || tot > 0 || pb > 0 || pt > 0;
+      });
+      if (useful.length === 0) return;
+
+      const editingNow = editingRef.current;
+      const baseOrder =
+        (editingNow && editingNow.id === targetOrderId
+          ? editingNow
+          : ordersRef.current.find((o) => o.id === targetOrderId)) ?? null;
+      if (!baseOrder) return;
+
+      const mergedLines = (baseOrder.lines || []).filter(
+        (l) => !isBlankCollectionOrderLine(l),
+      );
+      const lineIndex = new Map<string, number>();
+      mergedLines.forEach((row, i) => {
+        const key = collectionLineDedupeKey(row.referencia, row.descripcion);
+        if (key) lineIndex.set(key, i);
+      });
+
+      const undTotPatch: Record<string, string> = {};
+      const pesoTotPatch: Record<string, string> = {};
+      let hasTotUnd = false;
+      let hasTotPeso = false;
+
+      for (const row of useful) {
+        const mapped = aldeGptTerraLineToImportInput(row);
+        const bultosNum = Math.max(
+          0,
+          Math.round(
+            parseFloat(String(mapped.bultos ?? "").replace(",", ".")) || 0,
+          ),
+        );
+        const pesoNum = Math.max(
+          parseFloat(String(mapped.pesoPorBulto ?? "").replace(",", ".")) || 0,
+          parseFloat(String(mapped.pesoTotalKg ?? "").replace(",", ".")) || 0,
+        );
+        const isReempaque =
+          mapped.reempaque === true && bultosNum <= 0 && pesoNum <= 0;
+
+        const imported = normalizeCollectionOrderLineFromImport({
+          referencia: mapped.referencia,
+          descripcion: mapped.descripcion,
+          bultos: isReempaque
+            ? "0"
+            : mapped.bultos || (bultosNum > 0 ? String(bultosNum) : ""),
+          unidadesPorBulto: mapped.unidadesPorBulto,
+          unidadesTotales: mapped.unidadesTotales,
+          pesoPorBulto: isReempaque ? "" : mapped.pesoPorBulto,
+          pesoTotalKg: isReempaque ? "" : mapped.pesoTotalKg,
+          modelo: mapped.modelo,
+          paisOrigen: mapped.paisOrigen,
+          tejido: mapped.tejido,
+          talla: mapped.talla,
+          genero: mapped.genero,
+          composicion: mapped.composicion,
+        });
+
+        const undFromTerra = Math.round(
+          parseFloat(String(mapped.unidadesPorBulto ?? "").replace(",", ".")) ||
+            0,
+        );
+        const totFromTerra = Math.round(
+          parseFloat(String(mapped.unidadesTotales ?? "").replace(",", ".")) ||
+            0,
+        );
+        const pesoTotFromTerra = String(mapped.pesoTotalKg ?? "").trim();
+
+        if (undFromTerra > 0) {
+          imported.unidadesPorBulto = String(undFromTerra);
+        } else if (totFromTerra > 0 && isReempaque) {
+          imported.unidadesPorBulto = String(totFromTerra);
+        } else if (
+          totFromTerra > 0 &&
+          bultosNum > 0 &&
+          totFromTerra % bultosNum === 0
+        ) {
+          imported.unidadesPorBulto = String(totFromTerra / bultosNum);
+        } else if (totFromTerra > 0 && bultosNum > 0) {
+          // Tot ÷ bultos no entero → und=48 decorativo; tot de factura se guarda.
+          imported.unidadesPorBulto = "48";
+        }
+
+        if (totFromTerra > 0) {
+          imported.unidadesTotales = String(totFromTerra);
+        }
+
+        if (!isReempaque && pesoTotFromTerra) {
+          const withPeso = applyPesoTotalToLine(
+            { id: "", ...imported },
+            pesoTotFromTerra,
+          );
+          imported.pesoPorBulto = withPeso.pesoPorBulto;
+          imported.pesoTotalKg = withPeso.pesoTotalKg;
+        }
+
+        if (isReempaque) {
+          imported.reempaque = true;
+          imported.bultos = "0";
+          imported.pesoPorBulto = "";
+          imported.pesoTotalKg = "";
+          imported.pesoPiezaKg = "";
+        } else {
+          imported.reempaque = false;
+          if (bultosNum > 0) imported.bultos = String(bultosNum);
+        }
+
+        const normalized: CollectionOrderLine = {
+          id: generateId(),
+          ...imported,
+        };
+        const referencia = imported.referencia;
+        const key = collectionLineDedupeKey(
+          imported.referencia,
+          imported.descripcion,
+        );
+        let targetId = normalized.id;
+
+        if (key && lineIndex.has(key)) {
+          const idx = lineIndex.get(key)!;
+          const existingId = mergedLines[idx]!.id;
+          targetId = existingId;
+          mergedLines[idx] = {
+            ...mergedLines[idx],
+            ...normalized,
+            id: existingId,
+            reempaque: isReempaque,
+            unidadesTotales:
+              totFromTerra > 0
+                ? String(totFromTerra)
+                : mergedLines[idx]!.unidadesTotales,
+            pesoTotalKg: !isReempaque && pesoTotFromTerra
+              ? String(imported.pesoTotalKg ?? pesoTotFromTerra)
+              : mergedLines[idx]!.pesoTotalKg,
+          };
+          void runCatalogLookup(existingId, referencia);
+        } else {
+          mergedLines.push(normalized);
+          if (key) lineIndex.set(key, mergedLines.length - 1);
+          void runCatalogLookup(normalized.id, referencia);
+        }
+
+        const totUnd =
+          totFromTerra > 0
+            ? String(totFromTerra)
+            : undFromTerra > 0 && bultosNum > 0
+              ? String(undFromTerra * bultosNum)
+              : "";
+        if (totUnd) {
+          undTotPatch[targetId] = totUnd;
+          hasTotUnd = true;
+        }
+        if (pesoTotFromTerra && !isReempaque) {
+          pesoTotPatch[targetId] = pesoTotFromTerra;
+          hasTotPeso = true;
+        }
+      }
+
+      const cleanedLines = withoutBlankCollectionLines(mergedLines);
+      const nextOrder: CollectionOrder = {
+        ...baseOrder,
+        lines: cleanedLines.length > 0 ? cleanedLines : [],
+      };
+      setEditing((prev) =>
+        prev && prev.id === targetOrderId ? nextOrder : prev,
+      );
+      setOrders((prev) => upsertCollectionOrderInList(prev, nextOrder));
+      if (editingRef.current?.id === targetOrderId) {
+        if (hasTotUnd) {
+          setUnitsMode("total");
+          setPendingUndTot((prev) => ({ ...prev, ...undTotPatch }));
+        }
+        if (hasTotPeso) {
+          setWeightMode("total");
+          setPendingPesoTot((prev) => ({ ...prev, ...pesoTotPatch }));
+        }
+      }
+      void persistOrder({ order: nextOrder, showAlerts: false });
+    },
+    [persistOrder, runCatalogLookup],
+  );
+
+  /** Extracción documental Terra ligada a una OR (sobrevive al salir de la orden). */
+  const runTerraDocumentExtract = useCallback(
+    async (args: {
+      targetOrderId: string;
+      text: string;
+      files: File[];
+      extractMode: "full" | "refsBultosOnly";
+    }): Promise<{ reply: string; lines: AldeGptTerraLine[] }> => {
+      const { targetOrderId, text, files, extractMode } = args;
+      const fileNames = files.map((f) => f.name);
+      patchTerraJob(targetOrderId, {
+        busy: true,
+        pendingFileName: fileNames[0] ?? null,
+        progress: { current: 1, total: Math.max(1, files.length) },
+      });
+
+      const normalizeUploadFilename = (name: string) => {
+        const base = (name || "documento").slice(0, 180);
+        const lastDot = base.lastIndexOf(".");
+        if (lastDot <= 0 || lastDot === base.length - 1) return base;
+        return `${base.slice(0, lastDot)}${base.slice(lastDot).toLowerCase()}`;
+      };
+
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) {
+          throw Object.assign(
+            new Error("Sesión expirada. Vuelve a iniciar sesión."),
+            { code: 401 },
+          );
+        }
+
+        const requestOne = async (
+          message: string,
+          file: File | null,
+        ): Promise<{ reply: string; lines: AldeGptTerraLine[] }> => {
+          let res: Response;
+          if (file) {
+            const fd = new FormData();
+            fd.append("message", message);
+            fd.append("history", JSON.stringify([]));
+            fd.append("extractMode", extractMode);
+            fd.append(
+              "file",
+              file,
+              normalizeUploadFilename(file.name || "documento"),
+            );
+            res = await fetch("/api/chat", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: fd,
+            });
+          } else {
+            res = await fetch("/api/chat", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                message,
+                history: [],
+                extractMode,
+              }),
+            });
+          }
+          let data: {
+            error?: string;
+            reply?: string;
+            lines?: AldeGptTerraLine[];
+          } = {};
+          try {
+            data = (await res.json()) as typeof data;
+          } catch {
+            throw Object.assign(
+              new Error(
+                res.status === 504
+                  ? "Se agotó el tiempo de espera. Reintenta en unos segundos."
+                  : `Error ${res.status}. Reintenta en unos segundos.`,
+              ),
+              { code: res.status },
+            );
+          }
+          if (!res.ok) {
+            throw Object.assign(new Error(data.error || `Error ${res.status}`), {
+              code: res.status,
+            });
+          }
+          return {
+            reply: String(data.reply ?? "").trim(),
+            lines: Array.isArray(data.lines) ? data.lines : [],
+          };
+        };
+
+        let extracted: AldeGptTerraLine[] = [];
+        const parts: string[] = [];
+
+        if (files.length === 0) {
+          const one = await requestOne(text, null);
+          extracted = one.lines;
+          parts.push(one.reply);
+        } else {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i]!;
+            patchTerraJob(targetOrderId, {
+              busy: true,
+              pendingFileName: file.name,
+              progress: { current: i + 1, total: files.length },
+            });
+            const basePrompt =
+              extractMode === "refsBultosOnly"
+                ? ALDEGPT_TERRA_REFS_BULTOS_PROMPT
+                : text ||
+                  `Extrae las líneas del documento adjunto (${file.name}) según las reglas de recolección.`;
+            const orderedPrompt =
+              files.length === 1
+                ? `${basePrompt}\n\nResponde en JSON.`
+                : `${basePrompt}\n\nDocumento ${i + 1} de ${files.length} (respeta este orden). Responde en JSON.`;
+            const one = await requestOne(orderedPrompt, file);
+            extracted = extracted.concat(one.lines);
+            if (one.reply) parts.push(`(${file.name}) ${one.reply}`);
+          }
+        }
+
+        applyTerraLinesForOrderId(targetOrderId, extracted);
+        const reply =
+          parts.filter(Boolean).join("\n\n") ||
+          (extracted.length > 0
+            ? `Se extrajeron ${extracted.length} fila(s) del documento.`
+            : "");
+        patchTerraJob(targetOrderId, {
+          busy: false,
+          pendingFileName: null,
+          progress: null,
+        });
+        return { reply, lines: extracted };
+      } catch (err) {
+        patchTerraJob(targetOrderId, {
+          busy: false,
+          pendingFileName: null,
+          progress: null,
+        });
+        throw err;
+      }
+    },
+    [applyTerraLinesForOrderId],
+  );
+
   /* ——— Lista ——— */
   if (!editing) {
-    const listSelectedCount = orders.filter((o) => selectedOrderIds[o.id] === true).length;
     const generalCount = countOrdersForCollectionListTab(orders, "general");
     const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
     const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
     const noInventoryCount = countOrdersForCollectionListTab(orders, "noInventory");
     const displayedListOrders = ordersForCollectionListTab(orders, listTab);
+    const listSelectedCount = displayedListOrders.filter(
+      (o) => selectedOrderIds[o.id] === true,
+    ).length;
     const listDominantCliente = (() => {
       const freq = new Map<string, number>();
       for (const o of orders) {
@@ -1399,14 +1965,29 @@ export function CollectionOrderModule({
       return best;
     })();
     const toggleListSelectAll = () => {
-      if (orders.length === 0) return;
-      if (listSelectedCount === orders.length) {
-        setSelectedOrderIds({});
+      if (displayedListOrders.length === 0) return;
+      const allVisibleSelected = displayedListOrders.every(
+        (o) => selectedOrderIds[o.id] === true,
+      );
+      if (allVisibleSelected) {
+        setSelectedOrderIds((prev) => {
+          const next = { ...prev };
+          for (const o of displayedListOrders) delete next[o.id];
+          return next;
+        });
         return;
       }
-      const next: Record<string, boolean> = {};
-      for (const o of orders) next[o.id] = true;
-      setSelectedOrderIds(next);
+      setSelectedOrderIds((prev) => {
+        const next = { ...prev };
+        for (const o of displayedListOrders) next[o.id] = true;
+        return next;
+      });
+    };
+    const toggleOrderSelected = (orderId: string) => {
+      setSelectedOrderIds((prev) => ({
+        ...prev,
+        [orderId]: !prev[orderId],
+      }));
     };
 
     const deleteModalSingle =
@@ -1484,54 +2065,94 @@ export function CollectionOrderModule({
         ) : (
           <>
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-600 dark:bg-slate-900">
-              <button
-                type="button"
-                onClick={toggleListSelectAll}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                {listSelectedCount === orders.length ? "Quitar selección" : "Seleccionar todo"}
-              </button>
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                Seleccionadas: {listSelectedCount}
-              </span>
-              <button
-                type="button"
-                disabled={listSelectedCount === 0}
-                onClick={() => void downloadSelectedListMagaya()}
-                title="Un solo Excel Magaya (hoja «Magaya»): órdenes en bloques con color alternado."
-                className="rounded-xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-100 to-orange-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:from-amber-200 hover:to-orange-100 disabled:opacity-40 dark:border-amber-500/40 dark:from-amber-950/50 dark:to-orange-950/30 dark:text-amber-100 dark:hover:from-amber-900/60 dark:hover:to-orange-950/40"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Magaya
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={listSelectedCount === 0}
-                onClick={() => void downloadSelectedListInventarioExcel()}
-                title="Mismas columnas que «Descargar CSV» en cada orden (detallado). Archivo Excel con franjas de color suaves por orden; el formato .csv no puede llevar colores."
-                className="rounded-xl border-2 border-cyan-400/80 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-900 shadow-sm hover:bg-cyan-100 disabled:opacity-40 dark:border-cyan-500/50 dark:bg-cyan-950/35 dark:text-cyan-100 dark:hover:bg-cyan-950/55"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Inventario
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={listSelectedCount === 0}
-                onClick={() => requestDeleteSelectedOrders()}
-                className="ml-auto rounded-xl border-2 border-red-200 bg-red-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-40 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
-              >
-                Eliminar seleccionadas
-              </button>
+              {!listSelectMode ? (
+                <button
+                  type="button"
+                  onClick={() => setListSelectMode(true)}
+                  className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-indigo-900 shadow-sm hover:bg-indigo-100 dark:border-indigo-500/50 dark:bg-indigo-950/40 dark:text-indigo-100 dark:hover:bg-indigo-950/60"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <CheckSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    Seleccionar
+                  </span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={exitListSelectMode}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Cancelar selección
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleListSelectAll}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {displayedListOrders.length > 0 &&
+                    displayedListOrders.every((o) => selectedOrderIds[o.id] === true)
+                      ? "Quitar selección"
+                      : "Seleccionar todo"}
+                  </button>
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                    Seleccionadas: {listSelectedCount}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={listSelectedCount === 0}
+                    onClick={() => void downloadSelectedListMagaya()}
+                    title="Un solo Excel Magaya (hoja «Magaya»): órdenes en bloques con color alternado."
+                    className="rounded-xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-100 to-orange-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:from-amber-200 hover:to-orange-100 disabled:opacity-40 dark:border-amber-500/40 dark:from-amber-950/50 dark:to-orange-950/30 dark:text-amber-100 dark:hover:from-amber-900/60 dark:hover:to-orange-950/40"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Magaya
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={listSelectedCount === 0}
+                    onClick={() => void downloadSelectedListInventarioExcel()}
+                    title="Mismas columnas que «Descargar CSV» en cada orden (detallado). Archivo Excel con franjas de color suaves por orden; el formato .csv no puede llevar colores."
+                    className="rounded-xl border-2 border-cyan-400/80 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-900 shadow-sm hover:bg-cyan-100 disabled:opacity-40 dark:border-cyan-500/50 dark:bg-cyan-950/35 dark:text-cyan-100 dark:hover:bg-cyan-950/55"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Inventario
+                    </span>
+                  </button>
+                  {listTab === "warehouse" ? (
+                    <button
+                      type="button"
+                      disabled={listSelectedCount === 0}
+                      onClick={moveSelectedToNoInventory}
+                      title="Mueve las OR seleccionadas a la pestaña Sin inventario (ya procesadas fuera del flujo de RA)."
+                      className="rounded-xl border-2 border-slate-400/70 bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-800 shadow-sm hover:bg-slate-200 disabled:opacity-40 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                    >
+                      Pasar a sin inventario
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={listSelectedCount === 0}
+                    onClick={() => requestDeleteSelectedOrders()}
+                    className="ml-auto rounded-xl border-2 border-red-200 bg-red-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-40 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
+                  >
+                    Eliminar seleccionadas
+                  </button>
+                </>
+              )}
             </div>
 
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {displayedListOrders.map((o) => {
               const job = geminiJobByOrderId[o.id];
-              const analyzing = job?.busy === true;
+              const terraJob = terraJobByOrderId[o.id];
+              const analyzing =
+                job?.busy === true || terraJob?.busy === true;
+              const analyzingBrand: "gemini" | "terra" =
+                terraJob?.busy === true ? "terra" : "gemini";
               const refCount = listReferenciasCount(o.lines);
               const bultosTot = orderDisplayBultos(o);
               const refWord = refCount === 1 ? "referencia" : "referencias";
@@ -1541,41 +2162,57 @@ export function CollectionOrderModule({
               const inWarehouse = listTab === "warehouse";
               const inLinkedRa = listTab === "linkedRa";
               const hasRa = orderHasLinkedRa(o);
+              const isSelected = selectedOrderIds[o.id] === true;
               return (
                 <div
                   key={o.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => openEdit(o)}
+                  onClick={() => {
+                    if (listSelectMode) {
+                      toggleOrderSelected(o.id);
+                      return;
+                    }
+                    openEdit(o);
+                  }}
                   onKeyDown={(ev) => {
                     if (ev.key === "Enter" || ev.key === " ") {
                       ev.preventDefault();
+                      if (listSelectMode) {
+                        toggleOrderSelected(o.id);
+                        return;
+                      }
                       openEdit(o);
                     }
                   }}
-                  aria-label={`Abrir orden #${orderLabel}`}
-                  className="group relative flex cursor-pointer flex-col gap-2 overflow-hidden rounded-xl border border-slate-200/90 bg-white p-2.5 pl-3.5 text-left shadow-sm ring-1 ring-slate-900/[0.03] transition duration-200 hover:-translate-y-0.5 hover:border-indigo-200/80 hover:shadow-md hover:ring-indigo-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 dark:border-slate-600/80 dark:bg-slate-900 dark:ring-white/[0.04] dark:hover:border-indigo-500/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                  aria-label={
+                    listSelectMode
+                      ? `${isSelected ? "Quitar" : "Seleccionar"} orden #${orderLabel}`
+                      : `Abrir orden #${orderLabel}`
+                  }
+                  className={`group relative flex cursor-pointer flex-col gap-2 overflow-hidden rounded-xl border bg-white p-2.5 pl-3.5 text-left shadow-sm ring-1 transition duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${
+                    listSelectMode && isSelected
+                      ? "border-indigo-400 ring-indigo-500/20 dark:border-indigo-500/60"
+                      : "border-slate-200/90 ring-slate-900/[0.03] hover:border-indigo-200/80 hover:ring-indigo-500/10 dark:border-slate-600/80 dark:ring-white/[0.04] dark:hover:border-indigo-500/40"
+                  } dark:bg-slate-900`}
                 >
                   <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-indigo-500 to-sky-500 opacity-70" />
-                  <label
-                    className="relative z-[1] flex shrink-0 cursor-pointer items-center self-start pt-0.5 sm:self-center"
-                    onClick={(ev) => ev.stopPropagation()}
-                    onKeyDown={(ev) => ev.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedOrderIds[o.id] === true}
-                      onChange={(ev) =>
-                        setSelectedOrderIds((p) => ({
-                          ...p,
-                          [o.id]: ev.target.checked,
-                        }))
-                      }
+                  {listSelectMode ? (
+                    <label
+                      className="relative z-[1] flex shrink-0 cursor-pointer items-center self-start pt-0.5 sm:self-center"
                       onClick={(ev) => ev.stopPropagation()}
-                      className="h-4 w-4 rounded border-slate-300 accent-indigo-600 focus:ring-2 focus:ring-indigo-500"
-                      aria-label={`Seleccionar orden ${orderLabel}`}
-                    />
-                  </label>
+                      onKeyDown={(ev) => ev.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleOrderSelected(o.id)}
+                        onClick={(ev) => ev.stopPropagation()}
+                        className="h-4 w-4 rounded border-slate-300 accent-indigo-600 focus:ring-2 focus:ring-indigo-500"
+                        aria-label={`Seleccionar orden ${orderLabel}`}
+                      />
+                    </label>
+                  ) : null}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
@@ -1586,7 +2223,9 @@ export function CollectionOrderModule({
                           En bodega
                         </span>
                       ) : null}
-                      {analyzing && <CollectionOrderAiAnalyzingInline />}
+                      {analyzing && (
+                        <CollectionOrderAiAnalyzingInline brand={analyzingBrand} />
+                      )}
                     </div>
                     {o.proveedor?.trim() && (
                       <p className="mt-1 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -1652,16 +2291,21 @@ export function CollectionOrderModule({
                         {clienteLabel}
                       </span>
                     ) : null}
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
+                    <button
+                      type="button"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        openEdit(o);
+                      }}
+                      className={`relative z-[1] inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-sm transition ${
                         inWarehouse
-                          ? "bg-amber-600 group-hover:bg-amber-700"
-                          : "bg-[#16263F] group-hover:bg-indigo-700 dark:bg-indigo-600 dark:group-hover:bg-indigo-500"
+                          ? "bg-amber-600 hover:bg-amber-700"
+                          : "bg-[#16263F] hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
                       }`}
                     >
                       {inWarehouse ? "Asignar RA" : "Abrir"}
                       <ChevronRight className="h-3 w-3 opacity-80" aria-hidden />
-                    </span>
+                    </button>
                     <button
                       type="button"
                       onClick={(ev) => {
@@ -1730,6 +2374,7 @@ export function CollectionOrderModule({
   const suggestedNumber = String(maxExistingNumber + 1);
   const orderId = e.id;
   const geminiJob = getGeminiJob(orderId);
+  const terraJob = getTerraJob(orderId);
 
   const sendToGemini = async (args: {
     text: string;
@@ -1932,22 +2577,16 @@ export function CollectionOrderModule({
     );
     if (useful.length === 0) return;
 
-    const refKey = (raw: string) =>
-      String(raw ?? "")
-        .trim()
-        .toUpperCase()
-        .replace(/\s+/g, "");
-
     const baseOrder =
       (editing && editing.id === orderId
         ? editing
         : orders.find((o) => o.id === orderId)) ?? e;
 
     const mergedLines = [...(baseOrder.lines || [])];
-    const refIndex = new Map<string, number>();
+    const lineIndex = new Map<string, number>();
     mergedLines.forEach((row, i) => {
-      const key = refKey(String(row.referencia ?? ""));
-      if (key) refIndex.set(key, i);
+      const key = collectionLineDedupeKey(row.referencia, row.descripcion);
+      if (key) lineIndex.set(key, i);
     });
 
     for (const row of useful) {
@@ -1958,23 +2597,27 @@ export function CollectionOrderModule({
         ...imported,
       };
       const referencia = imported.referencia;
-      const key = refKey(referencia);
-      if (key && refIndex.has(key)) {
-        const idx = refIndex.get(key)!;
+      const key = collectionLineDedupeKey(
+        imported.referencia,
+        imported.descripcion,
+      );
+      if (key && lineIndex.has(key)) {
+        const idx = lineIndex.get(key)!;
         const existingId = mergedLines[idx]!.id;
         mergedLines[idx] = { ...mergedLines[idx], ...normalized, id: existingId };
         void runCatalogLookup(existingId, referencia);
       } else {
         mergedLines.push(normalized);
-        if (key) refIndex.set(key, mergedLines.length - 1);
+        if (key) lineIndex.set(key, mergedLines.length - 1);
         void runCatalogLookup(normalized.id, referencia);
       }
     }
 
     const cartones = opts?.cartonesFooter;
+    const cleanedLines = withoutBlankCollectionLines(mergedLines);
     const nextOrder: CollectionOrder = {
       ...baseOrder,
-      lines: mergedLines,
+      lines: cleanedLines.length > 0 ? cleanedLines : [],
       ...(cartones != null &&
       cartones > 0 &&
       (baseOrder.expectedBultos == null || baseOrder.expectedBultos === 0)
@@ -1988,13 +2631,12 @@ export function CollectionOrderModule({
     void persistOrder({ order: nextOrder, showAlerts: false });
   };
 
+  const applyTerraLinesToOrder = (incoming: AldeGptTerraLine[]) => {
+    applyTerraLinesForOrderId(orderId, incoming);
+  };
+
   return (
     <>
-        {remoteOrderUpdatePending ? (
-          <div className="mb-3 px-2">
-            <RemoteSyncBanner onApply={applyPendingRemoteOrder} />
-          </div>
-        ) : null}
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-[#1f3467]/20 bg-gradient-to-r from-white via-slate-50 to-white p-2 shadow-lg shadow-indigo-100/60 backdrop-blur-sm dark:border-indigo-900/40 dark:bg-slate-900/90 dark:shadow-black/20">
           <button
             type="button"
@@ -2014,7 +2656,13 @@ export function CollectionOrderModule({
           <button
             type="button"
             onClick={() => {
-              const rows = e.lines as unknown as Record<string, unknown>[];
+              const rows = linesForInventarioExport(
+                e.lines,
+                unitsMode,
+                weightMode,
+                pendingUndTot,
+                pendingPesoTot,
+              );
               if (countInventarioCsvRows(rows) === 0) {
                 alert("No hay líneas con datos para exportar.");
                 return;
@@ -2055,6 +2703,22 @@ export function CollectionOrderModule({
           </button>
           <button
             type="button"
+            disabled={saveBusy}
+            onClick={() => setChatGptOpen(true)}
+            title={`${ALDEGPT_TERRA_DISPLAY_NAME}: chat y extracción (puedes salir de la OR mientras analiza)`}
+            className={`flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-[#1e1f20] dark:text-slate-100 dark:hover:bg-[#282a2c] ${
+              terraJob.busy ? "alde-ia-trigger--busy" : ""
+            }`}
+          >
+            {terraJob.busy ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" aria-hidden />
+            ) : (
+              <AldeGptTerraIcon size={18} className="shrink-0" />
+            )}
+            {ALDEGPT_TERRA_DISPLAY_NAME}
+          </button>
+          <button
+            type="button"
             disabled={transferLinesCount === 0}
             onClick={() => setTransferOpen(true)}
             className="ml-auto flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:brightness-110 disabled:opacity-50"
@@ -2071,10 +2735,31 @@ export function CollectionOrderModule({
           >
             <CollectionOrderAiAnalyzingStrip
               inlineRow
+              brand="gemini"
               label={
                 geminiJob.pendingFileName
                   ? `${AI_ASSISTANT_DISPLAY_NAME} · analizando ${geminiJob.pendingFileName} (puede tardar hasta 5 min en documentos extensos)…`
                   : `${AI_ASSISTANT_DISPLAY_NAME} · analizando documento…`
+              }
+            />
+          </div>
+        )}
+
+        {terraJob.busy && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-slate-200 bg-[#e8f0fe]/95 px-2.5 py-1.5 shadow-md dark:border-slate-600 dark:bg-[#131314]/90"
+          >
+            <CollectionOrderAiAnalyzingStrip
+              inlineRow
+              brand="terra"
+              label={
+                terraJob.pendingFileName
+                  ? terraJob.progress && terraJob.progress.total > 1
+                    ? `${ALDEGPT_TERRA_DISPLAY_NAME} · documento ${terraJob.progress.current}/${terraJob.progress.total}: ${terraJob.pendingFileName}…`
+                    : `${ALDEGPT_TERRA_DISPLAY_NAME} · extrayendo ${terraJob.pendingFileName} a la orden…`
+                  : `${ALDEGPT_TERRA_DISPLAY_NAME} · extrayendo documento a la orden…`
               }
             />
           </div>
@@ -2391,21 +3076,77 @@ export function CollectionOrderModule({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {e.lines.map((row, idx) => {
-                  const totUnd = unidadesTotalesFromLine(row);
-                  const pesoTot = roundUpMeasure(pesoTotalFromLine(row));
+                  const isReempaque = row.reempaque === true;
+                  const totUnd = isReempaque
+                    ? 0
+                    : (() => {
+                        const pending = pendingUndTot[row.id];
+                        if (pending !== undefined && String(pending).trim() !== "") {
+                          const n = Math.round(
+                            parseFloat(String(pending).replace(",", ".")) || 0,
+                          );
+                          if (n > 0) return n;
+                        }
+                        return unidadesTotalesFromLine(row);
+                      })();
+                  const pesoTot = isReempaque
+                    ? 0
+                    : (() => {
+                        const pending = pendingPesoTot[row.id];
+                        if (pending !== undefined && String(pending).trim() !== "") {
+                          const n =
+                            parseFloat(String(pending).replace(",", ".")) || 0;
+                          if (n > 0) return n;
+                        }
+                        const stored =
+                          parseFloat(
+                            String(row.pesoTotalKg ?? "").replace(",", "."),
+                          ) || 0;
+                        if (stored > 0) return stored;
+                        return roundMeasureNearest(pesoTotalFromLine(row));
+                      })();
                   const totalUndRounded = Math.round(totUnd);
-                  const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
-                  const cubicajeTot = cubicajeM3FromDims(row.l, row.w, row.h, row.bultos);
+                  const bultos = isReempaque
+                    ? 0
+                    : parseFloat(String(row.bultos ?? 0)) || 0;
+                  const cubicajeTot = cubicajeM3FromDims(
+                    row.l,
+                    row.w,
+                    row.h,
+                    row.bultos,
+                    isReempaque,
+                  );
                   const cbmBulto =
-                    bultos > 0
-                      ? roundMeasureNearest(cubicajeTot / bultos)
-                      : cubicajeM3FromDims(row.l, row.w, row.h, 1);
+                    isReempaque
+                      ? 0
+                      : bultos > 0
+                        ? roundMeasureNearest(cubicajeTot / bultos)
+                        : cubicajeM3FromDims(row.l, row.w, row.h, 1);
                   const refUnknown =
                     unresolvedRefByRow[row.id] === true &&
                     String(row.referencia ?? "").trim().length > 0;
+                  const measureDisabledClass =
+                    "border-slate-200 bg-slate-100 text-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-600";
                   return (
-                    <tr key={row.id} className="odd:bg-white even:bg-slate-50/60 transition-colors hover:bg-sky-50/70 dark:odd:bg-slate-900 dark:even:bg-slate-800/40 dark:hover:bg-sky-900/20">
-                      <td className="px-2 py-1 text-center text-slate-400">{idx + 1}</td>
+                    <tr
+                      key={row.id}
+                      className={`transition-colors hover:bg-sky-50/70 dark:hover:bg-sky-900/20 ${
+                        isReempaque
+                          ? "border-l-[3px] border-l-violet-400 bg-violet-50/40 dark:bg-violet-950/20"
+                          : "odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/40"
+                      }`}
+                    >
+                      <td className="px-2 py-1 text-center">
+                        <div className="inline-flex items-center justify-center gap-1">
+                          <span className="text-slate-400">{idx + 1}</span>
+                          {isReempaque ? (
+                            <Recycle
+                              className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400"
+                              aria-label={`Línea ${idx + 1} reempaque`}
+                            />
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-2 py-1">
                         <input
                           value={row.referencia ?? ""}
@@ -2452,27 +3193,37 @@ export function CollectionOrderModule({
                       <td className="px-2 py-1 w-20">
                         <input
                           type="number"
-                          value={row.bultos ?? ""}
+                          disabled={isReempaque}
+                          value={isReempaque ? "" : (row.bultos ?? "")}
                           onChange={(ev) =>
                             updateLine(row.id, { bultos: sanitizeIntegerInput(ev.target.value) })
                           }
                           inputMode="numeric"
                           step={1}
-                          className="no-spinners w-full rounded-lg border border-slate-200 px-1 py-1 text-center text-xs font-black dark:border-slate-600 dark:bg-slate-950"
+                          placeholder={isReempaque ? "—" : undefined}
+                          className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs font-black dark:bg-slate-950 ${
+                            isReempaque
+                              ? measureDisabledClass
+                              : "border-slate-200 dark:border-slate-600"
+                          }`}
                         />
                       </td>
                       <td className="px-2 py-1 w-20">
                         <input
                           type="text"
-                          value={displayUndBultoValue({
-                            rowId: row.id,
-                            raw: String(row.unidadesPorBulto ?? ""),
-                            focusedUndBultoRowId,
-                            draftByRow: undBultoDraft,
-                          })}
-                          disabled={unitsMode === "total"}
+                          value={
+                            isReempaque
+                              ? ""
+                              : displayUndBultoValue({
+                                  rowId: row.id,
+                                  raw: String(row.unidadesPorBulto ?? ""),
+                                  focusedUndBultoRowId,
+                                  draftByRow: undBultoDraft,
+                                })
+                          }
+                          disabled={isReempaque || unitsMode === "total"}
                           onFocus={() => {
-                            if (unitsMode === "total") return;
+                            if (isReempaque || unitsMode === "total") return;
                             setFocusedUndBultoRowId(row.id);
                             setUndBultoDraft((prev) => ({
                               ...prev,
@@ -2490,39 +3241,42 @@ export function CollectionOrderModule({
                             setFocusedUndBultoRowId((prev) => (prev === row.id ? null : prev));
                           }}
                           inputMode="decimal"
+                          placeholder={isReempaque ? "—" : undefined}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs transition dark:bg-slate-950 ${
-                            unitsMode === "total"
-                              ? "border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
+                            isReempaque || unitsMode === "total"
+                              ? measureDisabledClass
                               : "border-slate-200 dark:border-slate-600"
                           }`}
                         />
                       </td>
                       <td className="bg-slate-50/80 px-2 py-1 text-center text-sm font-black text-[#16263F] dark:bg-slate-800/60 dark:text-slate-100">
-                        {totalUndRounded}
+                        {isReempaque ? "—" : totalUndRounded}
                       </td>
                       <td className="px-2 py-1 w-24 bg-slate-50/70 dark:bg-slate-800/60">
                         <input
                           type="number"
-                          disabled={unitsMode === "per_bundle"}
+                          disabled={isReempaque || unitsMode === "per_bundle"}
                           title="Si llenas unidades totales, al salir recalcula und/bulto con los bultos actuales"
                           value={
-                            unitsMode === "total"
-                              ? pendingUndTot[row.id] !== undefined
-                                ? pendingUndTot[row.id]!
-                                : totUnd > 0
-                                  ? String(Math.round(totUnd))
-                                  : ""
-                              : ""
+                            isReempaque
+                              ? ""
+                              : unitsMode === "total"
+                                ? pendingUndTot[row.id] !== undefined
+                                  ? pendingUndTot[row.id]!
+                                  : totUnd > 0
+                                    ? String(Math.round(totUnd))
+                                    : ""
+                                : ""
                           }
                           onChange={(ev) => {
-                            if (unitsMode !== "total") return;
+                            if (isReempaque || unitsMode !== "total") return;
                             setPendingUndTot((p) => ({
                               ...p,
                               [row.id]: sanitizeIntegerInput(ev.target.value),
                             }));
                           }}
                           onBlur={(ev) => {
-                            if (unitsMode !== "total") return;
+                            if (isReempaque || unitsMode !== "total") return;
                             const next = applyUnidadesTotalesToLine(
                               row,
                               sanitizeIntegerInput(ev.target.value),
@@ -2544,19 +3298,21 @@ export function CollectionOrderModule({
                             });
                           }}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs font-bold transition ${
-                            unitsMode === "total"
-                              ? "border-indigo-200 bg-indigo-50/60 dark:border-indigo-800 dark:bg-indigo-950/25"
-                              : "border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
+                            isReempaque
+                              ? measureDisabledClass
+                              : unitsMode === "total"
+                                ? "border-indigo-200 bg-indigo-50/60 dark:border-indigo-800 dark:bg-indigo-950/25"
+                                : "border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
                           }`}
-                          placeholder="Tot."
+                          placeholder={isReempaque ? "—" : "Tot."}
                           step={1}
                         />
                       </td>
                       <td className="px-2 py-1 w-24">
                         <input
                           type="text"
-                          value={displayMeasureInput(row.pesoPorBulto)}
-                          disabled={weightMode === "total"}
+                          value={isReempaque ? "" : displayMeasureInput(row.pesoPorBulto)}
+                          disabled={isReempaque || weightMode === "total"}
                           onChange={(ev) =>
                             updateLine(row.id, {
                               pesoPorBulto: sanitizeDecimalInput(ev.target.value, 2),
@@ -2568,9 +3324,10 @@ export function CollectionOrderModule({
                             })
                           }
                           inputMode="decimal"
+                          placeholder={isReempaque ? "—" : undefined}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs transition dark:bg-slate-950 ${
-                            weightMode === "total"
-                              ? "border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
+                            isReempaque || weightMode === "total"
+                              ? measureDisabledClass
                               : "border-slate-200 dark:border-slate-600"
                           }`}
                         />
@@ -2579,27 +3336,29 @@ export function CollectionOrderModule({
                         <input
                           type="text"
                           title="Al salir del campo recalcula peso por bulto con los bultos actuales"
-                          disabled={weightMode === "per_bundle"}
+                          disabled={isReempaque || weightMode === "per_bundle"}
                           value={
-                            weightMode === "total"
-                              ? pendingPesoTot[row.id] !== undefined
-                                ? pendingPesoTot[row.id]!
+                            isReempaque
+                              ? ""
+                              : weightMode === "total"
+                                ? pendingPesoTot[row.id] !== undefined
+                                  ? pendingPesoTot[row.id]!
+                                  : pesoTot > 0
+                                    ? pesoTot.toFixed(2)
+                                    : ""
                                 : pesoTot > 0
                                   ? pesoTot.toFixed(2)
                                   : ""
-                              : pesoTot > 0
-                                ? pesoTot.toFixed(2)
-                                : ""
                           }
                           onChange={(ev) => {
-                            if (weightMode !== "total") return;
+                            if (isReempaque || weightMode !== "total") return;
                             setPendingPesoTot((p) => ({
                               ...p,
                               [row.id]: sanitizeDecimalInput(ev.target.value, 2),
                             }));
                           }}
                           onBlur={(ev) => {
-                            if (weightMode !== "total") return;
+                            if (isReempaque || weightMode !== "total") return;
                             const next = applyPesoTotalToLine(
                               row,
                               sanitizeDecimalInput(ev.target.value, 2),
@@ -2621,11 +3380,13 @@ export function CollectionOrderModule({
                             });
                           }}
                           className={`no-spinners w-full rounded-lg border px-1 py-1 text-center text-xs font-bold transition ${
-                            weightMode === "total"
-                              ? "border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/30"
-                              : "border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
+                            isReempaque
+                              ? measureDisabledClass
+                              : weightMode === "total"
+                                ? "border-amber-200 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/30"
+                                : "border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500"
                           }`}
-                          placeholder="Tot."
+                          placeholder={isReempaque ? "—" : "Tot."}
                           inputMode="decimal"
                         />
                       </td>
@@ -2633,7 +3394,8 @@ export function CollectionOrderModule({
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={row.l ?? ""}
+                          disabled={isReempaque}
+                          value={isReempaque ? "" : (row.l ?? "")}
                           onChange={(ev) =>
                             updateLine(row.id, {
                               l: sanitizeMeasureTyping(ev.target.value),
@@ -2644,14 +3406,18 @@ export function CollectionOrderModule({
                               l: normalizeMeasureField(ev.target.value),
                             })
                           }
-                          className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
+                          placeholder={isReempaque ? "—" : undefined}
+                          className={`no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950 ${
+                            isReempaque ? measureDisabledClass : ""
+                          }`}
                         />
                       </td>
                       <td className="px-2 py-1 w-16">
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={row.w ?? ""}
+                          disabled={isReempaque}
+                          value={isReempaque ? "" : (row.w ?? "")}
                           onChange={(ev) =>
                             updateLine(row.id, {
                               w: sanitizeMeasureTyping(ev.target.value),
@@ -2662,14 +3428,18 @@ export function CollectionOrderModule({
                               w: normalizeMeasureField(ev.target.value),
                             })
                           }
-                          className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
+                          placeholder={isReempaque ? "—" : undefined}
+                          className={`no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950 ${
+                            isReempaque ? measureDisabledClass : ""
+                          }`}
                         />
                       </td>
                       <td className="px-2 py-1 w-16">
                         <input
                           type="text"
                           inputMode="decimal"
-                          value={row.h ?? ""}
+                          disabled={isReempaque}
+                          value={isReempaque ? "" : (row.h ?? "")}
                           onChange={(ev) =>
                             updateLine(row.id, {
                               h: sanitizeMeasureTyping(ev.target.value),
@@ -2680,24 +3450,46 @@ export function CollectionOrderModule({
                               h: normalizeMeasureField(ev.target.value),
                             })
                           }
-                          className="no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950"
+                          placeholder={isReempaque ? "—" : undefined}
+                          className={`no-spinners w-full rounded border px-1 py-0.5 text-xs dark:bg-slate-950 ${
+                            isReempaque ? measureDisabledClass : ""
+                          }`}
                         />
                       </td>
                       <td className="bg-slate-50/80 px-2 py-1 text-center text-xs font-black text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
-                        {formatCubicaje2(cbmBulto) || "0.00"}
+                        {isReempaque ? "—" : formatCubicaje2(cbmBulto) || "0.00"}
                       </td>
                       <td className="bg-blue-50/80 px-2 py-1 text-center text-sm font-black text-blue-700 dark:bg-blue-950/45 dark:text-blue-300">
-                        {formatCubicaje2(cubicajeTot) || "0.00"}
+                        {isReempaque ? "—" : formatCubicaje2(cubicajeTot) || "0.00"}
                       </td>
                       <td className="px-1 py-1">
-                        <button
-                          type="button"
-                          onClick={() => deleteRow(row.id)}
-                          className="rounded-lg p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
-                          aria-label="Eliminar línea"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleLineReempaque(row.id)}
+                            aria-pressed={isReempaque}
+                            title={
+                              isReempaque
+                                ? "Quitar reempaque"
+                                : "Marcar como reempaque (sin bultos, peso ni medidas)"
+                            }
+                            className={`rounded-lg p-1.5 transition ${
+                              isReempaque
+                                ? "bg-violet-500 text-white shadow-sm hover:bg-violet-600"
+                                : "text-slate-400 hover:bg-violet-50 hover:text-violet-500 dark:hover:bg-violet-950/40"
+                            }`}
+                          >
+                            <Recycle className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteRow(row.id)}
+                            className="rounded-lg p-1.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                            aria-label="Eliminar línea"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2740,7 +3532,13 @@ export function CollectionOrderModule({
         defaultNumero={String(e.numero ?? "").trim() || suggestedNumber}
         onCancel={() => setCsvOpen(false)}
         onConfirm={(numeroDocumento) => {
-          const rows = e.lines as unknown as Record<string, unknown>[];
+          const rows = linesForInventarioExport(
+            e.lines,
+            unitsMode,
+            weightMode,
+            pendingUndTot,
+            pendingPesoTot,
+          );
           if (countInventarioCsvRows(rows) === 0) {
              
             alert("No hay líneas con datos para exportar.");
@@ -2780,6 +3578,22 @@ export function CollectionOrderModule({
         onChangeJob={(patch) => patchGeminiJob(orderId, patch)}
         onSend={sendToGemini}
         onApplyLines={applyGeminiLinesToOrder}
+      />
+
+      <GeneralChatGptPanel
+        open={chatGptOpen}
+        onClose={() => setChatGptOpen(false)}
+        extractJobBusy={terraJob.busy}
+        onApplyLines={applyTerraLinesToOrder}
+        onSendExtract={async ({ text, files, extractMode }) => {
+          // Captura el id de ESTA orden: puedes salir a la lista u otra OR.
+          return runTerraDocumentExtract({
+            targetOrderId: orderId,
+            text,
+            files,
+            extractMode,
+          });
+        }}
       />
     </>
   );

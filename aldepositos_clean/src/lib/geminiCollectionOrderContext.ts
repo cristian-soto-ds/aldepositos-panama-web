@@ -57,13 +57,13 @@ ${emailRule ? `${emailRule}\n` : ""}- Medidas solo en l, w, h (cm por defecto; p
 --- Docenas y documentos internacionales (packing list / factura) ---
 - 1 docena = 12 piezas (siempre). Media docena = 6; cuarto de docena = 3.
 - Notación frecuente en columna CANTIDAD: **N (M)** = **N docenas + M piezas sueltas** (ej. «11 (8)» → 11×12+8 = **140 piezas totales de la línea**, no 11 ni 141). Pon ese total en el campo JSON unidadesTotales como cadena «140» y deja vacío unidadesPorBulto si el doc no da explícito por bulto (la app reparte con bultos y decimales si hace falta).
-- Columna **DOZ** / **4.0000 DOZ** = docenas → multiplica ×12 para piezas (4 DOZ = 48 piezas).
+- Columna **DOZ** / **DOC** / **4.0000 DOZ** / **8.00 DOC** = docenas de la **línea completa** → piezas totales = N×12 (o N×12 + sueltas si «6.06 DOC» → 72+6=78). Luego **unidadesPorBulto = unidadesTotales ÷ bultos** (ej. 2 bultos + 8 DOC → tot=96, und=48; NUNCA und=96 ni tot=192).
 - Inglés habitual: dozen, dozens, doz., dz, DZ, "Qty 2 dz", "2 dozen", "half dozen" (=6 si aplica una vez).
 - Portugués: dúzia, dúzias. Francés: douzaine(s). Mayorista: 1 gross = 12 docenas = 144 piezas.
 - Convierte cantidades a piezas: no dejes texto tipo «2 docenas» suelto; para «11 (8)» pon unidadesTotales="140".
-- Si el documento da piezas por bulto en docenas: multiplica por 12 y guarda el resultado en unidadesPorBulto.
-- Si da total de la línea en docenas (o mezcla): convierte a piezas totales; usa unidadesPorBulto sólo cuando sea entero claro por bulto; si total÷bultos no es entero, deja vacío unidadesPorBulto y rellena unidadesTotales (la app usa decimales al repartir).
-- En reply, cuando conviertas docenas, di explícitamente la regla usada (ej. «3 dz = 36 pzas por bulto») para que el operador verifique.
+- En facturas con columna cantidad DOC + bultos: cantidad = total de línea (no por bulto). Und/bulto = tot÷bultos si es entero.
+- Si total÷bultos no es entero: unidadesTotales=total de factura y unidadesPorBulto="48" (ej. 311÷6 → und=48 tot=311; 459÷10 → und=48 tot=459). No uses decimales ni redondees el total.
+- En reply, cuando conviertas docenas, di explícitamente la regla usada (ej. «8 DOC / 2 bultos = 96 pzas tot, 48 und/bulto») para que el operador verifique.
 
 --- FACTURA / packing puntomoda (Zona Libre Panamá) y tablas similares ---
 - PDFs de varias páginas: lee **todas** las páginas; no te quedes solo en la primera.
@@ -85,15 +85,15 @@ ${emailRule ? `${emailRule}\n` : ""}- Medidas solo en l, w, h (cm por defecto; p
 
 --- Exportación Magaya (CSV) y coherencia en cada línea ---
 La app genera un CSV Magaya por línea. Debes rellenar los campos extra del JSON además de referencia/medidas:
-- descripcion: solo nombre o tipo de artículo (ej. ESFERA, JIRAFA DECOR, PANTALON JEANS). Prohibido incluir medidas (no 10x10x10 cm, no dimensiones en texto). Prohibido incluir género aquí (género va solo en el campo genero).
+- descripcion: solo nombre o tipo de artículo. JEANS (no bermuda) → exactamente "PANTALON JEANS" (sin skinny/premium/wide leg/palazzo). Bermuda jeans → "BERMUDA". Prohibido incluir medidas (no 10x10x10 cm). Prohibido incluir género aquí (género va solo en el campo genero).
 - l, w, h: medidas en cm aquí únicamente (o convierte pulgadas a cm y dilo en reply si aplica).
 - modelo: columna MODELO del CSV. Códigos de referencia/modelo/marcas del documento resueltos con las tablas de abajo (ej. MARCAS=23 → CONCEPTS). Si el doc solo trae un código de pieza, puedes repetirlo o dejar vacío según contexto.
 - paisOrigen: nombre del país en español (ej. CHINA), usando la tabla de códigos cuando el doc diga PAIS=CH u homólogo.
-- unidadesPorBulto: piezas por un solo bulto/caja (número). Convierte pares (1 par=2), docenas (×12), etc. Si el total de línea no reparte en entero entre bultos, deja unidadesPorBulto vacío y pon la piezas totales exactas en unidadesTotales (p. ej. 140 con «11 (8)» y 3 bultos).
+- unidadesPorBulto: piezas por un solo bulto/caja (número). Convierte pares (1 par=2), docenas (×12), etc. Si el total de línea no reparte en entero entre bultos, unidadesPorBulto="48" y unidadesTotales=piezas exactas de factura (p. ej. 311 con 6 bultos → und=48 tot=311).
 - pesoUnaPiezaKg: peso en kg de UNA sola pieza/artículo cuando se pueda deducir; si el documento solo da peso por bulto y hay unidades por bulto, calcula: peso_bulto / unidades_por_bulto.
 - pesoPorBulto: peso por bulto en kg; la exportación CSV Magaya (columna PESO) y la columna «Peso por Piezas» del CSV Descargar usan este valor. Consistencia con el documento.
 - pesoTotalKg: úsalo cuando ayude al usuario; no sustituye a pesoPorBulto para Magaya/CSV salvo que el documento defina el dato solo como total de línea.
-- tejido: solo si el documento menciona tela/material textil aplicable a esa línea; si no hay dato, cadena vacía.
+- tejido: SOLO si hay etiqueta TEJIDO/TELA (ej. TEJIDO PLANO → "PLANO"). NUNCA copies CANVAS/DENIM/YUTE de la descripción ni de COMPOSICION. Si no hay etiqueta TEJIDO → "".
 - talla: rango min-máx con guion (ej. 12-18) si hay varias tallas listadas; una sola talla → solo ese valor.
 - forro: casi siempre "N/A" salvo que el documento indique otro valor explícito.
 - genero: dama, caballero, niño, niña o bebe; vacío si no aplica. Nunca lo pongas en descripcion.

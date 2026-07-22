@@ -73,8 +73,29 @@ export function rowHasExportableData(row: Record<string, unknown>): boolean {
   if (parseNum(row.l) || parseNum(row.w) || parseNum(row.h)) return true;
   if (parseNum(row.weight) || parseNum(row.pesoPorBulto)) return true;
   if (parseNum(row.unidadesPorBulto) > 0) return true;
+  if (parseNum(row.unidadesTotales) > 0) return true;
   if (parseNum(row.volumenM3) > 0) return true;
   return false;
+}
+
+/**
+ * Piezas totales para la columna «Cantidad» del CSV inventario.
+ * Prioriza `unidadesTotales` (UND captura / extracción IA); si no, bultos × und/bulto.
+ */
+export function cantidadPiezasTotalesForCsv(
+  row: Record<string, unknown>,
+  bultos: number,
+): number {
+  const tot = parseNum(row.unidadesTotales);
+  if (tot > 0) {
+    const r = Math.round(tot);
+    return Math.abs(tot - r) < 1e-3 ? r : tot;
+  }
+  const undB = parseNum(row.unidadesPorBulto);
+  if (bultos <= 0 || undB <= 0) return 0;
+  const product = bultos * undB;
+  const r = Math.round(product);
+  return Math.abs(product - r) < 1e-3 ? r : product;
 }
 
 function volumenM3ForRow(
@@ -108,12 +129,10 @@ function buildLineCells(
   let cantidad = 0;
   let pesoPorPiezas = 0;
   if (variant === "detailed") {
-    const undB = parseNum(row.unidadesPorBulto);
-    cantidad = bultos * undB;
+    cantidad = cantidadPiezasTotalesForCsv(row, bultos);
     pesoPorPiezas = parseNum(row.pesoPorBulto);
   } else {
-    const undB = parseNum(row.unidadesPorBulto);
-    cantidad = undB > 0 ? bultos * undB : 0;
+    cantidad = cantidadPiezasTotalesForCsv(row, bultos);
     pesoPorPiezas = parseNum(row.weight);
   }
 
@@ -155,12 +174,10 @@ export function buildInventarioExcelRowValues(
   let cantidad = 0;
   let pesoPorPiezas = 0;
   if (variant === "detailed") {
-    const undB = parseNum(row.unidadesPorBulto);
-    cantidad = bultos * undB;
+    cantidad = cantidadPiezasTotalesForCsv(row, bultos);
     pesoPorPiezas = parseNum(row.pesoPorBulto);
   } else {
-    const undB = parseNum(row.unidadesPorBulto);
-    cantidad = undB > 0 ? bultos * undB : 0;
+    cantidad = cantidadPiezasTotalesForCsv(row, bultos);
     pesoPorPiezas = parseNum(row.weight);
   }
 

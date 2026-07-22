@@ -1,4 +1,4 @@
-import { formatMeasure2 } from "@/lib/measureDecimals";
+import { formatMeasure2, formatWeightPrecise } from "@/lib/measureDecimals";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
   applyPesoTotalToLine,
@@ -251,11 +251,17 @@ export function normalizeCollectionOrderLineFromImport(
   if (unidadesTotales && bultosNum > 0) {
     const withTot = applyUnidadesTotalesToLine(draft, unidadesTotales);
     draft.unidadesPorBulto = withTot.unidadesPorBulto;
+    draft.unidadesTotales = withTot.unidadesTotales;
+  } else if (unidadesTotales) {
+    draft.unidadesTotales = unidadesTotales;
   }
 
   if (pesoTotalKg && bultosNum > 0 && !piezaFromIa) {
     const withPeso = applyPesoTotalToLine(draft, pesoTotalKg);
     draft.pesoPorBulto = withPeso.pesoPorBulto;
+    draft.pesoTotalKg = withPeso.pesoTotalKg;
+  } else if (pesoTotalKg) {
+    draft.pesoTotalKg = pesoTotalKg;
   }
 
   const undNum = Math.max(0, parseFloatLoose(String(draft.unidadesPorBulto ?? "")) || 0);
@@ -297,9 +303,21 @@ export function normalizeCollectionOrderLineFromImport(
     genero: draft.genero,
     composicion: draft.composicion,
   });
+
+  // Tras normalize (round-up a 2 decimales), restaurar peso/b preciso desde el
+  // total de factura para no alterar 487.73 → 487.80 al mostrar peso tot.
+  if (pesoTotalKg && bultosNum > 0 && !piezaFromIa) {
+    const total = parseFloatLoose(pesoTotalKg);
+    if (Number.isFinite(total) && total > 0) {
+      measured.pesoPorBulto = formatWeightPrecise(total / bultosNum);
+    }
+  }
+
   return {
     ...measured,
     referencia: String(measured.referencia ?? "").trim(),
     descripcion: String(measured.descripcion ?? "").trim(),
+    unidadesTotales: draft.unidadesTotales ?? "",
+    pesoTotalKg: draft.pesoTotalKg ?? "",
   };
 }

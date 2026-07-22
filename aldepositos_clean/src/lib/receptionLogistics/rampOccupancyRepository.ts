@@ -10,6 +10,7 @@ import {
   type RampOccupancyRampId,
   type RampOccupancyState,
 } from "@/lib/receptionLogistics/rampOccupancy";
+import { publishRampOccupancyLive } from "@/lib/receptionLogistics/receptionLiveSync";
 
 function isRampOccupancyState(value: unknown): value is RampOccupancyState {
   if (!value || typeof value !== "object") return false;
@@ -76,6 +77,7 @@ export async function fetchRampOccupancy(): Promise<RampOccupancyState> {
 
 export async function saveRampOccupancy(state: RampOccupancyState): Promise<void> {
   writeLocalRampOccupancy(state);
+  publishRampOccupancyLive(state);
   const { error } = await supabase.from(RECEPTION_TABLE).upsert({
     id: RAMP_OCCUPANCY_META_ID,
     payload: state,

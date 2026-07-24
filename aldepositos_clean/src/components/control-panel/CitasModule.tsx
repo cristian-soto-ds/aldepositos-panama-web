@@ -1,15 +1,17 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarClock,
   Check,
   Loader2,
   Paperclip,
+  Radio,
   RefreshCw,
   X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useCitasLiveSync } from "@/hooks/useCitasLiveSync";
 import type { Cita, CitaAdjunto, CitaEstado } from "@/lib/citas/types";
 
 type CitaWithUrls = Omit<Cita, "adjuntos"> & {
@@ -40,9 +42,28 @@ function startOfWeek(d: Date): Date {
   return x;
 }
 
+function formatRelativo(iso: string | null): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "—";
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 10) return "ahora";
+  if (sec < 60) return `hace ${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `hace ${min} min`;
+  return new Date(iso).toLocaleTimeString("es-PA", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function CitasModule() {
   const [citas, setCitas] = useState<CitaWithUrls[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [realtimeOk, setRealtimeOk] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<CitaWithUrls | null>(null);
   const [filter, setFilter] = useState<string>("");
@@ -50,31 +71,92 @@ export function CitasModule() {
   const [fechaCita, setFechaCita] = useState("");
   const [horaCita, setHoraCita] = useState("");
   const [mensaje, setMensaje] = useState("");
+  const loadingRef = useRef(false);
+  const fingerprintRef = useRef<string>("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("Sin sesión.");
-      const qs = filter ? `?estado=${encodeURIComponent(filter)}` : "";
-      const res = await fetch(`/api/citas${qs}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = (await res.json()) as { citas?: CitaWithUrls[]; error?: string };
-      if (!res.ok) throw new Error(json.error || "No se pudieron cargar las citas.");
-      setCitas(json.citas ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al cargar.");
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      if (loadingRef.current && silent) return;
+      loadingRef.current = true;
+      if (silent) {
+        /* sin spinner en poll; solo badge “hace Xs” */
+      } else {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) throw new Error("Sin sesión.");
+        const params = new URLSearchParams();
+        params.set("lite", "1");
+        if (filter) params.set("estado", filter);
+        if (silent && fingerprintRef.current) {
+          params.set("since", fingerprintRef.current);
+        }
+        const res = await fetch(`/api/citas?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = (await res.json()) as {
+          citas?: CitaWithUrls[];
+          unchanged?: boolean;
+          fingerprint?: string;
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(json.error || "No se pudieron cargar las citas.");
+        }
+        setLastSyncAt(new Date().toISOString());
+        if (json.unchanged) {
+          if (!silent) setError(null);
+          return;
+        }
+        const next = json.citas ?? [];
+        if (json.fingerprint) fingerprintRef.current = json.fingerprint;
+        setCitas(next);
+        setSelected((prev) => {
+          if (!prev) return null;
+          const found = next.find((c) => c.id === prev.id);
+          if (!found) return prev;
+          // Conservar URLs firmadas ya cargadas en el detalle
+          return {
+            ...found,
+            adjuntos: found.adjuntos.map((a) => {
+              const old = prev.adjuntos.find((x) => x.path === a.path);
+              return old?.url ? { ...a, url: old.url } : a;
+            }),
+          };
+        });
+        if (!silent) setError(null);
+      } catch (e) {
+        if (!silent) {
+          setError(e instanceof Error ? e.message : "Error al cargar.");
+        }
+      } finally {
+        loadingRef.current = false;
+        setLoading(false);
+        if (!silent) setSyncing(false);
+      }
+    },
+    [filter],
+  );
 
   useEffect(() => {
-    void load();
+    fingerprintRef.current = "";
+    void load({ silent: false });
   }, [load]);
+
+  useCitasLiveSync({
+    enabled: true,
+    onRefresh: () => load({ silent: true }),
+    onRealtimeStatus: setRealtimeOk,
+  });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 5_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const kpis = useMemo(() => {
     const weekStart = startOfWeek(new Date());
@@ -92,11 +174,31 @@ export function CitasModule() {
     return { pendientes, confirmadas, estaSemana, total: citas.length };
   }, [citas]);
 
-  const openDetail = (c: CitaWithUrls) => {
+  const openDetail = async (c: CitaWithUrls) => {
     setSelected(c);
     setFechaCita(c.fecha_cita || c.fecha_preferida || "");
     setHoraCita(c.hora_cita || c.hora_preferida || "");
     setMensaje(c.respuesta_mensaje || "");
+
+    const needsSign = c.adjuntos.some((a) => a.path && !a.url);
+    if (!needsSign) return;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/citas/${c.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = (await res.json()) as { cita?: CitaWithUrls };
+      if (res.ok && json.cita) {
+        setSelected(json.cita);
+        setCitas((prev) =>
+          prev.map((row) => (row.id === json.cita!.id ? json.cita! : row)),
+        );
+      }
+    } catch {
+      /* lista sigue usable sin descargas firmadas */
+    }
   };
 
   const respond = async (estado: "confirmada" | "rechazada" | "completada") => {
@@ -128,13 +230,15 @@ export function CitasModule() {
         );
         setSelected(json.cita);
       }
-      await load();
+      await load({ silent: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al responder.");
     } finally {
       setBusy(false);
     }
   };
+
+  void tick; // fuerza re-render del texto “hace Xs”
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6">
@@ -144,17 +248,30 @@ export function CitasModule() {
             Citas de entrega
           </h2>
           <p className="text-sm text-slate-500">
-            Solicitudes de proveedores · responder y confirmar
+            Solicitudes de proveedores · se actualiza solo
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold dark:border-slate-600"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            <Radio
+              className={`h-3 w-3 ${syncing || realtimeOk ? "animate-pulse" : ""}`}
+              aria-hidden
+            />
+            {realtimeOk ? "En vivo" : "Auto"} · {formatRelativo(lastSyncAt)}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              fingerprintRef.current = "";
+              setSyncing(true);
+              void load({ silent: true }).finally(() => setSyncing(false));
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold dark:border-slate-600"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            Actualizar
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -223,7 +340,7 @@ export function CitasModule() {
                 citas.map((c) => (
                   <tr
                     key={c.id}
-                    onClick={() => openDetail(c)}
+                    onClick={() => void openDetail(c)}
                     className="cursor-pointer border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50"
                   >
                     <td className="px-3 py-3">
@@ -247,10 +364,16 @@ export function CitasModule() {
                     </td>
                     <td className="px-3 py-3">
                       {c.adjuntos?.length ? (
-                        <span className="inline-flex items-center gap-1 text-xs">
-                          <Paperclip className="h-3.5 w-3.5" />
-                          {c.adjuntos.length}
-                        </span>
+                        <div className="max-w-[12rem]">
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold">
+                            <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                            {c.adjuntos.length} archivo
+                            {c.adjuntos.length === 1 ? "" : "s"}
+                          </span>
+                          <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                            {c.adjuntos.map((a) => a.name).join(", ")}
+                          </p>
+                        </div>
                       ) : (
                         "—"
                       )}
@@ -333,7 +456,9 @@ export function CitasModule() {
                   <dt className="text-[10px] font-bold uppercase text-slate-400">
                     Observaciones
                   </dt>
-                  <dd className="whitespace-pre-wrap">{selected.observaciones}</dd>
+                  <dd className="whitespace-pre-wrap">
+                    {selected.observaciones}
+                  </dd>
                 </div>
               )}
             </dl>
@@ -341,7 +466,7 @@ export function CitasModule() {
             {selected.adjuntos?.length > 0 && (
               <div className="mb-4 space-y-1">
                 <p className="text-[10px] font-bold uppercase text-slate-400">
-                  Adjuntos
+                  Adjuntos ({selected.adjuntos.length})
                 </p>
                 {selected.adjuntos.map((a) => (
                   <a

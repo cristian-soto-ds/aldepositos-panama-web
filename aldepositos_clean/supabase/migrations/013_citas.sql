@@ -202,3 +202,14 @@ create policy "cita_adjuntos_delete_staff"
   for delete
   to authenticated
   using (bucket_id = 'cita-adjuntos');
+
+-- Realtime: para que el panel Citas se actualice al instante
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.citas;
+  exception
+    when duplicate_object then null;
+    when undefined_object then null;
+  end;
+end $$;

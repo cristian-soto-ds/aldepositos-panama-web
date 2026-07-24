@@ -46,7 +46,8 @@ export function appendPhotoToTask(task: Task, photo: RaPhoto): Task {
     ...task.photoRecord,
     photos: [...existing, photo],
     lastUpdatedAt: at,
-    requested: false,
+    // Mantener en cola hasta que PC lo quite (permite varios ángulos / visitas)
+    requested: task.photoRecord?.requested ?? false,
     lastTakenBy,
   };
   return { ...task, photoRecord };

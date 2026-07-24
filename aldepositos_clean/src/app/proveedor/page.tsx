@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,10 +8,12 @@ import {
   Loader2,
   LogOut,
   Paperclip,
+  Radio,
   RefreshCw,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { supabase } from "@/lib/supabase";
+import { useCitasLiveSync } from "@/hooks/useCitasLiveSync";
 import type { Cita, CitaAdjunto, CitaEstado } from "@/lib/citas/types";
 
 type CitaWithUrls = Omit<Cita, "adjuntos"> & {
@@ -34,11 +36,62 @@ function estadoClass(estado: CitaEstado): string {
 export default function ProveedorPortalPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [citas, setCitas] = useState<CitaWithUrls[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [realtimeOk, setRealtimeOk] = useState(false);
+  const loadingRef = useRef(false);
+  const fingerprintRef = useRef<string>("");
 
-  const load = useCallback(async () => {
+  const loadCitas = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent === true;
+      if (loadingRef.current && silent) return;
+      loadingRef.current = true;
+      if (silent) setSyncing(true);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) {
+          router.replace("/login");
+          return;
+        }
+        const params = new URLSearchParams({ lite: "1" });
+        if (silent && fingerprintRef.current) {
+          params.set("since", fingerprintRef.current);
+        }
+        const res = await fetch(`/api/citas?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = (await res.json()) as {
+          citas?: CitaWithUrls[];
+          unchanged?: boolean;
+          fingerprint?: string;
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(json.error || "No se pudieron cargar citas.");
+        }
+        if (json.unchanged) {
+          if (!silent) setError(null);
+          return;
+        }
+        if (json.fingerprint) fingerprintRef.current = json.fingerprint;
+        setCitas(json.citas ?? []);
+        if (!silent) setError(null);
+      } catch (e) {
+        if (!silent) setError(e instanceof Error ? e.message : "Error.");
+      } finally {
+        loadingRef.current = false;
+        setSyncing(false);
+      }
+    },
+    [router],
+  );
+
+  const bootstrap = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -69,23 +122,40 @@ export default function ProveedorPortalPage() {
         return;
       }
       setDisplayName(roleJson.fullName || userData.user.email || "Proveedor");
-
-      const res = await fetch("/api/citas", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const json = (await res.json()) as { citas?: CitaWithUrls[]; error?: string };
-      if (!res.ok) throw new Error(json.error || "No se pudieron cargar citas.");
-      setCitas(json.citas ?? []);
+      await loadCitas({ silent: false });
+      setReady(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error.");
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [loadCitas, router]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void bootstrap();
+  }, [bootstrap]);
+
+  useCitasLiveSync({
+    enabled: ready,
+    onRefresh: () => loadCitas({ silent: true }),
+    onRealtimeStatus: setRealtimeOk,
+  });
+
+  const openAdjunto = async (citaId: string, path: string) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/citas/${citaId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = (await res.json()) as { cita?: CitaWithUrls };
+      const url = json.cita?.adjuntos.find((a) => a.path === path)?.url;
+      if (url) window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      /* ignore */
+    }
+  };
 
   const kpis = useMemo(() => {
     let pendientes = 0;
@@ -144,18 +214,29 @@ export default function ProveedorPortalPage() {
       </header>
 
       <main className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:px-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-xl font-black text-[#16263F] dark:text-slate-100">
             Mis citas
           </h1>
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold dark:border-slate-600"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Actualizar
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+              <Radio
+                className={`h-3 w-3 ${syncing || realtimeOk ? "animate-pulse" : ""}`}
+                aria-hidden
+              />
+              {realtimeOk ? "En vivo" : "Auto"}
+            </span>
+            <button
+              type="button"
+              onClick={() => void loadCitas({ silent: true })}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold dark:border-slate-600"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+              />
+              Actualizar
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-3">
@@ -225,7 +306,9 @@ export default function ProveedorPortalPage() {
                       <dt className="text-[10px] font-bold uppercase text-slate-400">
                         Respuesta AlDepósitos
                       </dt>
-                      <dd className="whitespace-pre-wrap">{c.respuesta_mensaje}</dd>
+                      <dd className="whitespace-pre-wrap">
+                        {c.respuesta_mensaje}
+                      </dd>
                     </div>
                   )}
                 </dl>
@@ -233,18 +316,17 @@ export default function ProveedorPortalPage() {
                   <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 dark:border-slate-700">
                     <p className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-400">
                       <Paperclip className="h-3 w-3" />
-                      Adjuntos
+                      Adjuntos ({c.adjuntos.length})
                     </p>
                     {c.adjuntos.map((a) => (
-                      <a
+                      <button
                         key={a.path}
-                        href={a.url || undefined}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block text-sm text-blue-600 underline dark:text-blue-400"
+                        type="button"
+                        onClick={() => void openAdjunto(c.id, a.path)}
+                        className="block text-left text-sm text-blue-600 underline dark:text-blue-400"
                       >
                         {a.name}
-                      </a>
+                      </button>
                     ))}
                   </div>
                 )}

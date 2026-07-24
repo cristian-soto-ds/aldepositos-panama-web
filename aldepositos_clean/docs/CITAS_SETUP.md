@@ -10,6 +10,14 @@ La app guarda citas en Supabase (`public.citas` + Storage `cita-adjuntos`) y, si
 3. Verifica en **Storage** que existe el bucket `cita-adjuntos` (privado, ~15 MB).
 4. En **Table Editor → `profiles` o `perfiles`** (la que exista), confirma la columna `rol` (`staff` | `proveedor`). Por defecto todos quedan como `staff`.
 5. Copia `SUPABASE_SERVICE_ROLE_KEY` a `.env.local` y a Vercel (solo servidor). Es **obligatoria** para crear citas con adjuntos.
+6. (Recomendado) Activa Realtime en la tabla `citas`:
+
+```sql
+alter publication supabase_realtime add table public.citas;
+```
+
+O en Dashboard → **Database → Publications → supabase_realtime** → marca `citas`.
+Sin esto, el panel igual se actualiza solo (lista ligera + sondeo). Con Realtime activo el sondeo de respaldo es más espaciado.
 
 ### Crear un usuario proveedor
 

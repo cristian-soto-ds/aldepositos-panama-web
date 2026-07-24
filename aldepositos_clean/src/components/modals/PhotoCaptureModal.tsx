@@ -1,7 +1,21 @@
 "use client";
 
+/**
+ * Captura multi-foto para celular: vista previa de cada toma,
+ * acumular ángulos y revisar el lote antes de guardar.
+ */
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, ImagePlus, Loader2, RotateCcw, Upload, X } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ImagePlus,
+  Loader2,
+  RotateCcw,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import {
   dataUrlToJpegFile,
   fileToPreviewDataUrl,
@@ -14,6 +28,14 @@ import {
   RA_PHOTO_CATEGORY_LABELS,
 } from "@/lib/types/raPhoto";
 
+type DraftPhoto = {
+  id: string;
+  previewUrl: string;
+  file: File | null;
+  caption: string;
+  category: RaPhotoCategory;
+};
+
 type PhotoCaptureModalProps = {
   open: boolean;
   taskId: string;
@@ -21,10 +43,20 @@ type PhotoCaptureModalProps = {
   takenByEmail?: string;
   takenByName?: string;
   onClose: () => void;
+  /** Se llama una vez por foto guardada (permite varias en la misma sesión). */
   onPhotoSaved: (photo: RaPhoto) => void | Promise<void>;
+  /** Si true, al guardar una foto no cierra y permite seguir (lote). Default true. */
+  multiShot?: boolean;
 };
 
-type CaptureMode = "choose" | "camera" | "preview";
+type CaptureMode = "choose" | "camera" | "preview" | "review";
+
+function newDraftId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `d-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function PhotoCaptureModal({
   open,
@@ -34,6 +66,7 @@ export function PhotoCaptureModal({
   takenByName,
   onClose,
   onPhotoSaved,
+  multiShot = true,
 }: PhotoCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -44,10 +77,15 @@ export function PhotoCaptureModal({
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [caption, setCaption] = useState("");
   const [category, setCategory] = useState<RaPhotoCategory>("general");
+  const [drafts, setDrafts] = useState<DraftPhoto[]>([]);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const stopCamera = useCallback(() => {
     const stream = streamRef.current;
@@ -61,17 +99,23 @@ export function PhotoCaptureModal({
     setCameraReady(false);
   }, []);
 
-  const resetState = useCallback(() => {
-    stopCamera();
-    setMode("choose");
+  const clearCurrentShot = useCallback(() => {
     setPreviewUrl(null);
     setPendingFile(null);
     setCaption("");
     setCategory("general");
-    setCameraError(null);
     setUploadError(null);
+  }, []);
+
+  const resetState = useCallback(() => {
+    stopCamera();
+    setMode("choose");
+    clearCurrentShot();
+    setDrafts([]);
+    setCameraError(null);
     setUploading(false);
-  }, [stopCamera]);
+    setUploadProgress(null);
+  }, [stopCamera, clearCurrentShot]);
 
   useEffect(() => {
     if (!open) {
@@ -103,10 +147,10 @@ export function PhotoCaptureModal({
       setCameraError(
         "No se pudo acceder a la cámara. Usá «Subir archivo» o concedé permisos en el navegador.",
       );
-      setMode("choose");
+      setMode(drafts.length > 0 ? "review" : "choose");
       stopCamera();
     }
-  }, [stopCamera]);
+  }, [stopCamera, drafts.length]);
 
   const captureFromCamera = useCallback(() => {
     const video = videoRef.current;
@@ -125,12 +169,37 @@ export function PhotoCaptureModal({
   }, [cameraReady, stopCamera]);
 
   const handleFilePick = useCallback(async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
+    if (!files || files.length === 0) return;
+    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return;
+
+    // Varias desde galería → van directo al lote tras generar preview
+    if (images.length > 1) {
+      try {
+        const added: DraftPhoto[] = [];
+        for (const file of images) {
+          const url = await fileToPreviewDataUrl(file);
+          added.push({
+            id: newDraftId(),
+            previewUrl: url,
+            file,
+            caption: "",
+            category: "general",
+          });
+        }
+        setDrafts((prev) => [...prev, ...added]);
+        setMode("review");
+        setUploadError(null);
+      } catch {
+        setUploadError("No se pudieron leer algunas imágenes.");
+      }
+      return;
+    }
+
     try {
-      const url = await fileToPreviewDataUrl(file);
+      const url = await fileToPreviewDataUrl(images[0]);
       setPreviewUrl(url);
-      setPendingFile(file);
+      setPendingFile(images[0]);
       setMode("preview");
       setUploadError(null);
     } catch {
@@ -139,39 +208,83 @@ export function PhotoCaptureModal({
   }, []);
 
   const handleRetake = useCallback(() => {
-    setPreviewUrl(null);
-    setPendingFile(null);
-    setCaption("");
-    setCategory("general");
-    setUploadError(null);
+    clearCurrentShot();
     setMode("choose");
+  }, [clearCurrentShot]);
+
+  /** Acepta la vista previa y la suma al lote (aún no sube). */
+  const acceptIntoDraft = useCallback(() => {
+    if (!previewUrl) return;
+    setDrafts((prev) => [
+      ...prev,
+      {
+        id: newDraftId(),
+        previewUrl,
+        file: pendingFile,
+        caption: caption.trim(),
+        category,
+      },
+    ]);
+    clearCurrentShot();
+    if (multiShot) {
+      setMode("review");
+    } else {
+      setMode("choose");
+    }
+  }, [
+    previewUrl,
+    pendingFile,
+    caption,
+    category,
+    clearCurrentShot,
+    multiShot,
+  ]);
+
+  const removeDraft = useCallback((id: string) => {
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!previewUrl) return;
-    setUploading(true);
-    setUploadError(null);
-    try {
-      let file = pendingFile;
+  const uploadOne = useCallback(
+    async (draft: DraftPhoto): Promise<RaPhoto> => {
+      let file = draft.file;
       if (!file) {
-        file = await dataUrlToJpegFile(previewUrl, `capture-${Date.now()}.jpg`);
+        file = await dataUrlToJpegFile(
+          draft.previewUrl,
+          `capture-${Date.now()}.jpg`,
+        );
       }
       const meta: RaPhotoUploadMeta = {
-        caption: caption.trim() || undefined,
-        category,
+        caption: draft.caption.trim() || undefined,
+        category: draft.category,
         takenByEmail,
         takenByName,
       };
       const result = await uploadRaPhoto(taskId, file, meta);
-      if (!result.ok) {
-        setUploadError(result.message);
-        return;
-      }
+      if (!result.ok) throw new Error(result.message);
       await onPhotoSaved(result.photo);
+      return result.photo;
+    },
+    [taskId, takenByEmail, takenByName, onPhotoSaved],
+  );
+
+  /** Guardar solo la foto en preview (modo una foto). */
+  const handleSaveSinglePreview = useCallback(async () => {
+    if (!previewUrl) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const draft: DraftPhoto = {
+        id: newDraftId(),
+        previewUrl,
+        file: pendingFile,
+        caption,
+        category,
+      };
+      await uploadOne(draft);
       resetState();
       onClose();
     } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "Error al guardar la foto.");
+      setUploadError(e instanceof Error ? e.message : "Error al guardar.");
     } finally {
       setUploading(false);
     }
@@ -180,13 +293,32 @@ export function PhotoCaptureModal({
     pendingFile,
     caption,
     category,
-    takenByEmail,
-    takenByName,
-    taskId,
-    onPhotoSaved,
+    uploadOne,
     resetState,
     onClose,
   ]);
+
+  const handleSaveAllDrafts = useCallback(async () => {
+    if (drafts.length === 0) return;
+    setUploading(true);
+    setUploadError(null);
+    setUploadProgress({ done: 0, total: drafts.length });
+    try {
+      for (let i = 0; i < drafts.length; i++) {
+        await uploadOne(drafts[i]);
+        setUploadProgress({ done: i + 1, total: drafts.length });
+      }
+      resetState();
+      onClose();
+    } catch (e) {
+      setUploadError(
+        e instanceof Error ? e.message : "Error al guardar las fotos.",
+      );
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+    }
+  }, [drafts, uploadOne, resetState, onClose]);
 
   if (!open) return null;
 
@@ -211,10 +343,11 @@ export function PhotoCaptureModal({
               id="photo-capture-title"
               className="text-sm font-black uppercase tracking-widest text-white"
             >
-              Registro fotográfico
+              Tomar fotos
             </h2>
             <p className="mt-0.5 truncate text-xs font-semibold text-blue-100">
               RA {raLabel}
+              {drafts.length > 0 ? ` · ${drafts.length} en lote` : ""}
             </p>
           </div>
           <button
@@ -232,7 +365,8 @@ export function PhotoCaptureModal({
           {mode === "choose" && (
             <div className="space-y-4">
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                Documentá la mercancía con fotos para el informe al cliente.
+                Tomá varios ángulos. Cada foto se previsualiza antes de
+                agregarla; al final revisás el lote y guardás.
               </p>
               {cameraError && (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -243,7 +377,7 @@ export function PhotoCaptureModal({
                 <button
                   type="button"
                   onClick={() => void startCamera()}
-                  className="flex flex-col items-center gap-3 rounded-2xl border-2 border-[#16263F]/20 bg-slate-50 px-4 py-8 transition hover:border-[#16263F] hover:bg-white dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-750"
+                  className="flex flex-col items-center gap-3 rounded-2xl border-2 border-[#16263F]/20 bg-slate-50 px-4 py-8 transition hover:border-[#16263F] hover:bg-white dark:border-slate-600 dark:bg-slate-800"
                 >
                   <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#16263F] text-white">
                     <Camera className="h-7 w-7" />
@@ -261,15 +395,25 @@ export function PhotoCaptureModal({
                     <ImagePlus className="h-7 w-7" />
                   </span>
                   <span className="text-xs font-black uppercase tracking-widest text-sky-900 dark:text-sky-100">
-                    Subir archivo
+                    Subir archivo(s)
                   </span>
                 </button>
               </div>
+              {drafts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setMode("review")}
+                  className="w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 py-3 text-xs font-black uppercase tracking-widest text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+                >
+                  Revisar lote ({drafts.length})
+                </button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
+                capture="environment"
                 className="hidden"
                 onChange={(e) => {
                   void handleFilePick(e.target.files);
@@ -281,7 +425,7 @@ export function PhotoCaptureModal({
 
           {mode === "camera" && (
             <div className="space-y-4">
-              <div className="relative overflow-hidden rounded-2xl bg-black aspect-[4/3]">
+              <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-black">
                 <video
                   ref={videoRef}
                   playsInline
@@ -300,7 +444,7 @@ export function PhotoCaptureModal({
                   type="button"
                   onClick={() => {
                     stopCamera();
-                    setMode("choose");
+                    setMode(drafts.length > 0 ? "review" : "choose");
                   }}
                   className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-600 dark:border-slate-600 dark:text-slate-300"
                 >
@@ -321,21 +465,26 @@ export function PhotoCaptureModal({
 
           {mode === "preview" && previewUrl && (
             <div className="space-y-4">
+              <p className="text-center text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Vista previa — ¿cómo quedó?
+              </p>
               <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-600">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewUrl}
                   alt="Vista previa"
-                  className="max-h-64 w-full object-contain bg-slate-100 dark:bg-slate-800"
+                  className="max-h-72 w-full bg-slate-100 object-contain dark:bg-slate-800"
                 />
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  Categoría
+                  Categoría / ángulo
                 </label>
                 <select
                   value={category}
-                  onChange={(e) => setCategory(e.target.value as RaPhotoCategory)}
+                  onChange={(e) =>
+                    setCategory(e.target.value as RaPhotoCategory)
+                  }
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                 >
                   {RA_PHOTO_CATEGORIES.map((c) => (
@@ -347,43 +496,135 @@ export function PhotoCaptureModal({
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-black uppercase tracking-widest text-slate-500">
-                  Descripción (opcional)
+                  Nota (opcional)
                 </label>
                 <input
                   type="text"
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
-                  placeholder="Ej. Bulto 12 — etiqueta dañada"
+                  placeholder="Ej. Frente · etiqueta · daño"
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
                 />
               </div>
               {uploadError && (
-                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
                   {uploadError}
                 </p>
               )}
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   onClick={handleRetake}
                   disabled={uploading}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-600 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-600 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  Otra foto
+                  Repetir foto
+                </button>
+                {multiShot ? (
+                  <button
+                    type="button"
+                    onClick={acceptIntoDraft}
+                    disabled={uploading}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    <Check className="h-4 w-4" />
+                    Usar esta y seguir
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveSinglePreview()}
+                    disabled={uploading}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  >
+                    {uploading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4" />
+                    )}
+                    Guardar foto
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {mode === "review" && (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                Revisá las {drafts.length} foto
+                {drafts.length === 1 ? "" : "s"} antes de guardar. Podés
+                eliminar alguna o tomar más ángulos.
+              </p>
+              {drafts.length === 0 ? (
+                <p className="text-center text-sm text-slate-400">
+                  No hay fotos en el lote.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {drafts.map((d, idx) => (
+                    <article
+                      key={d.id}
+                      className="relative overflow-hidden rounded-xl border border-slate-200 dark:border-slate-600"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={d.previewUrl}
+                        alt={`Foto ${idx + 1}`}
+                        className="aspect-square w-full bg-slate-100 object-cover dark:bg-slate-800"
+                      />
+                      <p className="truncate px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
+                        {RA_PHOTO_CATEGORY_LABELS[d.category]}
+                        {d.caption ? ` · ${d.caption}` : ""}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={uploading}
+                        onClick={() => removeDraft(d.id)}
+                        className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-md bg-red-600/95 text-white"
+                        aria-label="Quitar del lote"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
+              {uploadError && (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+                  {uploadError}
+                </p>
+              )}
+              {uploadProgress && (
+                <p className="text-center text-xs font-semibold text-slate-500">
+                  Guardando {uploadProgress.done} / {uploadProgress.total}…
+                </p>
+              )}
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  disabled={uploading}
+                  onClick={() => void startCamera()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#16263F] px-4 py-3 text-xs font-black uppercase tracking-widest text-[#16263F] disabled:opacity-50 dark:text-slate-100"
+                >
+                  <Camera className="h-4 w-4" />
+                  Tomar otra
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleSave()}
-                  disabled={uploading}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  disabled={uploading || drafts.length === 0}
+                  onClick={() => void handleSaveAllDrafts()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
                 >
                   {uploading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  {uploading ? "Guardando…" : "Guardar foto"}
+                  {uploading
+                    ? "Guardando…"
+                    : `Guardar ${drafts.length} foto${drafts.length === 1 ? "" : "s"}`}
                 </button>
               </div>
             </div>

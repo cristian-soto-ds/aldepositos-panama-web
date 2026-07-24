@@ -34,12 +34,39 @@ export async function GET(request: NextRequest) {
     }
 
     const estado = request.nextUrl.searchParams.get("estado");
+    const lite = request.nextUrl.searchParams.get("lite") === "1";
+    const since = request.nextUrl.searchParams.get("since");
+
     const citas = await fetchCitasForViewer(auth.admin, {
       rol: auth.rol,
       userId: auth.user.id,
       email: auth.user.email ?? auth.perfil?.correoPerfil ?? null,
       estado: estado || null,
     });
+
+    let maxUpdated = "";
+    for (const c of citas) {
+      if (c.updated_at && c.updated_at > maxUpdated) maxUpdated = c.updated_at;
+    }
+    const fingerprint = `${citas.length}|${maxUpdated}`;
+
+    if (since && since === fingerprint) {
+      return NextResponse.json({
+        unchanged: true,
+        fingerprint,
+        rol: auth.rol,
+      });
+    }
+
+    // Lista ligera: sin URLs firmadas (caro). Se firman al abrir el detalle.
+    if (lite) {
+      return NextResponse.json({
+        citas,
+        fingerprint,
+        rol: auth.rol,
+        lite: true,
+      });
+    }
 
     const withUrls = await Promise.all(
       citas.map(async (c) => ({
@@ -48,7 +75,11 @@ export async function GET(request: NextRequest) {
       })),
     );
 
-    return NextResponse.json({ citas: withUrls, rol: auth.rol });
+    return NextResponse.json({
+      citas: withUrls,
+      fingerprint,
+      rol: auth.rol,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[GET /api/citas]", msg);

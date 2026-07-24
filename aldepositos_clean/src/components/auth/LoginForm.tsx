@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { User, Lock, ArrowRight, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { User, Lock, ArrowRight, Loader2, CalendarPlus } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { signInWithUsername } from "@/lib/auth/sign-in-with-username";
 
@@ -112,7 +113,14 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       </form>
 
       <div className="relative z-10 mt-8 border-t border-slate-100 pt-6 text-center dark:border-slate-700/80">
-        <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+        <Link
+          href="/solicitar-cita"
+          className="inline-flex items-center justify-center gap-2 text-sm font-semibold text-[#16263F] underline-offset-4 hover:underline dark:text-blue-300"
+        >
+          <CalendarPlus className="h-4 w-4" aria-hidden />
+          Solicitar cita de entrega
+        </Link>
+        <p className="mt-4 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
           AldePositos Zona Libre Panamá
         </p>
       </div>

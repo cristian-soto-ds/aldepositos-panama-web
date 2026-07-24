@@ -90,6 +90,7 @@ Las fotos se guardan en **Storage** (`bucket` `avatars`, ruta `{user_uuid}/avata
 1. Si usas la tabla en español: ejecuta `supabase/migrations/005_perfiles_avatar_url.sql` (columna + política `UPDATE`). Si tu proyecto sigue usando `public.profiles` en inglés, usa `003_profiles_avatar_url.sql` en su lugar.
 2. Ejecuta `supabase/migrations/004_storage_avatars_bucket.sql` (bucket público + políticas de lectura/escritura solo en la carpeta del usuario).
 3. Si la foto **sí sube** a Storage pero el panel dice que la base **rechazó guardar `avatar_url` (RLS)**, ejecuta **`supabase/migrations/006_perfiles_update_avatar_rls_fix.sql`**. Ajusta la política `UPDATE` para que coincida con la columna que enlaza tu fila con `auth.users` (`id`, `uuid` o ambas).
+4. Para que el **Ranking Inventariadores** muestre las fotos de todos (no solo iniciales), ejecuta **`supabase/migrations/012_perfiles_select_avatars_authenticated.sql`**. Ese script aplica la política `SELECT` en **`perfiles` o `profiles`** (la que exista). Sin ella, el ranking no puede leer `avatar_url` ajenos. Opcional: añade `SUPABASE_SERVICE_ROLE_KEY` en `.env.local` (solo servidor) como respaldo.
 
 Si la política `UPDATE` en `perfiles` choca con las tuyas, ajusta o elimina la duplicada.
 

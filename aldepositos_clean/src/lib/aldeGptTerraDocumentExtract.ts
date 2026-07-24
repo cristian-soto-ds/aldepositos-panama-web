@@ -64,12 +64,13 @@ export function collectionLineDedupeKey(
  * necesitan descripción, pesos ni Magaya en este paso).
  */
 export const ALDEGPT_TERRA_REFS_BULTOS_PROMPT =
-  "Lee el documento adjunto y extrae ÚNICAMENTE por cada fila de producto: " +
+  "Lee el documento adjunto (TODAS las páginas) y extrae ÚNICAMENTE por cada fila de producto: " +
   "referencia (código/SKU/artículo), bultos y si es reempaque. " +
   "NO completes descripción, unidades, peso, medidas ni campos Magaya. " +
-  "COMPLETITUD: una fila JSON por CADA producto de la tabla (incluidas las de Total Bultos=0). " +
-  "No omitas filas intermedias. Si la ref se ve cortada, distingue productos por descripción. " +
-  "Si Total Bultos ≥ 1 → bultos=ese número y reempaque=false. " +
+  "COMPLETITUD: una fila JSON por CADA producto de la tabla hasta el último #LN (si hay 50+, devuelve 50+). " +
+  "No omitas filas intermedias ni te detengas a mitad. Si la ref se ve cortada, distingue productos por descripción. " +
+  "Si Total Bultos/Bts ≥ 1 → bultos=ese número y reempaque=false. " +
+  "Si Bts vacío / # BLTO vacío y la misma referencia se repite (packing list bodega) → bultos=\"0\" y reempaque=true. " +
   "Si Total Bultos = 0 (o vacío sin caja propia) → bultos=\"0\" y reempaque=true. " +
   "EMPAQUE del documento NO implica reempaque por sí solo. No inventes referencias.";
 
@@ -88,18 +89,20 @@ Cada objeto en "lines" usa SOLO estas claves:
 
 === REGLAS ===
 1) REFERENCIA: código/SKU/Codigo/Item/Style/Part Number. Una fila por CADA producto de la tabla. No inventes.
-   COMPLETITUD OBLIGATORIA: si el packing tiene 3 productos, "lines" debe tener 3 objetos. NUNCA omitas una fila intermedia.
-   Total Bultos=0 / Peso=0 también cuenta (reempaque=true): EXTRÁELA igual.
+   COMPLETITUD OBLIGATORIA: si el packing tiene 50 productos, "lines" debe tener 50 objetos. NUNCA omitas una fila intermedia ni te cortes a mitad.
+   Total Bultos=0 / Bts vacío / misma ref repetida sin # BLTO también cuenta (reempaque=true): EXTRÁELA igual.
    Si la columna Referencia se ve cortada (ej. BOLSO-CAMBRID), completa el código con la descripción
    (BOLSO CAMBRIDGE DENIM CANVAS vs BOLSO CAMBRIDGE YUTE → dos referencias distintas, no una sola).
-2) BULTOS: columna «Total Bultos», «Bultos», «Cajas». Si Pack Code=BOX/CTN/CARTON, Issued Qty = bultos (cajas). No uses «Bulto No.» ni EMPAQUE como cantidad.
+2) BULTOS: columna «Total Bultos», «Bultos», «Bts», «Cajas». «# BLTO» es rango (1-5), NO uses ese rango como cantidad.
+   Si Pack Code=BOX/CTN/CARTON, Issued Qty = bultos (cajas). No uses «Bulto No.» ni EMPAQUE como cantidad.
 3) REEMPAQUE:
-   - Total Bultos ≥ 1 y/o Peso Bruto > 0 → bultos≥1, reempaque=false SIEMPRE (ej. Total Bultos=1 peso=21.25).
+   - Total Bultos/Bts ≥ 1 y/o Peso Bruto > 0 → bultos≥1, reempaque=false SIEMPRE (ej. Total Bultos=1 peso=21.25).
    - Pack Code BOX/CTN + Issued Qty > 0 → bultos=Issued Qty, reempaque=false.
+   - Packing list bodega: misma referencia repetida con # BLTO vacío y Bts vacío → bultos="0", reempaque=true (OBLIGATORIA).
    - Total Bultos Magaya = 0 y peso 0 → bultos="0", reempaque=true. ESTAS FILAS SON OBLIGATORIAS (no las saltes).
    - EMPAQUE del PDF ≠ reempaque.
 4) Deja vacíos / no envíes descripción, unidades, peso, Magaya ni otros campos.
-5) Respeta orden de páginas (1, 2, 3…) y de la tabla de arriba hacia abajo.
+5) Respeta orden de páginas (1, 2, 3…) y de la tabla de arriba hacia abajo. Lee TODAS las páginas.
 6) Ignora SUBTOTAL / TOTAL / GASTOS sin código de producto.
 7) Si no hay documento usable: "lines": [] y explícalo en reply.
 8) Si el mensaje dice «Documento K de N»: extrae SOLO ese documento. El pedido completo se arma concatenando K=1…N en ese orden.`;
@@ -167,10 +170,12 @@ Identifica el código de producto aunque la columna se llame: Referencia, Codigo
 Una fila JSON por CADA producto/código de la tabla. No inventes referencias.
 COMPLETITUD OBLIGATORIA:
 - Cuenta las filas de producto del documento (excluye SUBTOTAL/TOTAL/GASTOS) y genera exactamente ese número de objetos en "lines".
+- Lee TODAS las páginas del PDF/imagen. Si hay 50+ referencias en 2–3 páginas, "lines" debe tener 50+ objetos. NUNCA cortes en la fila 40–48 dejando el resto.
 - NUNCA omitas una fila intermedia. Ejemplo: si hay BACCI CANVAS, luego CAMBRIDGE DENIM CANVAS (Total Bultos=0), luego CAMBRIDGE YUTE (Total Bultos=0) → DEBES devolver las 3.
-- Total Bultos=0 y Peso=0 también es producto (reempaque): extráelo siempre.
+- Total Bultos=0 / Bts vacío / # BLTO vacío con la misma referencia repetida = reempaque: extráelo SIEMPRE como fila aparte.
 - Si la columna Referencia se ve truncada en el PDF (BOLSO-CAMBRID…), usa el texto completo del documento y/o la descripción para distinguir
   (DENIM CANVAS ≠ YUTE → dos líneas con referencias distintas, p. ej. …DENIM… y …YUTE…).
+- En "reply" indica cuántas filas extrajiste y el último #LN o referencia (para verificar completitud).
 
 2) DESCRIPCIÓN
 Usa la descripción del producto asociada a esa referencia.
@@ -181,9 +186,9 @@ NUNCA pongas medidas (cm, m, 10x20x30, etc.) en descripcion.
 NUNCA pongas género (dama/caballero) en descripcion: va en "genero".
 Si no es jeans, deja la descripción del documento sin inventar datos.
 
-3) BULTOS (dos tipos de documento)
-FIDELIDAD: el número de bultos debe ser EXACTAMENTE el de la columna «bultos» / «Total Bultos» del documento. No lo cambies.
-En facturas con columna «cantidad» en DOC/docenas: eso NO son bultos (va a unidades). Los bultos son la columna «bultos».
+3) BULTOS (tipos de documento)
+FIDELIDAD: el número de bultos debe ser EXACTAMENTE el de la columna «bultos» / «Bts» / «Total Bultos» del documento. No lo cambies.
+En facturas con columna «cantidad» en DOC/docenas: eso NO son bultos (va a unidades). Los bultos son la columna «bultos»/«Bts».
 A) Packing Magaya — la columna «Total Bultos» MANDA (no «Bulto No.», no EMPAQUE):
    - REGLA DE ORO: si Total Bultos ≥ 1 → reempaque=false SIEMPRE. Nunca marques reempaque una fila que tenga bultos.
    - Total Bultos ≥ 1 y/o Peso Bruto > 0 → bultos=ese número (o 1 si solo hay peso), reempaque=false.
@@ -199,6 +204,16 @@ C) Factura comercial (columnas peso + bultos + cantidad DOC):
    - bultos = columna «bultos» exacta (ej. 12, 13).
    - peso → pesoTotalKg exacto (ej. 538.08).
    - cantidad DOC → unidades (docenas→piezas), NUNCA a bultos.
+D) PACKING LIST BODEGA (columnas #LN, # BLTO, Referencia, Bts, Empaque, Cant. Pedida, Unidad DOC/PCS) — OBLIGATORIO:
+   - Extrae TODAS las filas de producto de TODAS las páginas (si el #LN llega a 50, 60, 80… debes devolver ese mismo número de líneas). NUNCA te detengas a mitad (p. ej. solo hasta 48).
+   - «Bts» = bultos de la fila. «# BLTO» es rango de bultos (1-5), NO es la cantidad de bultos.
+   - REEMPAQUE (muy frecuente): la MISMA referencia se repite en la fila siguiente con #LN vacío o sin # BLTO, Bts vacío/en blanco, y Cant. Pedida en PCS (o DOC).
+     → Esa segunda fila ES OBLIGATORIA: bultos="0", reempaque=true. Conserva Cant. Pedida como piezas (PCS→piezas; DOC→×12).
+     Ejemplo OBLIGATORIO:
+       Fila: ref 11-G331, # BLTO 46-47, Bts=2, Cant=9 DOC → bultos="2", reempaque=false, tot und=108 (o und según regla DOC).
+       Fila siguiente: ref 11-G331, # BLTO vacío, Bts vacío, Cant=6 PCS → bultos="0", reempaque=true, unidadesTotales="6", unidadesPorBulto="6".
+     Igual para 11-G337, 11-G309, etc. NUNCA omitas la fila de reempaque ni la fusiones con la anterior.
+   - Filas normales con Bts≥1 → reempaque=false.
 
 4) Und/bulto y Tot und (OBLIGATORIO — piezas enteras, NUNCA decimales en und/bulto)
 1 docena = 12 piezas SIEMPRE.

@@ -3,6 +3,7 @@
  * Se persiste en Supabase como JSON en la tabla `tasks`.
  */
 import type { ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
+import type { RaPhotoRecord } from "@/lib/types/raPhoto";
 
 export type Task = {
   id: string;
@@ -78,4 +79,6 @@ export type Task = {
    * Impide que otra orden de recolección envíe al mismo RA.
    */
   linkedCollectionOrderId?: string;
+  /** Registro fotográfico del RA (fotos en Storage + metadatos). */
+  photoRecord?: RaPhotoRecord;
 };

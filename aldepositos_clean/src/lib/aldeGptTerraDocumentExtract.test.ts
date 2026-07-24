@@ -210,6 +210,33 @@ describe("postProcessAldeGptTerraLines docenas und/tot", () => {
     expect(lines[0]!.unidadesTotales).toBe("96");
   });
 
+  it("packing list: misma ref con bultos vacíos → reempaque y conserva PCS", () => {
+    const lines = postProcessAldeGptTerraLines([
+      {
+        referencia: "11-G331",
+        descripcion: "PANTALON P/SRA",
+        bultos: "2",
+        unidadesTotales: "9 DOC",
+      },
+      {
+        referencia: "11-G331",
+        descripcion: "PANTALON P/SRA",
+        bultos: "",
+        unidadesTotales: "6",
+        reempaque: true,
+      },
+    ]);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]!.reempaque).toBe(false);
+    expect(lines[0]!.bultos).toBe("2");
+    expect(lines[0]!.unidadesTotales).toBe("108");
+    expect(lines[0]!.unidadesPorBulto).toBe("54");
+    expect(lines[1]!.reempaque).toBe(true);
+    expect(lines[1]!.bultos).toBe("0");
+    expect(lines[1]!.unidadesTotales).toBe("6");
+    expect(lines[1]!.unidadesPorBulto).toBe("6");
+  });
+
   it("311 piezas / 6 bultos (no entero) → und 48 tot 311", () => {
     const lines = postProcessAldeGptTerraLines([
       {

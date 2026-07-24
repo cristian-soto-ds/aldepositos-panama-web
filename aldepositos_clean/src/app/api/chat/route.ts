@@ -32,6 +32,8 @@ const GENERAL_INSTRUCTIONS =
 const ALDEGPT_TERRA_RESPONSE_OPTIONS = {
   model: CHAT_MODEL,
   store: true,
+  // Packing lists grandes (50–100+ filas) necesitan salida larga; sin esto el modelo corta ~línea 48.
+  max_output_tokens: 32_768,
   reasoning: {
     mode: "standard",
     effort: "medium",
@@ -39,7 +41,7 @@ const ALDEGPT_TERRA_RESPONSE_OPTIONS = {
   },
   text: {
     format: { type: "json_object" as const },
-    verbosity: "medium" as const,
+    verbosity: "high" as const,
   },
 };
 

@@ -106,6 +106,25 @@ const InventoryControlModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const CitasModule = dynamic(
+  () =>
+    import("@/components/control-panel/CitasModule").then((m) => m.CitasModule),
+  { loading: () => <PanelModuleLoader /> },
+);
+const PhotoRecordModule = dynamic(
+  () =>
+    import("@/components/control-panel/PhotoRecordModule").then(
+      (m) => m.PhotoRecordModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
+const PhotoReportsModule = dynamic(
+  () =>
+    import("@/components/control-panel/PhotoReportsModule").then(
+      (m) => m.PhotoReportsModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -115,6 +134,8 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "receptionist",
   "truck-direction",
   "reports",
+  "photo-record",
+  "photo-reports",
 ]);
 
 export default function PanelPage() {
@@ -641,10 +662,29 @@ export default function PanelPage() {
 
         {visibleView === "truck-direction" && <TruckDirectionModule />}
 
+        {visibleView === "citas" && <CitasModule />}
+
+        {visibleView === "photo-record" && (
+          <PhotoRecordModule
+            tasks={tasks}
+            onUpdateTask={handleUpdateTask}
+            userEmail={userEmail}
+            userDisplayName={userDisplayName}
+          />
+        )}
+
         {visibleView === "reference-catalog" && <ReferenceCatalogModule />}
 
         {visibleView === "reports" && (
           <CompletedReportsModule tasks={tasks} onDeleteTask={handleDeleteTask} />
+        )}
+
+        {visibleView === "photo-reports" && (
+          <PhotoReportsModule
+            tasks={tasks}
+            userEmail={userEmail}
+            userDisplayName={userDisplayName}
+          />
         )}
 
         {visibleView === "inventory-leaderboard" && (

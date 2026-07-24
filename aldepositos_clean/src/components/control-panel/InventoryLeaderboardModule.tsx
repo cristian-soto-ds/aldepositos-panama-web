@@ -26,6 +26,7 @@ import {
   type InventariadorStats,
 } from "@/lib/inventoryLeaderboard";
 import { avatarInitialsFromName } from "@/lib/viewerIdentity";
+import { supabase } from "@/lib/supabase";
 
 type InventoryLeaderboardModuleProps = {
   tasks: Task[];
@@ -57,6 +58,39 @@ function paletteForKey(key: string): string {
   for (let i = 0; i < key.length; i++)
     h = (h + key.charCodeAt(i) * (i + 1)) % AVATAR_PALETTES.length;
   return AVATAR_PALETTES[h]!;
+}
+
+function InventariadorAvatar({
+  name,
+  inventariadorId,
+  avatarUrl,
+  sizeClass,
+  textClass,
+}: {
+  name: string;
+  inventariadorId: string;
+  avatarUrl?: string | null;
+  sizeClass: string;
+  textClass: string;
+}) {
+  const src = avatarUrl?.trim() || "";
+  if (src) {
+    return (
+      <div
+        className={`${sizeClass} shrink-0 overflow-hidden rounded-full border border-white/40 shadow-sm dark:border-slate-700`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`flex shrink-0 items-center justify-center rounded-full ${sizeClass} ${textClass} ${paletteForKey(inventariadorId)}`}
+    >
+      {avatarInitialsFromName(name, null, null)}
+    </div>
+  );
 }
 
 const PODIUM_ORDER = [1, 0, 2] as const;
@@ -179,10 +213,12 @@ function PodiumCard({
   stat,
   slotIndex,
   isCurrentUser,
+  avatarUrl,
 }: {
   stat: InventariadorStats;
   slotIndex: 0 | 1 | 2;
   isCurrentUser: boolean;
+  avatarUrl?: string | null;
 }) {
   const heightClass = PODIUM_HEIGHTS[slotIndex];
   const medal = PODIUM_MEDALS[slotIndex];
@@ -206,11 +242,13 @@ function PodiumCard({
         <span className="mb-1 text-xl sm:text-2xl" aria-hidden>
           {medal}
         </span>
-        <div
-          className={`flex h-14 w-14 items-center justify-center rounded-full text-sm font-black sm:h-16 sm:w-16 sm:text-base ${paletteForKey(stat.id)}`}
-        >
-          {avatarInitialsFromName(stat.name, null, null)}
-        </div>
+        <InventariadorAvatar
+          name={stat.name}
+          inventariadorId={stat.id}
+          avatarUrl={avatarUrl}
+          sizeClass="h-14 w-14 sm:h-16 sm:w-16"
+          textClass="text-sm font-black sm:text-base"
+        />
         <p className="mt-2 max-w-[7rem] truncate text-center text-xs font-black text-[#16263F] dark:text-slate-100 sm:max-w-[9rem] sm:text-sm">
           {stat.name}
         </p>
@@ -351,6 +389,7 @@ function StatRow({
   maxBultos,
   isCurrentUser,
   prevPeriodLabel,
+  avatarUrl,
 }: {
   stat: InventariadorStats;
   maxInventarios: number;
@@ -358,6 +397,7 @@ function StatRow({
   maxBultos: number;
   isCurrentUser: boolean;
   prevPeriodLabel: string;
+  avatarUrl?: string | null;
 }) {
   return (
     <div
@@ -368,11 +408,13 @@ function StatRow({
       } ${isCurrentUser ? "ring-2 ring-blue-400/50" : ""}`}
     >
       <div className="mb-4 flex items-center gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-black ${paletteForKey(stat.id)}`}
-        >
-          {avatarInitialsFromName(stat.name, null, null)}
-        </div>
+        <InventariadorAvatar
+          name={stat.name}
+          inventariadorId={stat.id}
+          avatarUrl={avatarUrl}
+          sizeClass="h-10 w-10"
+          textClass="text-xs font-black"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
@@ -518,6 +560,7 @@ export function InventoryLeaderboardModule({
   const [period, setPeriod] = useState<LeaderboardPeriod>("day");
   const [currentTime, setCurrentTime] = useState("");
   const [currentDate, setCurrentDate] = useState("");
+  const [avatarsById, setAvatarsById] = useState<Record<string, string>>({});
 
   const currentUserId = useMemo(
     () => isCurrentUserInventariador(userDisplayName, userEmail),
@@ -566,6 +609,37 @@ export function InventoryLeaderboardModule({
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (!token) return;
+        const res = await fetch("/api/leaderboard/avatars", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          avatars?: Record<string, string>;
+        };
+        if (cancelled || !data.avatars) return;
+        const cleaned: Record<string, string> = {};
+        for (const [id, url] of Object.entries(data.avatars)) {
+          const t = String(url ?? "").trim();
+          if (t) cleaned[id] = t;
+        }
+        setAvatarsById(cleaned);
+      } catch (e) {
+        console.warn("[ranking] no se pudieron cargar avatares", e);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -708,6 +782,7 @@ export function InventoryLeaderboardModule({
                 stat={stat}
                 slotIndex={i as 0 | 1 | 2}
                 isCurrentUser={stat.id === currentUserId}
+                avatarUrl={avatarsById[stat.id]}
               />
             ))}
           </div>
@@ -740,6 +815,7 @@ export function InventoryLeaderboardModule({
               maxBultos={maxBultos}
               isCurrentUser={stat.id === currentUserId}
               prevPeriodLabel={result.prevPeriodLabel}
+              avatarUrl={avatarsById[stat.id]}
             />
           ))}
         </section>

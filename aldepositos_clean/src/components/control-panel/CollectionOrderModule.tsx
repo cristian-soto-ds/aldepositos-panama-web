@@ -1623,6 +1623,7 @@ export function CollectionOrderModule({
       );
       const lineIndex = new Map<string, number>();
       mergedLines.forEach((row, i) => {
+        if (row.reempaque === true) return;
         const key = collectionLineDedupeKey(row.referencia, row.descripcion);
         if (key) lineIndex.set(key, i);
       });
@@ -1645,7 +1646,9 @@ export function CollectionOrderModule({
           parseFloat(String(mapped.pesoTotalKg ?? "").replace(",", ".")) || 0,
         );
         const isReempaque =
-          mapped.reempaque === true && bultosNum <= 0 && pesoNum <= 0;
+          (mapped.reempaque === true || bultosNum <= 0) &&
+          bultosNum <= 0 &&
+          pesoNum <= 0;
 
         const imported = normalizeCollectionOrderLineFromImport({
           referencia: mapped.referencia,
@@ -1725,27 +1728,38 @@ export function CollectionOrderModule({
         );
         let targetId = normalized.id;
 
-        if (key && lineIndex.has(key)) {
-          const idx = lineIndex.get(key)!;
-          const existingId = mergedLines[idx]!.id;
+        // Reempaque (misma ref sin bultos) NUNCA se fusiona con la fila de bultos.
+        const existingIdx =
+          key && !isReempaque && lineIndex.has(key)
+            ? lineIndex.get(key)!
+            : undefined;
+        const existingIsReempaque =
+          existingIdx != null
+            ? mergedLines[existingIdx]?.reempaque === true
+            : false;
+
+        if (existingIdx != null && !existingIsReempaque && !isReempaque) {
+          const existingId = mergedLines[existingIdx]!.id;
           targetId = existingId;
-          mergedLines[idx] = {
-            ...mergedLines[idx],
+          mergedLines[existingIdx] = {
+            ...mergedLines[existingIdx],
             ...normalized,
             id: existingId,
-            reempaque: isReempaque,
+            reempaque: false,
             unidadesTotales:
               totFromTerra > 0
                 ? String(totFromTerra)
-                : mergedLines[idx]!.unidadesTotales,
-            pesoTotalKg: !isReempaque && pesoTotFromTerra
+                : mergedLines[existingIdx]!.unidadesTotales,
+            pesoTotalKg: pesoTotFromTerra
               ? String(imported.pesoTotalKg ?? pesoTotFromTerra)
-              : mergedLines[idx]!.pesoTotalKg,
+              : mergedLines[existingIdx]!.pesoTotalKg,
           };
           void runCatalogLookup(existingId, referencia);
         } else {
           mergedLines.push(normalized);
-          if (key) lineIndex.set(key, mergedLines.length - 1);
+          if (key && !isReempaque) {
+            lineIndex.set(key, mergedLines.length - 1);
+          }
           void runCatalogLookup(normalized.id, referencia);
         }
 
@@ -1887,6 +1901,67 @@ export function CollectionOrderModule({
         let extracted: AldeGptTerraLine[] = [];
         const parts: string[] = [];
 
+        /** Si el modelo corta ~línea 48, pide el resto del mismo PDF. */
+        const continueUntilComplete = async (
+          file: File,
+          initial: { reply: string; lines: AldeGptTerraLine[] },
+        ): Promise<{ reply: string; lines: AldeGptTerraLine[] }> => {
+          let all = [...initial.lines];
+          const replies = [initial.reply].filter(Boolean);
+          if (all.length < 35) {
+            return { reply: replies.join("\n"), lines: all };
+          }
+          const seen = () =>
+            new Set(
+              all.map((l) =>
+                [
+                  String(l.referencia ?? "")
+                    .trim()
+                    .toUpperCase()
+                    .replace(/\s+/g, ""),
+                  String(l.bultos ?? ""),
+                  l.reempaque === true ? "R" : "B",
+                  String(l.unidadesTotales ?? ""),
+                ].join("|"),
+              ),
+            );
+          let keys = seen();
+          for (let c = 0; c < 5; c++) {
+            const last = all[all.length - 1];
+            const lastRef =
+              String(last?.referencia ?? "").trim() || "(sin ref)";
+            const contPrompt =
+              `CONTINUACIÓN del mismo documento (${file.name}). ` +
+              `Ya extraje ${all.length} filas; la última referencia fue "${lastRef}". ` +
+              `Lee TODAS las páginas y extrae SOLO las filas de producto que FALTAN después de esa. ` +
+              `Incluye reempaques (misma ref con Bts/# BLTO vacío → bultos=0, reempaque=true). ` +
+              `NO repitas filas ya extraídas. Si ya terminaste el documento, responde {"reply":"completo","lines":[]}. ` +
+              `Responde en JSON.`;
+            const more = await requestOne(contPrompt, file);
+            if (!more.lines.length) break;
+            const fresh = more.lines.filter((l) => {
+              const k = [
+                String(l.referencia ?? "")
+                  .trim()
+                  .toUpperCase()
+                  .replace(/\s+/g, ""),
+                String(l.bultos ?? ""),
+                l.reempaque === true ? "R" : "B",
+                String(l.unidadesTotales ?? ""),
+              ].join("|");
+              if (keys.has(k)) return false;
+              keys.add(k);
+              return true;
+            });
+            if (fresh.length === 0) break;
+            all = all.concat(fresh);
+            keys = seen();
+            if (more.reply) replies.push(more.reply);
+            if (fresh.length < 5) break;
+          }
+          return { reply: replies.join("\n"), lines: all };
+        };
+
         if (files.length === 0) {
           const one = await requestOne(text, null);
           extracted = one.lines;
@@ -1903,14 +1978,15 @@ export function CollectionOrderModule({
               extractMode === "refsBultosOnly"
                 ? ALDEGPT_TERRA_REFS_BULTOS_PROMPT
                 : text ||
-                  `Extrae las líneas del documento adjunto (${file.name}) según las reglas de recolección.`;
+                  `Extrae TODAS las líneas del documento adjunto (${file.name}) según las reglas de recolección (todas las páginas; incluye reempaques con Bts vacío).`;
             const orderedPrompt =
               files.length === 1
                 ? `${basePrompt}\n\nResponde en JSON.`
                 : `${basePrompt}\n\nDocumento ${i + 1} de ${files.length} (respeta este orden). Responde en JSON.`;
             const one = await requestOne(orderedPrompt, file);
-            extracted = extracted.concat(one.lines);
-            if (one.reply) parts.push(`(${file.name}) ${one.reply}`);
+            const completed = await continueUntilComplete(file, one);
+            extracted = extracted.concat(completed.lines);
+            if (completed.reply) parts.push(`(${file.name}) ${completed.reply}`);
           }
         }
 

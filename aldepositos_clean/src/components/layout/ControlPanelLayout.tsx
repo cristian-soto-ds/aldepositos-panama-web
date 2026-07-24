@@ -17,6 +17,9 @@ import {
   Route,
   Trophy,
   PauseCircle,
+  CalendarClock,
+  Camera,
+  Images,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -174,6 +177,24 @@ export function ControlPanelLayout({
               setSidebarOpen(false);
             }}
           />
+          <NavItem
+            icon={<NavIcon Icon={CalendarClock} />}
+            text="Citas"
+            active={currentView === "citas"}
+            onClick={() => {
+              setCurrentView("citas");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<NavIcon Icon={Camera} />}
+            text="Registro Fotográfico"
+            active={currentView === "photo-record"}
+            onClick={() => {
+              setCurrentView("photo-record");
+              setSidebarOpen(false);
+            }}
+          />
 
           <div className="my-3 border-b border-white/5 md:my-4" />
 
@@ -210,6 +231,15 @@ export function ControlPanelLayout({
             active={currentView === "reports"}
             onClick={() => {
               setCurrentView("reports");
+              setSidebarOpen(false);
+            }}
+          />
+          <NavItem
+            icon={<NavIcon Icon={Images} />}
+            text="Reportes Registro Foto"
+            active={currentView === "photo-reports"}
+            onClick={() => {
+              setCurrentView("photo-reports");
               setSidebarOpen(false);
             }}
           />

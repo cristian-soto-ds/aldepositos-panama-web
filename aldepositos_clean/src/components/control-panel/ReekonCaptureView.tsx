@@ -24,9 +24,7 @@ import {
 import type { QuickMeasureRow, ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
 import { isQuickRowComplete } from "@/lib/quickInventoryTypes";
 import {
-  SyncStatusBadge,
   type AutosaveState,
-  type SyncStatus,
 } from "@/components/control-panel/SyncStatusBadge";
 import { ReekonReferenceListSheet } from "@/components/control-panel/ReekonReferenceListSheet";
 import {
@@ -72,8 +70,6 @@ type ReekonCaptureViewProps = {
   canPause?: boolean;
   autosaveState: AutosaveState;
   isSaving: boolean;
-  /** Estado de sincronización enriquecido (última sync, conexión, cola). */
-  syncStatus?: SyncStatus;
   /** Si true: L/A/H editables con teclado (sin cinta). */
   allowKeyboardMeasures?: boolean;
 };
@@ -341,7 +337,6 @@ export function ReekonCaptureView({
   canPause = false,
   autosaveState,
   isSaving,
-  syncStatus,
   allowKeyboardMeasures = false,
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
@@ -350,6 +345,8 @@ export function ReekonCaptureView({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refListOpen, setRefListOpen] = useState(false);
   const [showRefCarousel, setShowRefCarousel] = useState(false);
+  /** Segundo toque requerido para borrar la línea activa (evita borrados accidentales). */
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Peso de paleta con borrador local: escribir es instantáneo y solo se confirma
   // al salir del campo (evita el bloqueo al replicar el peso en todas las filas).
@@ -366,6 +363,10 @@ export function ReekonCaptureView({
   const activeRow = activeIndex >= 0 ? measureRows[activeIndex] : measureRows[0] ?? null;
   const activeId = activeRow?.id ?? null;
   const palletized = referenceMode === "palletized";
+
+  useEffect(() => {
+    setDeleteConfirmId(null);
+  }, [activeId]);
 
   const rowCbm = activeRow
     ? cubicajeM3FromDims(activeRow.l, activeRow.w, activeRow.h, activeRow.bultos, activeRow.reempaque)
@@ -591,7 +592,7 @@ export function ReekonCaptureView({
 
   const pendingCount = measureRows.length - completedCount;
 
-  const handleDeleteCurrent = () => {
+  const performDeleteCurrent = () => {
     if (!activeId || measureRows.length <= 1) return;
     if (typeof document !== "undefined") {
       const active = document.activeElement;
@@ -599,9 +600,30 @@ export function ReekonCaptureView({
     }
     const idx = activeIndex;
     const nextId = measureRows[idx + 1]?.id ?? measureRows[idx - 1]?.id;
+    setDeleteConfirmId(null);
     onDeleteRow(activeId);
     if (nextId) onActiveRowChange(nextId);
   };
+
+  const handleDeleteCurrent = () => {
+    if (!activeId || measureRows.length <= 1) return;
+    if (deleteConfirmId === activeId) {
+      performDeleteCurrent();
+      return;
+    }
+    setDeleteConfirmId(activeId);
+  };
+
+  const deleteConfirmLabel = useMemo(() => {
+    if (!activeRow) return "esta referencia";
+    const ref = strVal(activeRow.referencia);
+    if (referenceMode === "with" && ref) return `la referencia ${ref}`;
+    if (palletized) {
+      const pnum = palletOf(activeRow);
+      return `la fila de P${pnum}`;
+    }
+    return "esta línea";
+  }, [activeRow, referenceMode, palletized]);
 
   // Al terminar el Alto con la cinta: salta a la siguiente línea y enfoca su Largo.
   const finishMeasuresAndAdvance = () => {
@@ -1037,29 +1059,35 @@ export function ReekonCaptureView({
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
             <span>Total {formatCubicaje2(totalCbm)} m³</span>
             <span>{formatMeasure2(totalWeight)} kg</span>
-            {syncStatus ? (
-              <SyncStatusBadge
-                status={syncStatus}
-                className="!px-2 !py-1 !text-[11px]"
-              />
-            ) : (
-              <span>
-                {autosaveState === "saving" ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Guardando…
-                  </span>
-                ) : autosaveState === "saved" ? (
-                  "Guardado"
-                ) : autosaveState === "error" ? (
-                  "Error al guardar"
-                ) : (
-                  "Borrador"
-                )}
-              </span>
-            )}
           </div>
           <div className="flex items-stretch gap-2">
+            {deleteConfirmId === activeId ? (
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <p className="px-0.5 text-center text-[11px] font-semibold leading-snug text-red-700 dark:text-red-300">
+                  ¿Seguro que quieres eliminar {deleteConfirmLabel}?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="flex h-14 flex-1 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-sm font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={performDeleteCurrent}
+                    className="flex h-14 flex-1 items-center justify-center gap-1.5 rounded-2xl bg-red-600 text-sm font-bold text-white active:scale-[0.98] dark:bg-red-700"
+                  >
+                    <Trash2 className="h-5 w-5 shrink-0" />
+                    Sí, eliminar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
@@ -1145,6 +1173,8 @@ export function ReekonCaptureView({
               {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
               Guardar
             </button>
+              </>
+            )}
           </div>
         </div>
       </footer>

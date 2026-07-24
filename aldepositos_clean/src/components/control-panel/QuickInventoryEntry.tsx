@@ -42,7 +42,6 @@ const ReekonCaptureView = dynamic(
   },
 );
 import {
-  SyncStatusBadge,
   type AutosaveState,
 } from "@/components/control-panel/SyncStatusBadge";
 import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
@@ -3157,12 +3156,6 @@ export function QuickInventoryEntry({
           }
           autosaveState={autosaveState}
           isSaving={autosaveState === "saving"}
-          syncStatus={{
-            state: autosaveState,
-            lastSavedAt,
-            pendingCount,
-            isOnline,
-          }}
           allowKeyboardMeasures={allowKeyboardMeasures}
         />
         </div>
@@ -3274,14 +3267,6 @@ export function QuickInventoryEntry({
                 <Box className="icon-sm text-blue-600 dark:text-blue-400" />
                 RA-{t.ra}
               </span>
-              <SyncStatusBadge
-                status={{
-                  state: autosaveState,
-                  lastSavedAt,
-                  pendingCount,
-                  isOnline,
-                }}
-              />
             </div>
           )}
 

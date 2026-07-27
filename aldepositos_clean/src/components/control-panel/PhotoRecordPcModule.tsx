@@ -213,8 +213,7 @@ export function PhotoRecordPcModule({
               Cola de fotos
             </h1>
             <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Indicá qué RAs necesitan fotos. Los inventariadores las toman en
-              Celular.
+              Marcá RAs → los inventariadores los ven en Celular.
             </p>
           </div>
           <p className="text-sm font-black tabular-nums text-[#16263F] dark:text-slate-100">

@@ -13,7 +13,7 @@ import {
   rowHasExportableData,
   withExcelSeparatorHint,
 } from "@/lib/exportInventarioCsv";
-import { cubicajeM3FromDims, roundMeasureNearest } from "@/lib/measureDecimals";
+import { cubicajeM3FromDims, parseMeasureNumber, roundMeasureNearest } from "@/lib/measureDecimals";
 import {
   normalizeJeansDescripcion,
   rejectTejidoInferredFromProduct,
@@ -54,9 +54,7 @@ function tallaParaCsvMagaya(raw: string): string {
 }
 
 function parseNum(v: unknown): number {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
+  return parseMeasureNumber(v);
 }
 
 function cubicajeTotalM3(

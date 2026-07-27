@@ -9,6 +9,7 @@ import { ALDEGPT_TERRA_DISPLAY_NAME } from "@/lib/aldeGptTerraBrand";
 import { MAGAYA_KNOWN_CODE_TABLES } from "@/lib/magayaCodeTables";
 import {
   formatWeightPrecise,
+  parseMeasureNumber,
   preserveDocumentNumber,
 } from "@/lib/measureDecimals";
 
@@ -275,8 +276,9 @@ Si no hay documento o no es packing/factura, "lines": [] y responde en reply.
 ${MAGAYA_KNOWN_CODE_TABLES}`;
 
 function parseFloatLoose(s: string): number {
-  const n = parseFloat(String(s).replace(",", ".").trim());
-  return Number.isFinite(n) ? n : NaN;
+  const raw = String(s ?? "").trim();
+  if (!raw || !/\d/.test(raw)) return NaN;
+  return parseMeasureNumber(raw);
 }
 
 /**

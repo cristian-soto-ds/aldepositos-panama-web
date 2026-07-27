@@ -277,9 +277,16 @@ export function PhotoReportsModule({
             ) : (
               <Download className="h-4 w-4" />
             )}
-            PDF
+            {isDownloadingPdf ? "Generando PDF…" : "PDF profesional"}
           </button>
         </div>
+
+        {isDownloadingPdf && (
+          <p className="mx-4 mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+            Generando PDF… portada y fotos en alta calidad. No cierres esta
+            pantalla.
+          </p>
+        )}
 
         {exportError && (
           <p className="mx-4 mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
@@ -297,12 +304,18 @@ export function PhotoReportsModule({
               value={photoRecordTakenByLabel(viewTask)}
             />
           </div>
-          <div className="mx-auto grid max-w-5xl grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {viewPhotos.map((photo) => (
+          <p className="mx-auto mb-3 max-w-5xl text-[11px] font-semibold text-slate-500">
+            {viewPhotos.length} fotografía
+            {viewPhotos.length === 1 ? "" : "s"} · el PDF incluye portada y
+            fotos grandes (hasta 2 por hoja)
+          </p>
+          <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+            {viewPhotos.map((photo, idx) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
                 src={photoSrcFor(photo)}
+                index={idx + 1}
               />
             ))}
           </div>
@@ -506,24 +519,35 @@ function MetaChip({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PhotoCard({ photo, src }: { photo: RaPhoto; src: string }) {
+function PhotoCard({
+  photo,
+  src,
+  index,
+}: {
+  photo: RaPhoto;
+  src: string;
+  index: number;
+}) {
   return (
-    <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800/80">
-      <div className="flex h-28 items-center justify-center bg-slate-50 dark:bg-slate-900/60 sm:h-32">
+    <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-800/80">
+      <div className="relative flex aspect-[4/3] items-center justify-center bg-slate-50 dark:bg-slate-900/60">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={src}
-          alt={photo.caption || "Foto RA"}
-          className="max-h-full max-w-full object-contain p-1"
+          alt={photo.caption || `Foto ${index}`}
+          className="max-h-full max-w-full object-contain p-2"
           loading="lazy"
         />
+        <span className="absolute left-2 top-2 rounded-md bg-[#16263F]/90 px-2 py-0.5 text-[9px] font-black text-white">
+          #{index}
+        </span>
       </div>
-      <div className="space-y-0.5 p-2">
+      <div className="space-y-0.5 p-3">
         <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">
           {RA_PHOTO_CATEGORY_LABELS[photo.category ?? "general"]}
         </p>
         {photo.caption ? (
-          <p className="truncate text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+          <p className="line-clamp-2 text-[12px] font-semibold text-slate-700 dark:text-slate-200">
             {photo.caption}
           </p>
         ) : null}

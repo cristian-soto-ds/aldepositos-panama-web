@@ -4,6 +4,7 @@
  */
 
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
+import { parseMeasureNumber } from "@/lib/measureDecimals";
 
 export type ParsedOrHtmRow = {
   numero: string;
@@ -90,13 +91,7 @@ function cellText(el: Element | null | undefined): string {
 }
 
 function parseNum(raw: string): number {
-  const cleaned = raw
-    .replace(/\u00a0/g, " ")
-    .replace(/[^\d,.\-]/g, "")
-    .replace(/\.(?=.*\.)/g, "")
-    .replace(",", ".");
-  const n = parseFloat(cleaned);
-  return Number.isFinite(n) ? n : 0;
+  return parseMeasureNumber(raw);
 }
 
 /** Mejor coincidencia por alias más largo (evita «no» dentro de «nombre»). */

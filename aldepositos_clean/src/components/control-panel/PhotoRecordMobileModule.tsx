@@ -145,7 +145,7 @@ export function PhotoRecordMobileModule({
           RAs por fotografiar
         </h1>
         <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-          Cola marcada en PC · varios ángulos por RA
+          Cola de PC · tomá varias fotos por cada RA
         </p>
       </div>
 
@@ -223,13 +223,18 @@ export function PhotoRecordMobileModule({
             >
               ← Volver a la cola
             </button>
-            <div>
-              <h2 className="text-xl font-black text-[#16263F] dark:text-slate-100">
-                RA {selectedTask.ra}
-              </h2>
-              <p className="text-sm font-semibold text-slate-500">
-                {selectedTask.mainClient || selectedTask.provider || "—"}
-              </p>
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 className="text-xl font-black text-[#16263F] dark:text-slate-100">
+                  RA {selectedTask.ra}
+                </h2>
+                <p className="text-sm font-semibold text-slate-500">
+                  {selectedTask.mainClient || selectedTask.provider || "—"}
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {photos.length} foto{photos.length === 1 ? "" : "s"}
+              </span>
             </div>
             <button
               type="button"
@@ -238,7 +243,7 @@ export function PhotoRecordMobileModule({
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#16263F] py-4 text-sm font-black uppercase tracking-widest text-white shadow-md disabled:opacity-40"
             >
               <Camera className="h-5 w-5" />
-              Tomar fotos (varios ángulos)
+              Tomar varias fotos
             </button>
           </div>
 
@@ -317,6 +322,7 @@ export function PhotoRecordMobileModule({
           takenByEmail={userEmail ?? undefined}
           takenByName={userDisplayName ?? undefined}
           multiShot
+          autoStartCamera
           onClose={() => setCaptureOpen(false)}
           onPhotoSaved={handlePhotoSaved}
         />

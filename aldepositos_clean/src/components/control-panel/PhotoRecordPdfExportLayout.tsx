@@ -1,7 +1,9 @@
 "use client";
 
 /**
- * Layout PDF para registro fotográfico de RA — estilos inline para html2canvas.
+ * Layout PDF profesional para registro fotográfico de RA.
+ * Portada + 1–2 fotos grandes por hoja + pie de página.
+ * Estilos inline para html2canvas.
  */
 
 import type { CSSProperties } from "react";
@@ -12,20 +14,19 @@ import logoMark from "@/assets/brand/logo-aldepositos.png";
 import { PDF_EXPORT_WIDTH_PX } from "./reportsPdfExport";
 import type { RaPhotoPdfAsset } from "@/lib/raPhotoStorage";
 import { computeReportData } from "@/lib/reportTotals";
+import { photoRecordTakenByLabel } from "@/lib/raPhotoRecord";
 
 const BRAND = "#16263F";
 const TEXT = "#1e293b";
 const MUTED = "#64748b";
 const BORDER = "#e2e8f0";
-const PAGE_PAD_X = 40;
-const PAGE_PAD_Y = 28;
+const PAGE_PAD_X = 44;
+const PAGE_PAD_Y = 36;
 const CONTENT_W = PDF_EXPORT_WIDTH_PX - PAGE_PAD_X * 2;
-const COL_GAP = 14;
-const ROW_GAP = 14;
-/** Máximo de fotos por hoja (cuadrícula 2×2). */
-const PHOTOS_PER_PAGE = 4;
-/** Altura máxima de imagen en cuadrícula — compacta pero legible. */
-const GRID_IMG_MAX_H = 200;
+/** Máximo de fotos por hoja (grandes, apaisadas). */
+const PHOTOS_PER_PAGE = 2;
+const PHOTO_SLOT_H = 420;
+const FOOTER_H = 28;
 
 type Props = {
   task: Task;
@@ -41,6 +42,19 @@ function formatPhotoDate(iso: string): string {
     return new Date(iso).toLocaleString("es-PA", {
       dateStyle: "short",
       timeStyle: "short",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatLongDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("es-PA", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
     });
   } catch {
     return iso;
@@ -78,224 +92,328 @@ function paginatePhotos(photos: RaPhoto[]): RaPhoto[][] {
   for (let i = 0; i < photos.length; i += PHOTOS_PER_PAGE) {
     pages.push(photos.slice(i, i + PHOTOS_PER_PAGE));
   }
-  return pages;
+  return pages.length > 0 ? pages : [[]];
 }
 
 function pageShellStyle(): CSSProperties {
   return {
     width: `${PDF_EXPORT_WIDTH_PX}px`,
+    minHeight: 1100,
     boxSizing: "border-box",
     backgroundColor: "#ffffff",
     color: TEXT,
     fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif',
     fontSize: 12,
     lineHeight: 1.45,
-    padding: `${PAGE_PAD_Y}px ${PAGE_PAD_X}px`,
+    padding: `${PAGE_PAD_Y}px ${PAGE_PAD_X}px ${PAGE_PAD_Y + FOOTER_H}px`,
     position: "relative",
     overflow: "visible",
   };
 }
 
-function PdfHeader({
+function PageFooter({
   task,
-  generatedAt,
-  subtitle,
+  page,
+  totalPages,
 }: {
   task: Task;
-  generatedAt: string;
-  subtitle?: string;
+  page: number;
+  totalPages: number;
 }) {
   return (
     <div
       style={{
+        position: "absolute",
+        left: PAGE_PAD_X,
+        right: PAGE_PAD_X,
+        bottom: 18,
         display: "flex",
         justifyContent: "space-between",
-        alignItems: "flex-start",
-        gap: 16,
-        marginBottom: 18,
-        paddingBottom: 16,
-        borderBottom: `4px solid ${BRAND}`,
+        alignItems: "center",
+        borderTop: `1px solid ${BORDER}`,
+        paddingTop: 10,
+        fontSize: 9,
+        fontWeight: 700,
+        color: MUTED,
+        letterSpacing: "0.04em",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+      <span>
+        ALDEPÓSITOS · Zona Libre Panamá · RA {String(task.ra ?? "—")}
+      </span>
+      <span>
+        p. {page}/{totalPages}
+      </span>
+    </div>
+  );
+}
+
+function CoverPage({
+  task,
+  photos,
+  generatedAt,
+  generatedBy,
+  totalPages,
+}: {
+  task: Task;
+  photos: RaPhoto[];
+  generatedAt: string;
+  generatedBy?: string;
+  totalPages: number;
+}) {
+  const { totals } = computeReportData(task);
+  const capturadoPor =
+    photoRecordTakenByLabel(task) !== "Sin atribuir"
+      ? photoRecordTakenByLabel(task)
+      : generatedBy || "—";
+
+  const metaRows = [
+    { label: "Cliente", value: task.mainClient || "—" },
+    { label: "Proveedor", value: task.provider || "—" },
+    { label: "Marca", value: task.brand || "—" },
+    {
+      label: "Bultos",
+      value: `${task.currentBultos || totals.bultos || 0} / ${task.expectedBultos || "—"}`,
+    },
+    { label: "CBM", value: totals.cbm || "—" },
+    { label: "Peso kg", value: String(totals.weight ?? "—") },
+  ];
+
+  return (
+    <div data-report-export-page style={pageShellStyle()}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
+          paddingTop: 48,
+          marginBottom: 36,
+        }}
+      >
         <div
           style={{
-            flexShrink: 0,
             backgroundColor: "#ffffff",
             borderRadius: 9999,
-            padding: 6,
+            padding: 10,
             border: `1px solid ${BORDER}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            marginBottom: 20,
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={logoMark.src}
             alt="ALDEPÓSITOS"
-            width={48}
-            height={48}
-            style={{ display: "block", width: 48, height: 48, objectFit: "contain" }}
+            width={72}
+            height={72}
+            style={{ display: "block", width: 72, height: 72, objectFit: "contain" }}
             crossOrigin="anonymous"
           />
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 900,
-              color: BRAND,
-              letterSpacing: "-0.02em",
-              lineHeight: 1.25,
-            }}
-          >
-            Registro fotográfico · RA {String(task.ra ?? "—")}
-          </div>
-          <div
-            style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: MUTED,
-              marginTop: 6,
-              lineHeight: 1.35,
-            }}
-          >
-            {subtitle ?? "ALDEPÓSITOS · Zona Libre, Panamá"}
-          </div>
-        </div>
-      </div>
-      <div
-        style={{
-          textAlign: "right",
-          fontSize: 10,
-          color: MUTED,
-          fontWeight: 700,
-          lineHeight: 1.4,
-          flexShrink: 0,
-          paddingTop: 4,
-        }}
-      >
-        {formatPhotoDate(generatedAt)}
-      </div>
-    </div>
-  );
-}
-
-function CompactInfoRow({ task }: { task: Task }) {
-  const { totals } = computeReportData(task);
-  const items = [
-    { label: "Cliente", value: task.mainClient },
-    { label: "Proveedor", value: task.provider },
-    { label: "Marca", value: task.brand },
-    {
-      label: "Bultos",
-      value: `${task.currentBultos || totals.bultos} / ${task.expectedBultos || "—"}`,
-    },
-    { label: "CBM", value: totals.cbm },
-    { label: "Peso kg", value: String(totals.weight) },
-  ];
-
-  const labelStyle: CSSProperties = {
-    display: "block",
-    fontWeight: 800,
-    color: MUTED,
-    textTransform: "uppercase",
-    fontSize: 9,
-    letterSpacing: "0.1em",
-    lineHeight: 1.35,
-    marginBottom: 4,
-  };
-
-  const valueStyle: CSSProperties = {
-    display: "block",
-    fontWeight: 800,
-    color: TEXT,
-    fontSize: 12,
-    lineHeight: 1.45,
-    minHeight: 18,
-    wordBreak: "break-word",
-  };
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: 10,
-        marginBottom: 18,
-        padding: "14px 16px",
-        backgroundColor: "#f8fafc",
-        borderRadius: 10,
-        border: `1px solid ${BORDER}`,
-        boxSizing: "border-box",
-      }}
-    >
-      {items.map((item) => (
         <div
-          key={item.label}
           style={{
-            minWidth: 0,
-            padding: "4px 2px",
-            boxSizing: "border-box",
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: "0.22em",
+            textTransform: "uppercase",
+            color: MUTED,
+            marginBottom: 10,
           }}
         >
-          <span style={labelStyle}>{item.label}</span>
-          <span style={valueStyle}>{item.value || "—"}</span>
+          ALDEPÓSITOS · Zona Libre Panamá
         </div>
-      ))}
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 900,
+            color: BRAND,
+            letterSpacing: "-0.03em",
+            lineHeight: 1.15,
+            marginBottom: 8,
+          }}
+        >
+          Registro fotográfico
+        </div>
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: TEXT,
+            marginBottom: 6,
+          }}
+        >
+          RA {String(task.ra ?? "—")}
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: MUTED }}>
+          {formatLongDate(generatedAt)}
+        </div>
+      </div>
+
+      <div
+        style={{
+          height: 4,
+          backgroundColor: BRAND,
+          borderRadius: 2,
+          marginBottom: 28,
+        }}
+      />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 14,
+          marginBottom: 28,
+        }}
+      >
+        {metaRows.map((row) => (
+          <div
+            key={row.label}
+            style={{
+              border: `1px solid ${BORDER}`,
+              borderRadius: 10,
+              padding: "14px 16px",
+              backgroundColor: "#f8fafc",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: MUTED,
+                marginBottom: 6,
+              }}
+            >
+              {row.label}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 800,
+                color: TEXT,
+                wordBreak: "break-word",
+              }}
+            >
+              {row.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div
+        style={{
+          border: `1px solid ${BORDER}`,
+          borderRadius: 12,
+          padding: "18px 20px",
+          backgroundColor: "#ffffff",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 16,
+            marginBottom: 12,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: MUTED,
+                marginBottom: 4,
+              }}
+            >
+              Capturado por
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: BRAND }}>
+              {capturadoPor}
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: MUTED,
+                marginBottom: 4,
+              }}
+            >
+              Fotografías
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: TEXT }}>
+              {photos.length}
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: MUTED, fontWeight: 600 }}>
+          Documento de evidencia visual para el cliente. Generado{" "}
+          {formatPhotoDate(generatedAt)}
+          {generatedBy ? ` · ${generatedBy}` : ""}.
+        </div>
+      </div>
+
+      <PageFooter task={task} page={1} totalPages={totalPages} />
     </div>
   );
 }
 
-function PhotoThumb({
+function PhotoBlock({
   photo,
   asset,
-  cellW,
+  index,
+  slotH,
 }: {
   photo: RaPhoto;
   asset: RaPhotoPdfAsset;
-  cellW: number;
+  index: number;
+  slotH: number;
 }) {
-  const imgMaxW = cellW - 4;
+  const metaH = 44;
+  const imgMaxH = slotH - metaH;
   const { w: imgW, h: imgH } = fitImageInBox(
     asset.width,
     asset.height,
-    imgMaxW,
-    GRID_IMG_MAX_H,
+    CONTENT_W - 8,
+    imgMaxH,
   );
-  const category =
-    photo.category && photo.category !== "general"
-      ? RA_PHOTO_CATEGORY_LABELS[photo.category]
-      : null;
+  const category = RA_PHOTO_CATEGORY_LABELS[photo.category ?? "general"];
 
   return (
     <div
       style={{
-        width: `${cellW}px`,
+        width: CONTENT_W,
+        height: slotH,
         boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
+        marginBottom: 18,
       }}
     >
       <div
         style={{
-          width: `${cellW}px`,
-          height: `${GRID_IMG_MAX_H}px`,
+          flex: 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: "#f1f5f9",
-          borderRadius: 6,
+          borderRadius: 10,
           border: `1px solid ${BORDER}`,
+          minHeight: imgMaxH,
           boxSizing: "border-box",
         }}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={asset.src}
-          alt={photo.caption || "Foto"}
+          alt={photo.caption || `Foto ${index}`}
           width={imgW}
           height={imgH}
           style={{
@@ -306,106 +424,166 @@ function PhotoThumb({
           }}
         />
       </div>
-      {(category || photo.caption) && (
-        <div
-          style={{
-            marginTop: 5,
-            width: "100%",
-            textAlign: "center",
-            fontSize: 9,
-            lineHeight: 1.3,
-            color: MUTED,
-          }}
-        >
-          {category ? (
-            <span style={{ fontWeight: 800, color: BRAND, textTransform: "uppercase" }}>
-              {category}
-            </span>
-          ) : null}
-          {category && photo.caption ? " · " : null}
+      <div
+        style={{
+          marginTop: 8,
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "flex-start",
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              color: BRAND,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            #{index} · {category}
+          </div>
           {photo.caption ? (
-            <span style={{ fontWeight: 600, color: TEXT }}>{photo.caption}</span>
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 12,
+                fontWeight: 600,
+                color: TEXT,
+              }}
+            >
+              {photo.caption}
+            </div>
           ) : null}
         </div>
-      )}
-    </div>
-  );
-}
-
-function PhotoGrid({
-  photos,
-  photoSrcById = {},
-  photoAssetsById = {},
-}: {
-  photos: RaPhoto[];
-  photoSrcById?: Record<string, string>;
-  photoAssetsById?: Record<string, RaPhotoPdfAsset>;
-}) {
-  const cellW = Math.floor((CONTENT_W - COL_GAP) / 2);
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(2, ${cellW}px)`,
-        columnGap: COL_GAP,
-        rowGap: ROW_GAP,
-        width: `${CONTENT_W}px`,
-        justifyContent: "center",
-      }}
-    >
-      {photos.map((photo) => {
-        const asset = assetForPhoto(photo, photoAssetsById, photoSrcById);
-        return (
-          <PhotoThumb key={photo.id} photo={photo} asset={asset} cellW={cellW} />
-        );
-      })}
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: 10,
+            fontWeight: 600,
+            color: MUTED,
+            flexShrink: 0,
+          }}
+        >
+          {formatPhotoDate(photo.takenAt)}
+          {photo.takenByName ? (
+            <div style={{ marginTop: 2 }}>{photo.takenByName}</div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
 
 export function PhotoRecordPdfExportLayout(props: Props) {
-  const { task, photos, generatedAt, photoSrcById, photoAssetsById } = props;
-  const photoPages = paginatePhotos(photos);
-  const totalDocPages = photos.length > 0 ? photoPages.length : 1;
+  const {
+    task,
+    photos,
+    generatedAt,
+    generatedBy,
+    photoSrcById = {},
+    photoAssetsById = {},
+  } = props;
 
-  if (photos.length === 0) {
-    return (
-      <div data-report-export-page style={pageShellStyle()}>
-        <PdfHeader task={task} generatedAt={generatedAt} />
-        <CompactInfoRow task={task} />
-        <p style={{ fontSize: 11, color: MUTED, textAlign: "center", padding: 24 }}>
-          Sin fotografías registradas.
-        </p>
-      </div>
-    );
-  }
+  const photoPages = paginatePhotos(photos);
+  const totalPages = 1 + (photos.length > 0 ? photoPages.length : 0);
 
   return (
     <>
-      {photoPages.map((pagePhotos, pageIndex) => (
-        <div
-          key={`photo-pdf-page-${pageIndex}`}
-          data-report-export-page
-          style={pageShellStyle()}
-        >
-          <PdfHeader
-            task={task}
-            generatedAt={generatedAt}
-            subtitle={
-              totalDocPages > 1
-                ? `Evidencia fotográfica · Hoja ${pageIndex + 1} de ${totalDocPages}`
-                : "Evidencia fotográfica"
-            }
-          />
-          {pageIndex === 0 ? <CompactInfoRow task={task} /> : null}
-          <PhotoGrid
-            photos={pagePhotos}
-            photoSrcById={photoSrcById}
-            photoAssetsById={photoAssetsById}
-          />
-        </div>
-      ))}
+      <CoverPage
+        task={task}
+        photos={photos}
+        generatedAt={generatedAt}
+        generatedBy={generatedBy}
+        totalPages={Math.max(1, totalPages)}
+      />
+
+      {photos.length === 0 ? null : (
+        photoPages.map((pagePhotos, pageIndex) => {
+          const pageNum = pageIndex + 2;
+          const single = pagePhotos.length === 1;
+          const slotH = single ? PHOTO_SLOT_H * 1.55 : PHOTO_SLOT_H;
+
+          return (
+            <div
+              key={`photo-pdf-page-${pageIndex}`}
+              data-report-export-page
+              style={pageShellStyle()}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-end",
+                  marginBottom: 18,
+                  paddingBottom: 12,
+                  borderBottom: `3px solid ${BRAND}`,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 800,
+                      letterSpacing: "0.14em",
+                      textTransform: "uppercase",
+                      color: MUTED,
+                      marginBottom: 4,
+                    }}
+                  >
+                    Evidencia fotográfica
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 900,
+                      color: BRAND,
+                    }}
+                  >
+                    RA {String(task.ra ?? "—")}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: MUTED,
+                  }}
+                >
+                  {pagePhotos.length} foto
+                  {pagePhotos.length === 1 ? "" : "s"} en esta hoja
+                </div>
+              </div>
+
+              {pagePhotos.map((photo, i) => {
+                const globalIndex = pageIndex * PHOTOS_PER_PAGE + i + 1;
+                const asset = assetForPhoto(
+                  photo,
+                  photoAssetsById,
+                  photoSrcById,
+                );
+                return (
+                  <PhotoBlock
+                    key={photo.id}
+                    photo={photo}
+                    asset={asset}
+                    index={globalIndex}
+                    slotH={slotH}
+                  />
+                );
+              })}
+
+              <PageFooter
+                task={task}
+                page={pageNum}
+                totalPages={totalPages}
+              />
+            </div>
+          );
+        })
+      )}
     </>
   );
 }

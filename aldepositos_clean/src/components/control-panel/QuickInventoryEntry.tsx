@@ -3142,6 +3142,8 @@ export function QuickInventoryEntry({
           faltantes={faltantes}
           totalCbm={totals.cbm}
           totalWeight={totals.weight}
+          expectedWeight={Number(t.expectedWeight) || 0}
+          expectedCbm={Number(t.expectedCbm) || 0}
           completedCount={completedRows}
           onBack={requestLeave}
           onSwitchToTable={() => setCaptureLayoutWithPersist("table")}

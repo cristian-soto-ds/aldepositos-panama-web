@@ -27,6 +27,7 @@ import {
   type AutosaveState,
 } from "@/components/control-panel/SyncStatusBadge";
 import { ReekonReferenceListSheet } from "@/components/control-panel/ReekonReferenceListSheet";
+import { ReekonSaveReviewSheet } from "@/components/control-panel/ReekonSaveReviewSheet";
 import {
   cubicajeM3FromDims,
   formatCubicaje2,
@@ -60,6 +61,10 @@ type ReekonCaptureViewProps = {
   faltantes: number;
   totalCbm: number;
   totalWeight: number;
+  /** Peso preliminar de factura (RA). */
+  expectedWeight?: number;
+  /** Cubicaje preliminar de factura (RA). */
+  expectedCbm?: number;
   completedCount: number;
   onBack: () => void;
   onSwitchToTable: () => void;
@@ -327,6 +332,8 @@ export function ReekonCaptureView({
   faltantes,
   totalCbm,
   totalWeight,
+  expectedWeight = 0,
+  expectedCbm = 0,
   completedCount,
   onBack,
   onSwitchToTable,
@@ -344,6 +351,7 @@ export function ReekonCaptureView({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refListOpen, setRefListOpen] = useState(false);
+  const [saveReviewOpen, setSaveReviewOpen] = useState(false);
   const [showRefCarousel, setShowRefCarousel] = useState(false);
   /** Segundo toque requerido para borrar la línea activa (evita borrados accidentales). */
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -861,7 +869,29 @@ export function ReekonCaptureView({
       <main ref={formRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
         <div className="mx-auto w-full max-w-md">
           {!activeRow || !activeId ? (
-            <p className="py-8 text-center text-sm text-slate-500">Agrega una línea para comenzar.</p>
+            <div className="flex flex-col items-center gap-4 py-10 text-center">
+              <p className="text-sm text-slate-500">
+                Agrega una línea para comenzar.
+              </p>
+              <button
+                type="button"
+                onClick={addRowHere}
+                className="inline-flex items-center gap-2 rounded-2xl bg-[#16263F] px-5 py-3.5 text-sm font-bold text-white active:scale-[0.98]"
+              >
+                <Plus className="h-5 w-5" />
+                {palletized ? "Agregar primera fila" : "Agregar línea"}
+              </button>
+              {palletized && onAddPallet ? (
+                <button
+                  type="button"
+                  onClick={onAddPallet}
+                  className="inline-flex items-center gap-2 rounded-2xl border-2 border-violet-400 bg-violet-50 px-5 py-3 text-sm font-bold text-violet-800 active:scale-[0.98] dark:border-violet-500 dark:bg-violet-950/40 dark:text-violet-200"
+                >
+                  <Layers className="h-5 w-5" />
+                  Crear paleta 1
+                </button>
+              ) : null}
+            </div>
           ) : (
             <div className="flex flex-col gap-4">
               {referenceMode === "with" ? (
@@ -1061,7 +1091,7 @@ export function ReekonCaptureView({
             <span>{formatMeasure2(totalWeight)} kg</span>
           </div>
           <div className="flex items-stretch gap-2">
-            {deleteConfirmId === activeId ? (
+            {deleteConfirmId != null && deleteConfirmId === activeId ? (
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <p className="px-0.5 text-center text-[11px] font-semibold leading-snug text-red-700 dark:text-red-300">
                   ¿Seguro que quieres eliminar {deleteConfirmLabel}?
@@ -1092,7 +1122,7 @@ export function ReekonCaptureView({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleDeleteCurrent}
-              disabled={measureRows.length <= 1}
+              disabled={!activeId || measureRows.length <= 1}
               className="flex h-14 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 active:scale-95 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400 sm:w-14"
               aria-label="Eliminar línea"
             >
@@ -1166,7 +1196,7 @@ export function ReekonCaptureView({
             )}
             <button
               type="button"
-              onClick={onSave}
+              onClick={() => setSaveReviewOpen(true)}
               disabled={isSaving}
               className="flex h-14 min-w-0 flex-[1.2] items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-2 text-sm font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60 sm:flex-[1.5] sm:gap-2 sm:text-base"
             >
@@ -1189,6 +1219,25 @@ export function ReekonCaptureView({
         completedCount={completedCount}
         faltantes={faltantes}
         activePallet={palletized ? activePalletNum : null}
+      />
+
+      <ReekonSaveReviewSheet
+        open={saveReviewOpen}
+        onClose={() => setSaveReviewOpen(false)}
+        onConfirm={() => {
+          setSaveReviewOpen(false);
+          onSave();
+        }}
+        measureRows={measureRows}
+        referenceMode={referenceMode}
+        raLabel={raLabel}
+        declaredBultos={declaredBultos}
+        physicalBultos={physicalBultos}
+        expectedWeight={expectedWeight}
+        expectedCbm={expectedCbm}
+        capturedWeight={totalWeight}
+        capturedCbm={totalCbm}
+        isSaving={isSaving}
       />
     </div>
   );

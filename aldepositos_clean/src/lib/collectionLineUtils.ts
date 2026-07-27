@@ -5,13 +5,12 @@ import {
   formatMeasure2,
   formatWeightPrecise,
   normalizeMeasureFieldsOnRow,
+  parseMeasureNumber,
   preserveDocumentNumber,
 } from "@/lib/measureDecimals";
 
 function parseN(v: unknown): number {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
+  return parseMeasureNumber(v);
 }
 
 function parseIntN(v: unknown): number {

@@ -2,10 +2,61 @@
 
 export const MEASURE_DECIMALS = 2;
 
+/**
+ * Interpreta números con separadores de miles/decimales (HTML Magaya, facturas, CSV).
+ * Ejemplos:
+ * - "1,320.30" → 1320.30 (miles con coma, decimal con punto)
+ * - "1.320,30" → 1320.30 (miles con punto, decimal con coma)
+ * - "21,25" / "21.25" → 21.25
+ */
 export function parseMeasureNumber(value: unknown): number {
   if (value === null || value === undefined || value === "") return 0;
-  const n =
-    typeof value === "number" ? value : parseFloat(String(value).replace(",", "."));
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+
+  let s = String(value)
+    .trim()
+    .replace(/\u00a0/g, "")
+    .replace(/\s/g, "")
+    .replace(/[^\d,.\-]/g, "");
+  if (!s || s === "-" || s === "." || s === ",") return 0;
+
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    // Ambos: el último es el decimal.
+    if (lastComma > lastDot) {
+      // 1.320,30
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      // 1,320.30
+      s = s.replace(/,/g, "");
+    }
+  } else if (lastComma !== -1) {
+    const parts = s.split(",");
+    const last = parts[parts.length - 1] ?? "";
+    if (parts.length === 2 && last.length > 0 && last.length <= 2) {
+      // 21,25 → decimal
+      s = `${parts[0]}.${last}`;
+    } else {
+      // 1,320 o 1,320,500 → miles
+      s = s.replace(/,/g, "");
+    }
+  } else if (lastDot !== -1) {
+    const parts = s.split(".");
+    if (parts.length > 2) {
+      const last = parts[parts.length - 1] ?? "";
+      // 1.320.30 → miles + decimal; 1.320.456 → solo miles
+      if (last.length > 0 && last.length !== 3) {
+        s = `${parts.slice(0, -1).join("")}.${last}`;
+      } else {
+        s = s.replace(/\./g, "");
+      }
+    }
+    // Un solo punto: decimal (21.25 / 1.936)
+  }
+
+  const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -67,18 +118,45 @@ export function formatWeightPrecise(value: unknown, maxDecimals = 6): string {
 
 /** Conserva el número tal cual vino del documento (coma→punto, sin re-redondear). */
 export function preserveDocumentNumber(raw: unknown): string {
-  const t = String(raw ?? "")
+  const n = parseMeasureNumber(raw);
+  if (!Number.isFinite(n) || n <= 0) return "";
+
+  // Si el texto original ya es un decimal simple tras normalizar miles, conserva decimales.
+  const cleaned = String(raw ?? "")
     .trim()
-    .replace(/\s/g, "")
-    .replace(",", ".");
-  if (!t) return "";
-  const n = parseFloat(t);
-  if (!Number.isFinite(n) || n < 0) return "";
-  // Mantener la representación del doc (hasta 4 decimales típicos de factura).
-  if (/^\d+(\.\d+)?$/.test(t)) {
-    const [intPart, dec = ""] = t.split(".");
+    .replace(/\u00a0/g, "")
+    .replace(/\s/g, "");
+  const asPlain = (() => {
+    const lastComma = cleaned.lastIndexOf(",");
+    const lastDot = cleaned.lastIndexOf(".");
+    let t = cleaned.replace(/[^\d,.\-]/g, "");
+    if (lastComma !== -1 && lastDot !== -1) {
+      t =
+        lastComma > lastDot
+          ? t.replace(/\./g, "").replace(",", ".")
+          : t.replace(/,/g, "");
+    } else if (lastComma !== -1) {
+      const parts = t.split(",");
+      const last = parts[parts.length - 1] ?? "";
+      t =
+        parts.length === 2 && last.length > 0 && last.length <= 2
+          ? `${parts[0]}.${last}`
+          : t.replace(/,/g, "");
+    } else if ((t.match(/\./g) || []).length > 1) {
+      const parts = t.split(".");
+      const last = parts[parts.length - 1] ?? "";
+      t =
+        last.length > 0 && last.length !== 3
+          ? `${parts.slice(0, -1).join("")}.${last}`
+          : t.replace(/\./g, "");
+    }
+    return t;
+  })();
+
+  if (/^\d+(\.\d+)?$/.test(asPlain)) {
+    const [intPart, dec = ""] = asPlain.split(".");
     if (!dec) return intPart!;
-    return `${intPart}.${dec.slice(0, 4)}`;
+    return `${intPart}.${dec.slice(0, 6)}`;
   }
   return String(roundMeasureNearest(n, 4));
 }

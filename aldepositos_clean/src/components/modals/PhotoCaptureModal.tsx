@@ -47,6 +47,8 @@ type PhotoCaptureModalProps = {
   onPhotoSaved: (photo: RaPhoto) => void | Promise<void>;
   /** Si true, al guardar una foto no cierra y permite seguir (lote). Default true. */
   multiShot?: boolean;
+  /** Al abrir, intenta ir directo a la cámara (menos pasos en celular). */
+  autoStartCamera?: boolean;
 };
 
 type CaptureMode = "choose" | "camera" | "preview" | "review";
@@ -67,6 +69,7 @@ export function PhotoCaptureModal({
   onClose,
   onPhotoSaved,
   multiShot = true,
+  autoStartCamera = false,
 }: PhotoCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -117,18 +120,6 @@ export function PhotoCaptureModal({
     setUploadProgress(null);
   }, [stopCamera, clearCurrentShot]);
 
-  useEffect(() => {
-    if (!open) {
-      resetState();
-      return;
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !uploading) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, uploading, onClose, resetState]);
-
   const startCamera = useCallback(async () => {
     setCameraError(null);
     setMode("camera");
@@ -151,6 +142,25 @@ export function PhotoCaptureModal({
       stopCamera();
     }
   }, [stopCamera, drafts.length]);
+
+  useEffect(() => {
+    if (!open) {
+      resetState();
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !uploading) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, uploading, onClose, resetState]);
+
+  useEffect(() => {
+    if (!open || !autoStartCamera) return;
+    void startCamera();
+    // Solo al abrir el modal
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoStartCamera]);
 
   const captureFromCamera = useCallback(() => {
     const video = videoRef.current;
@@ -209,36 +219,44 @@ export function PhotoCaptureModal({
 
   const handleRetake = useCallback(() => {
     clearCurrentShot();
-    setMode("choose");
-  }, [clearCurrentShot]);
+    void startCamera();
+  }, [clearCurrentShot, startCamera]);
 
   /** Acepta la vista previa y la suma al lote (aún no sube). */
-  const acceptIntoDraft = useCallback(() => {
-    if (!previewUrl) return;
-    setDrafts((prev) => [
-      ...prev,
-      {
-        id: newDraftId(),
-        previewUrl,
-        file: pendingFile,
-        caption: caption.trim(),
-        category,
-      },
-    ]);
-    clearCurrentShot();
-    if (multiShot) {
-      setMode("review");
-    } else {
-      setMode("choose");
-    }
-  }, [
-    previewUrl,
-    pendingFile,
-    caption,
-    category,
-    clearCurrentShot,
-    multiShot,
-  ]);
+  const acceptIntoDraft = useCallback(
+    (thenContinue: boolean) => {
+      if (!previewUrl) return;
+      setDrafts((prev) => [
+        ...prev,
+        {
+          id: newDraftId(),
+          previewUrl,
+          file: pendingFile,
+          caption: caption.trim(),
+          category,
+        },
+      ]);
+      clearCurrentShot();
+      if (!multiShot) {
+        setMode("choose");
+        return;
+      }
+      if (thenContinue) {
+        void startCamera();
+      } else {
+        setMode("review");
+      }
+    },
+    [
+      previewUrl,
+      pendingFile,
+      caption,
+      category,
+      clearCurrentShot,
+      multiShot,
+      startCamera,
+    ],
+  );
 
   const removeDraft = useCallback((id: string) => {
     setDrafts((prev) => prev.filter((d) => d.id !== id));
@@ -343,11 +361,15 @@ export function PhotoCaptureModal({
               id="photo-capture-title"
               className="text-sm font-black uppercase tracking-widest text-white"
             >
-              Tomar fotos
+              Varias fotos
             </h2>
             <p className="mt-0.5 truncate text-xs font-semibold text-blue-100">
               RA {raLabel}
-              {drafts.length > 0 ? ` · ${drafts.length} en lote` : ""}
+              {drafts.length > 0
+                ? ` · Ángulo ${drafts.length + (mode === "preview" ? 1 : 0)} · ${drafts.length} en lote`
+                : mode === "preview"
+                  ? " · Ángulo 1"
+                  : " · Tomá todos los ángulos"}
             </p>
           </div>
           <button
@@ -365,8 +387,8 @@ export function PhotoCaptureModal({
           {mode === "choose" && (
             <div className="space-y-4">
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                Tomá varios ángulos. Cada foto se previsualiza antes de
-                agregarla; al final revisás el lote y guardás.
+                1) Capturá · 2) Revisá cómo quedó · 3) Usá y tomá otra · 4)
+                Guardá el lote al final.
               </p>
               {cameraError && (
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
@@ -425,6 +447,10 @@ export function PhotoCaptureModal({
 
           {mode === "camera" && (
             <div className="space-y-4">
+              <p className="text-center text-[10px] font-black uppercase tracking-widest text-slate-500">
+                Ángulo {drafts.length + 1}
+                {drafts.length > 0 ? ` · ${drafts.length} ya en lote` : ""}
+              </p>
               <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-black">
                 <video
                   ref={videoRef}
@@ -448,13 +474,13 @@ export function PhotoCaptureModal({
                   }}
                   className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-600 dark:border-slate-600 dark:text-slate-300"
                 >
-                  Cancelar
+                  {drafts.length > 0 ? "Ver lote" : "Galería"}
                 </button>
                 <button
                   type="button"
                   onClick={captureFromCamera}
                   disabled={!cameraReady}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-3.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
                 >
                   <Camera className="h-4 w-4" />
                   Capturar
@@ -466,7 +492,7 @@ export function PhotoCaptureModal({
           {mode === "preview" && previewUrl && (
             <div className="space-y-4">
               <p className="text-center text-[10px] font-black uppercase tracking-widest text-slate-500">
-                Vista previa — ¿cómo quedó?
+                Ángulo {drafts.length + 1} — ¿cómo quedó?
               </p>
               <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-600">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -519,18 +545,28 @@ export function PhotoCaptureModal({
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-widest text-slate-600 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  Repetir foto
+                  Repetir
                 </button>
                 {multiShot ? (
-                  <button
-                    type="button"
-                    onClick={acceptIntoDraft}
-                    disabled={uploading}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-3 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
-                  >
-                    <Check className="h-4 w-4" />
-                    Usar esta y seguir
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => acceptIntoDraft(true)}
+                      disabled={uploading}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-3.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                    >
+                      <Check className="h-4 w-4" />
+                      Usar y tomar otra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => acceptIntoDraft(false)}
+                      disabled={uploading}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-emerald-500 bg-emerald-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-emerald-900 disabled:opacity-50 dark:bg-emerald-950/40 dark:text-emerald-100"
+                    >
+                      Usar y revisar lote
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"
@@ -551,18 +587,17 @@ export function PhotoCaptureModal({
           )}
 
           {mode === "review" && (
-            <div className="space-y-4">
+            <div className="flex min-h-0 flex-col gap-4">
               <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-                Revisá las {drafts.length} foto
-                {drafts.length === 1 ? "" : "s"} antes de guardar. Podés
-                eliminar alguna o tomar más ángulos.
+                Revisá el lote ({drafts.length}). Podés quitar alguna o sumar más
+                ángulos antes de guardar.
               </p>
               {drafts.length === 0 ? (
                 <p className="text-center text-sm text-slate-400">
                   No hay fotos en el lote.
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid max-h-[42dvh] grid-cols-2 gap-2.5 overflow-y-auto sm:max-h-none">
                   {drafts.map((d, idx) => (
                     <article
                       key={d.id}
@@ -571,21 +606,21 @@ export function PhotoCaptureModal({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={d.previewUrl}
-                        alt={`Foto ${idx + 1}`}
-                        className="aspect-square w-full bg-slate-100 object-cover dark:bg-slate-800"
+                        alt={`Ángulo ${idx + 1}`}
+                        className="aspect-[4/3] w-full bg-slate-100 object-cover dark:bg-slate-800"
                       />
-                      <p className="truncate px-1.5 py-1 text-[9px] font-bold uppercase text-slate-500">
-                        {RA_PHOTO_CATEGORY_LABELS[d.category]}
+                      <p className="truncate px-2 py-1.5 text-[10px] font-bold uppercase text-slate-500">
+                        #{idx + 1} · {RA_PHOTO_CATEGORY_LABELS[d.category]}
                         {d.caption ? ` · ${d.caption}` : ""}
                       </p>
                       <button
                         type="button"
                         disabled={uploading}
                         onClick={() => removeDraft(d.id)}
-                        className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-md bg-red-600/95 text-white"
+                        className="absolute right-1.5 top-1.5 flex h-8 w-8 items-center justify-center rounded-lg bg-red-600/95 text-white"
                         aria-label="Quitar del lote"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </article>
                   ))}
@@ -601,7 +636,7 @@ export function PhotoCaptureModal({
                   Guardando {uploadProgress.done} / {uploadProgress.total}…
                 </p>
               )}
-              <div className="flex flex-col gap-2">
+              <div className="sticky bottom-0 flex flex-col gap-2 bg-white pt-1 dark:bg-slate-900">
                 <button
                   type="button"
                   disabled={uploading}
@@ -615,7 +650,7 @@ export function PhotoCaptureModal({
                   type="button"
                   disabled={uploading || drafts.length === 0}
                   onClick={() => void handleSaveAllDrafts()}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-4 text-xs font-black uppercase tracking-widest text-white disabled:opacity-50"
                 >
                   {uploading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -624,7 +659,7 @@ export function PhotoCaptureModal({
                   )}
                   {uploading
                     ? "Guardando…"
-                    : `Guardar ${drafts.length} foto${drafts.length === 1 ? "" : "s"}`}
+                    : `Revisar y guardar (${drafts.length})`}
                 </button>
               </div>
             </div>

@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Camera,
@@ -18,17 +17,13 @@ import {
   type RaPhoto,
 } from "@/lib/types/raPhoto";
 import {
-  buildPhotoRecordPdfFilename,
   getTaskPhotos,
   photoRecordActivityDate,
   photoRecordTakenByLabel,
   taskHasPhotos,
   taskMatchesPhotoEmployee,
 } from "@/lib/raPhotoRecord";
-import {
-  preloadRaPhotoPdfAssets,
-  type RaPhotoPdfAsset,
-} from "@/lib/raPhotoStorage";
+import { downloadPhotoRecordPdf } from "@/lib/downloadPhotoRecordPdf";
 import { useRaPhotoDisplayUrls } from "@/hooks/useRaPhotoDisplayUrls";
 import {
   INVENTARIADORES,
@@ -37,12 +32,6 @@ import {
   getPeriodBounds,
   type LeaderboardPeriod,
 } from "@/lib/inventoryLeaderboard";
-import {
-  exportReportPdfFromExportRoot,
-  PDF_EXPORT_WIDTH_PX,
-  waitForReportDomReady,
-} from "./reportsPdfExport";
-import { PhotoRecordPdfExportLayout } from "./PhotoRecordPdfExportLayout";
 
 type EmployeeFilter = "Todos" | "sin-atribuir" | string;
 type PeriodFilter = "Todos" | "day" | "week" | "month";
@@ -73,42 +62,6 @@ function taskMatchesPeriod(task: Task, period: PeriodFilter): boolean {
   if (!activity) return false;
   const { start, end } = getPeriodBounds(period as LeaderboardPeriod);
   return activity.getTime() >= start.getTime() && activity.getTime() < end.getTime();
-}
-
-async function waitForExportImages(
-  root: HTMLElement,
-  timeoutMs = 12000,
-): Promise<void> {
-  const imgs = Array.from(root.querySelectorAll("img"));
-  await Promise.all(
-    imgs.map(
-      (img) =>
-        new Promise<void>((resolve) => {
-          if (img.complete && img.naturalWidth > 0) {
-            resolve();
-            return;
-          }
-          const done = () => resolve();
-          const timer = window.setTimeout(done, timeoutMs);
-          img.addEventListener(
-            "load",
-            () => {
-              window.clearTimeout(timer);
-              done();
-            },
-            { once: true },
-          );
-          img.addEventListener(
-            "error",
-            () => {
-              window.clearTimeout(timer);
-              done();
-            },
-            { once: true },
-          );
-        }),
-    ),
-  );
 }
 
 function FilterSelect({
@@ -154,10 +107,6 @@ export function PhotoReportsModule({
   const [viewTask, setViewTask] = useState<Task | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [pdfPhotoAssetsById, setPdfPhotoAssetsById] = useState<
-    Record<string, RaPhotoPdfAsset>
-  >({});
-  const pdfExportRef = useRef<HTMLDivElement>(null);
 
   const photoTasks = useMemo(
     () =>
@@ -223,28 +172,22 @@ export function PhotoReportsModule({
     setIsDownloadingPdf(true);
     setExportError(null);
     try {
-      const assets = await preloadRaPhotoPdfAssets(viewPhotos, viewTask.id);
-      flushSync(() => setPdfPhotoAssetsById(assets));
-      await waitForReportDomReady();
-      const root = pdfExportRef.current;
-      if (!root) throw new Error("Contenedor PDF no disponible.");
-      await waitForExportImages(root);
-      await exportReportPdfFromExportRoot(
-        root,
-        buildPhotoRecordPdfFilename(viewTask.ra),
-      );
+      await downloadPhotoRecordPdf({
+        task: viewTask,
+        photos: viewPhotos,
+        generatedBy: userDisplayName ?? userEmail ?? undefined,
+      });
     } catch (e) {
+      console.error("[Photo PDF] Fallo al generar PDF:", e);
       setExportError(e instanceof Error ? e.message : "Error al generar PDF.");
     } finally {
       setIsDownloadingPdf(false);
     }
-  }, [viewTask, viewPhotos]);
+  }, [viewTask, viewPhotos, userDisplayName, userEmail]);
 
   const activeFiltersCount = [clientFilter, employeeFilter, periodFilter].filter(
     (v) => v !== "Todos",
   ).length;
-
-  const generatedAt = new Date().toISOString();
 
   if (viewTask) {
     return (
@@ -320,39 +263,6 @@ export function PhotoReportsModule({
             ))}
           </div>
         </div>
-
-        {viewPhotos.length > 0 && (
-          <div
-            aria-hidden
-            style={{
-              position: "fixed",
-              left: "-14000px",
-              top: 0,
-              zIndex: -1,
-              pointerEvents: "none",
-              width: `${PDF_EXPORT_WIDTH_PX}px`,
-              overflow: "visible",
-            }}
-          >
-            <div
-              ref={pdfExportRef}
-              id="photo-reports-pdf-export-root"
-              style={{
-                width: `${PDF_EXPORT_WIDTH_PX}px`,
-                backgroundColor: "#ffffff",
-                boxSizing: "border-box",
-              }}
-            >
-              <PhotoRecordPdfExportLayout
-                task={viewTask}
-                photos={viewPhotos}
-                generatedAt={generatedAt}
-                generatedBy={userDisplayName ?? userEmail ?? undefined}
-                photoAssetsById={pdfPhotoAssetsById}
-              />
-            </div>
-          </div>
-        )}
       </div>
     );
   }

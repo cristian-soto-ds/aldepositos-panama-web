@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./reports-print.css";
 import { downloadReportExcel } from "@/lib/exportReportExcel";
-import { downloadReportPdfFromExcel } from "@/lib/exportReportPdfFromExcel";
+import { downloadReportPdfFromPrintHtml } from "@/lib/downloadReportPdfFromPrintHtml";
 import { openReportPrintWindow } from "@/lib/buildReportPrintHtml";
 import type { Task as TaskModel } from "@/lib/types/task";
 import type { ReferenceCaptureMode } from "@/lib/quickInventoryTypes";
@@ -323,7 +323,7 @@ export function CompletedReportsModule({
     setExportError(null);
     setIsDownloadingPdf(true);
     try {
-      await downloadReportPdfFromExcel({
+      await downloadReportPdfFromPrintHtml({
         tasks: tasksToPrint,
       });
     } catch (e) {

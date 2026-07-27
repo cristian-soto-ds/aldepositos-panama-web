@@ -5,6 +5,8 @@ export const RA_PHOTOS_BUCKET = "ra-photos";
 
 const MAX_SIDE_PX = 1920;
 const JPEG_QUALITY = 0.85;
+/** Lado máximo embebido en PDF (evita canvas gigante / memoria). */
+const PDF_EMBED_MAX_SIDE_PX = 1400;
 
 export type RaPhotoUploadMeta = {
   caption?: string;
@@ -276,6 +278,41 @@ function measureDataUrl(src: string): Promise<{ width: number; height: number }>
   });
 }
 
+async function shrinkDataUrlForPdf(
+  src: string,
+  maxSide: number = PDF_EMBED_MAX_SIDE_PX,
+): Promise<string> {
+  if (!src.startsWith("data:image/") || typeof document === "undefined") {
+    return src;
+  }
+
+  const { width, height } = await measureDataUrl(src);
+  const longest = Math.max(width, height);
+  if (longest <= maxSide) return src;
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = maxSide / longest;
+      const tw = Math.max(1, Math.round(width * scale));
+      const th = Math.max(1, Math.round(height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = tw;
+      canvas.height = th;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(src);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, tw, th);
+      const out = canvas.toDataURL("image/jpeg", 0.88);
+      resolve(out || src);
+    };
+    img.onerror = () => reject(new Error("No se pudo optimizar la imagen para PDF"));
+    img.src = src;
+  });
+}
+
 export async function preloadRaPhotoDataUrls(
   photos: RaPhoto[],
   taskId?: string,
@@ -298,8 +335,21 @@ export async function preloadRaPhotoPdfAssets(
       try {
         src = await fetchRaPhotoDataUrl(p, taskId);
       } catch {
-        src = displayUrlForRaPhoto(p, taskId);
+        const fallback = displayUrlForRaPhoto(p, taskId);
+        if (fallback) {
+          const res = await fetch(fallback);
+          if (!res.ok) {
+            throw new Error("No se pudo descargar la foto para el PDF.");
+          }
+          src = await blobToDataUrl(await res.blob());
+        }
       }
+      if (!src.startsWith("data:image/")) {
+        throw new Error(
+          `No se pudo embebir la foto en el PDF (${p.caption || p.id}).`,
+        );
+      }
+      src = await shrinkDataUrlForPdf(src);
       try {
         const { width, height } = await measureDataUrl(src);
         out[p.id] = { src, width, height };

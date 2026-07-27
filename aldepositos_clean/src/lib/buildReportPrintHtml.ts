@@ -1,25 +1,30 @@
 /**
- * Documento de impresión con el mismo layout profesional del Excel
+ * Documento de impresión / PDF con el mismo layout profesional del Excel
  * (cabecera marca, banner RA, campos, KPIs, tabla).
- * Se abre en ventana limpia — sin sidebar ni botones de la app.
  */
 
 import type { Task } from "@/lib/types/task";
 import logoMark from "@/assets/brand/logo-aldepositos.png";
 import {
   computeReportData,
+  reportDimDisplay,
   reportLineTotalCbm,
   reportModuleLabel,
   reportPalletWeight,
   reportRowPallet,
 } from "@/lib/reportTotals";
-import { cubicajeM3FromDims, roundUpMeasure } from "@/lib/measureDecimals";
+import {
+  cubicajeM3FromDims,
+  formatCubicaje2,
+  roundUpMeasure,
+} from "@/lib/measureDecimals";
 
 const BRAND = "#16263F";
 const BRAND_LIGHT = "#1E3A5F";
 const ACCENT = "#3B82F6";
 const CBM = "#1D4ED8";
 const MUTED = "#94A3B8";
+const MUTED_ON_DARK = "#B8C4D4";
 const TEXT = "#1E293B";
 const BORDER = "#E2E8F0";
 const ROW_ALT = "#F8FAFC";
@@ -33,7 +38,8 @@ function esc(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function logoAbsUrl(): string {
+function logoSrc(logoDataUrl?: string | null): string {
+  if (logoDataUrl) return logoDataUrl;
   const src = logoMark.src.startsWith("http")
     ? logoMark.src
     : `${typeof window !== "undefined" ? window.location.origin : ""}${logoMark.src}`;
@@ -74,7 +80,7 @@ function detailedHeaders(): string[] {
 
 type TableRow = {
   cells: (string | number)[];
-  kind: "data" | "pallet" | "reempaque";
+  kind: "data" | "pallet" | "reempaque" | "total";
 };
 
 function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
@@ -84,6 +90,7 @@ function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
     isPalletized,
     showWeightColumn,
     showReferenceColumn,
+    totals,
   } = computeReportData(task);
 
   if (isDetailed) {
@@ -110,11 +117,11 @@ function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
           Number(pesoPorBulto.toFixed(2)),
           Number((bultos * pesoPorBulto).toFixed(2)),
           isReempaque ? "SI" : "-",
-          l,
-          w,
-          h,
-          cbmPorBulto,
-          cubicajeTotal,
+          reportDimDisplay(row.l),
+          reportDimDisplay(row.w),
+          reportDimDisplay(row.h),
+          isReempaque ? "—" : formatCubicaje2(cbmPorBulto),
+          formatCubicaje2(cubicajeTotal),
         ],
       };
     });
@@ -134,7 +141,7 @@ function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
         rows.push({
           kind: "pallet",
           cells: [
-            `PALETA ${p}${pw > 0 ? `  ·  ${pw.toFixed(2)} kg` : ""}`,
+            `PALETA ${p}${pw > 0 ? `  ·  Peso paleta: ${pw.toFixed(2)} kg` : ""}`,
             "",
             "",
             "",
@@ -146,22 +153,18 @@ function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
         lineNum = 0;
       }
       lineNum += 1;
-      const l = parseFloat(String(row.l ?? 0)) || 0;
-      const w = parseFloat(String(row.w ?? 0)) || 0;
-      const h = parseFloat(String(row.h ?? 0)) || 0;
-      const b = parseFloat(String(row.bultos ?? 0)) || 0;
       const isReempaque = row.reempaque === true;
       const rowCbm = reportLineTotalCbm(row);
       rows.push({
         kind: isReempaque ? "reempaque" : "data",
         cells: [
           lineNum,
-          isReempaque ? "—" : b,
-          isReempaque ? "—" : l,
-          isReempaque ? "—" : w,
-          isReempaque ? "—" : h,
+          isReempaque ? "—" : parseFloat(String(row.bultos ?? 0)) || 0,
+          isReempaque ? "—" : reportDimDisplay(row.l),
+          isReempaque ? "—" : reportDimDisplay(row.w),
+          isReempaque ? "—" : reportDimDisplay(row.h),
           isReempaque ? "SI" : "-",
-          isReempaque ? "—" : rowCbm,
+          isReempaque ? "—" : formatCubicaje2(rowCbm),
         ],
       });
     }
@@ -183,17 +186,39 @@ function buildTable(task: Task): { headers: string[]; rows: TableRow[] } {
     if (showReferenceColumn) cells.push(String(row.referencia || "-"));
     cells.push(b);
     if (showWeightColumn) {
-      cells.push(row.weight != null ? parseFloat(String(row.weight)) || 0 : "-");
-      cells.push(isReempaque || pesoTotal <= 0 ? "-" : pesoTotal);
+      cells.push(
+        isReempaque || row.weight == null
+          ? "—"
+          : Number(parseFloat(String(row.weight)) || 0).toFixed(2),
+      );
+      cells.push(isReempaque || pesoTotal <= 0 ? "—" : pesoTotal.toFixed(2));
     }
-    cells.push(l, w, h, isReempaque ? "SI" : "-", isReempaque ? "-" : cbmPorBulto);
-    cells.push(rowCbm);
+    cells.push(
+      isReempaque ? "—" : reportDimDisplay(row.l),
+      isReempaque ? "—" : reportDimDisplay(row.w),
+      isReempaque ? "—" : reportDimDisplay(row.h),
+      isReempaque ? "SI" : "-",
+      isReempaque ? "—" : formatCubicaje2(cbmPorBulto),
+      formatCubicaje2(rowCbm),
+    );
     return { kind: isReempaque ? "reempaque" : "data", cells };
   });
+
+  if (rows.length > 0) {
+    rows.push({
+      kind: "total",
+      cells: ["SUMA CUBICAJE (TOTAL CBM)", totals.cbm],
+    });
+  }
+
   return { headers, rows };
 }
 
-function renderSheet(task: Task, currentDate: string): string {
+function renderSheet(
+  task: Task,
+  currentDate: string,
+  logoDataUrl?: string | null,
+): string {
   const { totals, isDetailed } = computeReportData(task);
   const { headers, rows } = buildTable(task);
   const moduleLabel = reportModuleLabel(task).toUpperCase();
@@ -237,7 +262,8 @@ function renderSheet(task: Task, currentDate: string): string {
       if (key.includes("cbm") || key.includes("total cbm") || key.includes("tot. cbm"))
         return `<col class="col-cbm" />`;
       if (key.includes("bult")) return `<col class="col-bultos" />`;
-      if (key.includes("peso")) return `<col class="col-peso" />`;
+      if (key.includes("peso") || key.includes("p.")) return `<col class="col-peso" />`;
+      if (key.includes("reemp")) return `<col class="col-reemp" />`;
       return `<col />`;
     })
     .join("");
@@ -246,6 +272,11 @@ function renderSheet(task: Task, currentDate: string): string {
     .map((row, ri) => {
       if (row.kind === "pallet") {
         return `<tr class="pallet-row"><td colspan="${colCount}">${esc(row.cells[0])}</td></tr>`;
+      }
+      if (row.kind === "total") {
+        const label = String(row.cells[0] ?? "");
+        const value = row.cells[1] ?? "";
+        return `<tr class="total-row"><td colspan="${colCount - 1}" class="cell-total-label">${esc(label)}</td><td class="cell-cbm cell-total-value">${esc(value)}</td></tr>`;
       }
       const tds = row.cells
         .map((c, i) => {
@@ -257,7 +288,8 @@ function renderSheet(task: Task, currentDate: string): string {
             key.includes("refer") || key === "ref." ? "cell-ref" : "",
             key === "l" || key === "w" || key === "h" ? "cell-dim" : "",
             key.includes("bult") ? "cell-bultos" : "",
-            key.includes("peso") ? "cell-peso" : "",
+            key.includes("peso") || key.includes("p.") ? "cell-peso" : "",
+            key.includes("reemp") ? "cell-reemp" : "",
           ]
             .filter(Boolean)
             .join(" ");
@@ -270,17 +302,21 @@ function renderSheet(task: Task, currentDate: string): string {
     })
     .join("");
 
+  const notesBlock = task.notes?.trim()
+    ? `
+    <h2 class="section-title">OBSERVACIONES</h2>
+    <div class="notes-box">${esc(task.notes.trim())}</div>`
+    : "";
+
   return `
-  <section class="sheet">
+  <section class="sheet" data-report-export-page="true">
     <header class="brand-bar">
-      <div class="brand-left">
-        <div class="logo-wrap">
-          <img src="${esc(logoAbsUrl())}" alt="ALDEPOSITOS" width="72" height="72" />
-        </div>
-        <div class="brand-text">
-          <div class="brand-name">ALDEPOSITOS</div>
-          <div class="brand-tag">Servicios logísticos integrales</div>
-        </div>
+      <div class="brand-logo">
+        <img src="${esc(logoSrc(logoDataUrl))}" alt="ALDEPOSITOS" width="72" height="72" />
+      </div>
+      <div class="brand-mid">
+        <div class="brand-name">ALDEPOSITOS</div>
+        <div class="brand-tag">Servicios logísticos integrales</div>
       </div>
       <div class="brand-right">
         <div class="report-title">REPORTE DE INGRESO</div>
@@ -330,6 +366,8 @@ function renderSheet(task: Task, currentDate: string): string {
       <thead><tr>${tableHead}</tr></thead>
       <tbody>${tableBody}</tbody>
     </table>
+    ${notesBlock}
+    <footer class="doc-footer">ALDEPOSITOS  ·  Documento generado automáticamente</footer>
   </section>`;
 }
 
@@ -348,51 +386,51 @@ const PRINT_CSS = `
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  body { padding: 0; }
   .sheet {
     width: 100%;
     max-width: 190mm;
     margin: 0 auto 12mm;
     page-break-after: always;
+    background: #fff;
   }
   .sheet:last-child { page-break-after: auto; margin-bottom: 0; }
 
   .brand-bar {
     display: flex;
     align-items: stretch;
-    justify-content: space-between;
-    gap: 16px;
     background: ${BRAND};
     color: #fff;
     border-radius: 4px;
     overflow: hidden;
-    min-height: 78px;
+    min-height: 82px;
   }
-  .brand-left {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 8px 12px;
-    background: #fff;
-    min-width: 52%;
-  }
-  .logo-wrap {
+  .brand-logo {
     flex-shrink: 0;
-    width: 64px;
-    height: 64px;
+    width: 88px;
+    background: #fff;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 6px;
   }
-  .logo-wrap img {
-    width: 64px;
-    height: 64px;
+  .brand-logo img {
+    width: 68px;
+    height: 68px;
     object-fit: contain;
+    display: block;
+  }
+  .brand-mid {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 10px 14px 12px;
   }
   .brand-name {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 900;
-    color: ${BRAND};
+    color: #fff;
     letter-spacing: -0.02em;
     line-height: 1;
   }
@@ -400,27 +438,30 @@ const PRINT_CSS = `
     margin-top: 5px;
     font-size: 9px;
     font-style: italic;
-    color: #64748b;
+    color: ${MUTED_ON_DARK};
     letter-spacing: 0.04em;
   }
   .brand-right {
-    flex: 1;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: flex-end;
     padding: 10px 16px;
     text-align: right;
+    max-width: 42%;
   }
   .report-title {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.08em;
+    line-height: 1.25;
   }
   .report-meta {
     margin-top: 6px;
     font-size: 9px;
-    color: #B8C4D4;
+    color: ${MUTED_ON_DARK};
+    line-height: 1.35;
   }
 
   .ra-banner {
@@ -429,19 +470,18 @@ const PRINT_CSS = `
     border: 1px solid ${BORDER};
     border-radius: 4px;
     text-align: center;
-    padding: 8px 12px;
+    padding: 10px 12px;
+    line-height: 1.2;
   }
   .ra-label {
-    display: block;
     font-size: 9px;
     font-weight: 700;
     color: ${MUTED};
     letter-spacing: 0.14em;
   }
   .ra-value {
-    display: block;
-    margin-top: 2px;
-    font-size: 22px;
+    margin-left: 6px;
+    font-size: 20px;
     font-weight: 900;
     color: ${BRAND};
     letter-spacing: -0.02em;
@@ -449,14 +489,14 @@ const PRINT_CSS = `
 
   .fields {
     display: grid;
-    grid-template-columns: 1.15fr 1.15fr 1fr 0.9fr;
+    grid-template-columns: 1.15fr 1.15fr 1fr 0.85fr;
     gap: 0;
     margin-top: 8px;
     border-top: 1px solid ${BORDER};
     border-bottom: 1px solid ${BORDER};
   }
   .field {
-    padding: 8px 10px 10px;
+    padding: 9px 10px 11px;
     border-right: 1px solid ${BORDER};
   }
   .field:last-child { border-right: none; }
@@ -468,14 +508,14 @@ const PRINT_CSS = `
     margin-bottom: 4px;
   }
   .field-value {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     color: ${TEXT};
-    line-height: 1.25;
+    line-height: 1.3;
     word-break: break-word;
   }
   .field-value.hero {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 900;
     color: ${BRAND};
   }
@@ -491,7 +531,7 @@ const PRINT_CSS = `
   .kpis.detailed { grid-template-columns: repeat(4, 1fr); }
   .kpi {
     text-align: center;
-    padding: 8px 6px;
+    padding: 10px 6px;
     border-right: 1px solid ${BORDER};
     background: #fff;
   }
@@ -503,16 +543,17 @@ const PRINT_CSS = `
     letter-spacing: 0.1em;
   }
   .kpi-value {
-    margin-top: 3px;
+    margin-top: 4px;
     font-size: 18px;
     font-weight: 900;
     color: ${BRAND};
     line-height: 1.1;
+    font-variant-numeric: tabular-nums;
   }
 
   .section-title {
     margin: 12px 0 6px;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 900;
     color: ${BRAND};
     letter-spacing: 0.12em;
@@ -522,15 +563,16 @@ const PRINT_CSS = `
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    font-size: 10px;
+    font-size: 9px;
   }
   col.col-num { width: 4%; }
-  col.col-ref { width: 18%; }
-  col.col-desc { width: 16%; }
-  col.col-dim { width: 7%; }
-  col.col-bultos { width: 7%; }
-  col.col-peso { width: 9%; }
-  col.col-cbm { width: 9%; }
+  col.col-ref { width: 13%; }
+  col.col-desc { width: 14%; }
+  col.col-dim { width: 5.5%; }
+  col.col-bultos { width: 6.5%; }
+  col.col-peso { width: 8%; }
+  col.col-reemp { width: 7%; }
+  col.col-cbm { width: 8.5%; }
 
   th {
     background: ${BRAND};
@@ -538,23 +580,25 @@ const PRINT_CSS = `
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    padding: 8px 3px;
+    padding: 7px 3px;
     border: 1px solid ${BRAND};
     text-align: center;
-    font-size: 8px;
-    line-height: 1.15;
+    font-size: 7.5px;
+    line-height: 1.2;
   }
-  th.th-cbm { background: ${ACCENT}; }
-  th.th-ref { font-size: 8.5px; }
-  th.th-dim { font-size: 9px; }
+  th.th-cbm { background: ${ACCENT}; border-color: ${ACCENT}; }
+  th.th-ref { font-size: 7.5px; }
+  th.th-dim { font-size: 8px; }
 
   td {
     border: 1px solid ${BORDER};
-    padding: 6px 4px;
+    padding: 5px 3px;
     text-align: center;
     color: ${TEXT};
     vertical-align: middle;
     word-break: break-word;
+    font-size: 9px;
+    line-height: 1.25;
   }
   tr.alt td { background: ${ROW_ALT}; }
   tr.reempaque td { background: #F5F3FF; }
@@ -565,58 +609,92 @@ const PRINT_CSS = `
     text-align: left;
     padding: 6px 8px;
     letter-spacing: 0.04em;
+    font-size: 9px;
+  }
+  tr.total-row td {
+    background: #EFF6FF;
+    font-weight: 800;
+  }
+  td.cell-total-label {
+    text-align: right;
+    padding-right: 8px;
+    font-size: 8px;
+    text-transform: uppercase;
+    color: ${BRAND};
+    letter-spacing: 0.06em;
+  }
+  td.cell-total-value {
+    font-size: 11px;
+    font-weight: 900;
   }
 
   td.cell-num {
     font-weight: 800;
     color: ${BRAND};
-    font-size: 10px;
+    font-size: 9px;
   }
   td.cell-ref {
     text-align: left;
     padding-left: 6px;
     font-weight: 800;
-    font-size: 11px;
+    font-size: 9px;
     color: ${BRAND};
     letter-spacing: 0.01em;
   }
   td.cell-dim {
-    font-weight: 800;
-    font-size: 11px;
+    font-weight: 700;
+    font-size: 9px;
     font-variant-numeric: tabular-nums;
-    color: ${TEXT};
   }
   td.cell-bultos {
     font-weight: 800;
-    font-size: 11px;
+    font-size: 9px;
     font-variant-numeric: tabular-nums;
   }
   td.cell-peso {
     font-variant-numeric: tabular-nums;
-    font-size: 10px;
+    font-size: 8.5px;
+  }
+  td.cell-reemp {
+    font-weight: 700;
+    font-size: 8px;
   }
   td.cell-cbm {
     color: ${CBM};
     font-weight: 900;
-    font-size: 11px;
+    font-size: 9px;
     font-variant-numeric: tabular-nums;
   }
 
+  .notes-box {
+    margin-top: 4px;
+    border: 1px solid ${BORDER};
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 9px;
+    background: ${KPI_BG};
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+
+  .doc-footer {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid ${BORDER};
+    text-align: center;
+    font-size: 8px;
+    font-weight: 600;
+    color: ${MUTED};
+    letter-spacing: 0.08em;
+  }
+
   @media print {
-    html, body {
-      background: #fff !important;
-    }
-    .sheet {
-      max-width: none;
-      margin: 0;
-    }
+    html, body { background: #fff !important; }
+    .sheet { max-width: none; margin: 0; }
   }
 
   @media screen {
-    body {
-      background: #e2e8f0;
-      padding: 16px;
-    }
+    body { background: #e2e8f0; padding: 16px; }
     .sheet {
       background: #fff;
       padding: 12mm 10mm;
@@ -629,11 +707,12 @@ const PRINT_CSS = `
 export function buildReportPrintHtml(
   tasks: Task[],
   currentDate: string,
+  options?: { logoDataUrl?: string | null },
 ): string {
-  const sheets = tasks.map((t) => renderSheet(t, currentDate)).join("\n");
+  const sheets = tasks
+    .map((t) => renderSheet(t, currentDate, options?.logoDataUrl))
+    .join("\n");
 
-  // Título vacío: evita el texto central del encabezado del navegador
-  // (fecha / título / URL se ocultan en Más opciones → Encabezados y pies).
   return `<!DOCTYPE html>
 <html lang="es-PA">
 <head>
@@ -649,10 +728,6 @@ ${sheets}
 
 const PRINT_IFRAME_ID = "aldepositos-report-print-frame";
 
-/**
- * Imprime el reporte estilo Excel sin abrir ventana emergente
- * (usa un iframe oculto en la misma página → no lo bloquea el navegador).
- */
 export function openReportPrintWindow(
   tasks: Task[],
   currentDate: string,
@@ -698,7 +773,6 @@ export function openReportPrintWindow(
     try {
       const win = frame.contentWindow;
       if (!win) return;
-      // Título vacío otra vez por si el navegador lo reescribe.
       try {
         if (frame.contentDocument) frame.contentDocument.title = "";
       } catch {

@@ -35,6 +35,8 @@ type Props = {
   generatedBy?: string;
   photoSrcById?: Record<string, string>;
   photoAssetsById?: Record<string, RaPhotoPdfAsset>;
+  /** Data URL del logo (mejor para html2canvas que rutas _next). */
+  logoSrc?: string;
 };
 
 function formatPhotoDate(iso: string): string {
@@ -154,12 +156,14 @@ function CoverPage({
   generatedAt,
   generatedBy,
   totalPages,
+  logoSrc,
 }: {
   task: Task;
   photos: RaPhoto[];
   generatedAt: string;
   generatedBy?: string;
   totalPages: number;
+  logoSrc?: string;
 }) {
   const { totals } = computeReportData(task);
   const capturadoPor =
@@ -202,12 +206,11 @@ function CoverPage({
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={logoMark.src}
+            src={logoSrc || logoMark.src}
             alt="ALDEPÓSITOS"
             width={72}
             height={72}
             style={{ display: "block", width: 72, height: 72, objectFit: "contain" }}
-            crossOrigin="anonymous"
           />
         </div>
         <div
@@ -485,6 +488,7 @@ export function PhotoRecordPdfExportLayout(props: Props) {
     generatedBy,
     photoSrcById = {},
     photoAssetsById = {},
+    logoSrc,
   } = props;
 
   const photoPages = paginatePhotos(photos);
@@ -498,6 +502,7 @@ export function PhotoRecordPdfExportLayout(props: Props) {
         generatedAt={generatedAt}
         generatedBy={generatedBy}
         totalPages={Math.max(1, totalPages)}
+        logoSrc={logoSrc}
       />
 
       {photos.length === 0 ? null : (

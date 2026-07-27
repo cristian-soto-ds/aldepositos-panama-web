@@ -4,7 +4,6 @@ import { useMemo, type ReactNode, type SyntheticEvent } from "react";
 import {
   ArrowLeft,
   AlertTriangle,
-  CheckCircle2,
   Loader2,
   Save,
 } from "lucide-react";
@@ -18,8 +17,8 @@ import {
   sumCubicajeM3,
 } from "@/lib/measureDecimals";
 
-const PESO_TOL_KG = 0.05;
-const CBM_TOL_M3 = 0.02;
+/** Solo avisar diferencia de cubicaje si |Δ| ≥ 0.40 m³. */
+const CBM_DIFF_ALERT_MIN_M3 = 0.4;
 
 type ReekonSaveReviewSheetProps = {
   open: boolean;
@@ -88,27 +87,12 @@ function formatSignedDiff(delta: number, decimals: number, unit: string): string
 
 function DiffAlert({
   children,
-  tone,
 }: {
   children: ReactNode;
-  tone: "warn" | "ok";
 }) {
-  const wrap =
-    tone === "ok"
-      ? "border-emerald-200 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/30"
-      : "border-amber-200 bg-amber-50/90 dark:border-amber-800 dark:bg-amber-950/35";
-  const iconClass =
-    tone === "ok"
-      ? "text-emerald-600 dark:text-emerald-400"
-      : "text-amber-700 dark:text-amber-300";
-
   return (
-    <div className={`flex items-start gap-2 rounded-xl border px-3 py-2.5 ${wrap}`}>
-      {tone === "ok" ? (
-        <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${iconClass}`} />
-      ) : (
-        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${iconClass}`} />
-      )}
+    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/90 px-3 py-2.5 dark:border-amber-800 dark:bg-amber-950/35">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
       <div className="min-w-0 text-sm leading-snug text-slate-800 dark:text-slate-100">
         {children}
       </div>
@@ -123,27 +107,18 @@ export function ReekonSaveReviewSheet({
   measureRows,
   referenceMode,
   raLabel,
-  declaredBultos,
-  physicalBultos,
-  expectedWeight,
   expectedCbm,
-  capturedWeight,
   capturedCbm,
   isSaving,
 }: ReekonSaveReviewSheetProps) {
   const palletized = referenceMode === "palletized";
-  const hasFacturaWeight = expectedWeight > 0;
   const hasFacturaCbm = expectedCbm > 0;
-  const weightDelta = roundMeasureNearest(capturedWeight - expectedWeight);
   const computedCbm = useMemo(() => sumCubicajeM3(measureRows), [measureRows]);
   const displayCbm = capturedCbm > 0 ? capturedCbm : computedCbm;
   const cbmDelta = roundMeasureNearest(displayCbm - expectedCbm);
-  const bultosDelta = physicalBultos - declaredBultos;
-
-  const weightDiff = hasFacturaWeight && Math.abs(weightDelta) > PESO_TOL_KG;
-  const cbmDiff = hasFacturaCbm && Math.abs(cbmDelta) > CBM_TOL_M3;
-  const bultosDiff = declaredBultos > 0 && bultosDelta !== 0;
-  const hasAnyDiff = weightDiff || cbmDiff || bultosDiff;
+  // Solo diferencia de cubicaje; umbral 0.40 m³ (positiva o negativa).
+  const cbmDiff =
+    hasFacturaCbm && Math.abs(cbmDelta) >= CBM_DIFF_ALERT_MIN_M3;
 
   const lineEntries = useMemo(() => {
     const seenPallets = new Set<number>();
@@ -217,51 +192,18 @@ export function ReekonSaveReviewSheet({
         </div>
 
         <div className="custom-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
-          {hasAnyDiff ? (
-            <div className="space-y-2">
-              {weightDiff ? (
-                <DiffAlert tone="warn">
-                  <span className="font-bold">Peso:</span> capturaste{" "}
-                  <span className="font-bold tabular-nums">{formatMeasure2(capturedWeight)} kg</span>
-                  , factura{" "}
-                  <span className="tabular-nums">{formatMeasure2(expectedWeight)} kg</span>
-                  {" · "}
-                  <span className="font-bold tabular-nums text-amber-900 dark:text-amber-200">
-                    {formatSignedDiff(weightDelta, 2, "kg")}
-                  </span>
-                </DiffAlert>
-              ) : null}
-              {cbmDiff ? (
-                <DiffAlert tone="warn">
-                  <span className="font-bold">Cubicaje:</span> capturaste{" "}
-                  <span className="font-bold tabular-nums">{formatCubicaje2(displayCbm)} m³</span>
-                  , factura{" "}
-                  <span className="tabular-nums">{formatCubicaje2(expectedCbm)} m³</span>
-                  {" · "}
-                  <span className="font-bold tabular-nums text-amber-900 dark:text-amber-200">
-                    {formatSignedDiff(cbmDelta, 2, "m³")}
-                  </span>
-                </DiffAlert>
-              ) : null}
-              {bultosDiff ? (
-                <DiffAlert tone="warn">
-                  <span className="font-bold">Bultos:</span> capturaste{" "}
-                  <span className="font-bold tabular-nums">{physicalBultos}</span>, declarados{" "}
-                  <span className="tabular-nums">{declaredBultos}</span>
-                  {" · "}
-                  <span className="font-bold tabular-nums text-amber-900 dark:text-amber-200">
-                    {bultosDelta > 0 ? `+${bultosDelta}` : bultosDelta}
-                  </span>
-                </DiffAlert>
-              ) : null}
-            </div>
-          ) : (
-            <DiffAlert tone="ok">
-              {hasFacturaWeight || hasFacturaCbm || declaredBultos > 0
-                ? "Coincide con la factura."
-                : "Sin datos de factura para comparar."}
+          {cbmDiff ? (
+            <DiffAlert>
+              <span className="font-bold">Cubicaje:</span> capturaste{" "}
+              <span className="font-bold tabular-nums">{formatCubicaje2(displayCbm)} m³</span>
+              , factura{" "}
+              <span className="tabular-nums">{formatCubicaje2(expectedCbm)} m³</span>
+              {" · "}
+              <span className="font-bold tabular-nums text-amber-900 dark:text-amber-200">
+                {formatSignedDiff(cbmDelta, 2, "m³")}
+              </span>
             </DiffAlert>
-          )}
+          ) : null}
 
           <div>
             <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">

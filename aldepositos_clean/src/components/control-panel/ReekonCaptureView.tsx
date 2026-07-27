@@ -352,7 +352,48 @@ export function ReekonCaptureView({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refListOpen, setRefListOpen] = useState(false);
   const [saveReviewOpen, setSaveReviewOpen] = useState(false);
+  /** Tras cerrar el resumen, absorbe el «ghost click» móvil que reabre Guardar. */
+  const [saveReviewDismissLock, setSaveReviewDismissLock] = useState(false);
+  const saveReviewDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [showRefCarousel, setShowRefCarousel] = useState(false);
+
+  const dismissSaveReview = useCallback(() => {
+    setSaveReviewOpen(false);
+    setSaveReviewDismissLock(true);
+    if (saveReviewDismissTimerRef.current) {
+      clearTimeout(saveReviewDismissTimerRef.current);
+    }
+    saveReviewDismissTimerRef.current = setTimeout(() => {
+      saveReviewDismissTimerRef.current = null;
+      setSaveReviewDismissLock(false);
+    }, 450);
+  }, []);
+
+  const openSaveReview = useCallback(() => {
+    if (saveReviewDismissLock || isSaving) return;
+    setSaveReviewOpen(true);
+  }, [saveReviewDismissLock, isSaving]);
+
+  const confirmSaveReview = useCallback(() => {
+    if (isSaving) return;
+    setSaveReviewOpen(false);
+    setSaveReviewDismissLock(false);
+    if (saveReviewDismissTimerRef.current) {
+      clearTimeout(saveReviewDismissTimerRef.current);
+      saveReviewDismissTimerRef.current = null;
+    }
+    onSave();
+  }, [isSaving, onSave]);
+
+  useEffect(() => {
+    return () => {
+      if (saveReviewDismissTimerRef.current) {
+        clearTimeout(saveReviewDismissTimerRef.current);
+      }
+    };
+  }, []);
   /** Segundo toque requerido para borrar la línea activa (evita borrados accidentales). */
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
@@ -1084,7 +1125,11 @@ export function ReekonCaptureView({
       </main>
 
       {/* Footer */}
-      <footer className="reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 pt-2 dark:border-slate-700 dark:bg-slate-900">
+      <footer
+        className={`reekon-safe-bottom shrink-0 border-t border-slate-200 bg-white px-3 pt-2 dark:border-slate-700 dark:bg-slate-900 ${
+          saveReviewOpen ? "pointer-events-none" : ""
+        }`}
+      >
         <div className="mx-auto w-full max-w-md">
           <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
             <span>Total {formatCubicaje2(totalCbm)} m³</span>
@@ -1196,8 +1241,8 @@ export function ReekonCaptureView({
             )}
             <button
               type="button"
-              onClick={() => setSaveReviewOpen(true)}
-              disabled={isSaving}
+              onClick={openSaveReview}
+              disabled={isSaving || saveReviewDismissLock}
               className="flex h-14 min-w-0 flex-[1.2] items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-2 text-sm font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60 sm:flex-[1.5] sm:gap-2 sm:text-base"
             >
               {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
@@ -1221,13 +1266,21 @@ export function ReekonCaptureView({
         activePallet={palletized ? activePalletNum : null}
       />
 
+      {saveReviewDismissLock ? (
+        <div
+          className="fixed inset-0 z-[10004] bg-transparent"
+          aria-hidden
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        />
+      ) : null}
+
       <ReekonSaveReviewSheet
         open={saveReviewOpen}
-        onClose={() => setSaveReviewOpen(false)}
-        onConfirm={() => {
-          setSaveReviewOpen(false);
-          onSave();
-        }}
+        onClose={dismissSaveReview}
+        onConfirm={confirmSaveReview}
         measureRows={measureRows}
         referenceMode={referenceMode}
         raLabel={raLabel}

@@ -17,7 +17,6 @@ import {
   Route,
   Trophy,
   PauseCircle,
-  CalendarClock,
   Camera,
   Images,
   type LucideIcon,
@@ -174,15 +173,6 @@ export function ControlPanelLayout({
             active={currentView === "truck-direction"}
             onClick={() => {
               setCurrentView("truck-direction");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={CalendarClock} />}
-            text="Citas"
-            active={currentView === "citas"}
-            onClick={() => {
-              setCurrentView("citas");
               setSidebarOpen(false);
             }}
           />

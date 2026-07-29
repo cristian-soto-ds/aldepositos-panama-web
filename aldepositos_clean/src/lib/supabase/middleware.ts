@@ -1,5 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 /** Copia cabeceras Set-Cookie (p. ej. refresh de sesión) a una redirección. */
@@ -12,31 +12,6 @@ function applySetCookiesFrom(from: NextResponse, to: NextResponse) {
   } catch {
     /* Edge: getSetCookie/append puede fallar según runtime; la redirección sigue válida */
   }
-}
-
-async function resolveHomePath(
-  supabase: SupabaseClient,
-  userId: string,
-): Promise<"/panel" | "/proveedor"> {
-  try {
-    for (const table of ["perfiles", "profiles"] as const) {
-      const { data: perfil } = await supabase
-        .from(table)
-        .select("rol")
-        .eq("id", userId)
-        .maybeSingle();
-      if (
-        perfil &&
-        typeof (perfil as { rol?: unknown }).rol === "string" &&
-        String((perfil as { rol: string }).rol).toLowerCase() === "proveedor"
-      ) {
-        return "/proveedor";
-      }
-    }
-  } catch {
-    /* default panel */
-  }
-  return "/panel";
 }
 
 /**
@@ -61,10 +36,9 @@ export async function updateSession(request: NextRequest) {
 
   let supabaseResponse = NextResponse.next({ request });
   let user: User | null = null;
-  let supabase: SupabaseClient | null = null;
 
   try {
-    supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -94,10 +68,9 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
-  if (user && supabase && (path === "/login" || path === "/")) {
+  if (user && (path === "/login" || path === "/")) {
     try {
-      const dest = await resolveHomePath(supabase, user.id);
-      const redirect = NextResponse.redirect(new URL(dest, request.url));
+      const redirect = NextResponse.redirect(new URL("/panel", request.url));
       applySetCookiesFrom(supabaseResponse, redirect);
       return redirect;
     } catch (e) {
@@ -106,23 +79,9 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  if (user && supabase && path.startsWith("/panel")) {
-    try {
-      const dest = await resolveHomePath(supabase, user.id);
-      if (dest === "/proveedor") {
-        const redirect = NextResponse.redirect(new URL(dest, request.url));
-        applySetCookiesFrom(supabaseResponse, redirect);
-        return redirect;
-      }
-    } catch {
-      /* stay on panel */
-    }
-  }
-
   if (
     !user &&
     (path.startsWith("/panel") ||
-      path.startsWith("/proveedor") ||
       path.startsWith("/welcome") ||
       (path.startsWith("/direccion-camiones") &&
         !path.startsWith("/direccion-camiones/tv")))

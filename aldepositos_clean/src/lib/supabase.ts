@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { sanitizeTaskTextFields } from "@/lib/collectionOrderToTask";
 import {
   isTaskPayload,
   parseTaskRealtimeChange,
@@ -30,11 +31,67 @@ export const supabase = createBrowserClient(
 
 export type FetchTasksOptions = {
   /**
-   * true: payload completo (Despacho / Reportes).
+   * true: payload completo (Despacho / Reportes / Ranking).
    * false/omitido: sin measureData (lista del panel; detalle vía fetchTaskById).
    */
   includeMeasureData?: boolean;
 };
+
+type TasksListRow = { payload: unknown };
+
+function mapTaskRows(rows: TasksListRow[], includeMeasureData: boolean): Task[] {
+  const tasks = rows
+    .map((r) => r.payload)
+    .filter(isTaskPayload)
+    .map(sanitizeTaskTextFields);
+  return includeMeasureData ? tasks : tasks.map(toListTask);
+}
+
+/** null = aún no probado; false = migracion 014 no aplicada; true = OK */
+let tasksListRpcAvailable: boolean | null = null;
+
+/**
+ * Lista vía RPC `fetch_tasks_list` (sin measureData en red cuando slim).
+ * Si la migración 014 aún no está aplicada, cae al select clásico.
+ */
+async function fetchTasksViaRpc(
+  includeMeasureData: boolean,
+): Promise<Task[] | null> {
+  if (tasksListRpcAvailable === false) return null;
+
+  const { data, error } = await supabase.rpc("fetch_tasks_list", {
+    p_include_measure: includeMeasureData,
+  });
+  if (error) {
+    const code = String((error as { code?: string }).code ?? "");
+    const msg = String(error.message ?? "").toLowerCase();
+    if (
+      code === "PGRST202" ||
+      code === "42883" ||
+      msg.includes("fetch_tasks_list") ||
+      msg.includes("could not find the function") ||
+      msg.includes("function public.fetch_tasks_list")
+    ) {
+      tasksListRpcAvailable = false;
+      return null;
+    }
+    throw error;
+  }
+  tasksListRpcAvailable = true;
+  return mapTaskRows((data ?? []) as TasksListRow[], includeMeasureData);
+}
+
+async function fetchTasksViaSelect(
+  includeMeasureData: boolean,
+): Promise<Task[]> {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("id, payload, updated_at")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+  return mapTaskRows((data ?? []) as TasksListRow[], includeMeasureData);
+}
 
 /**
  * Lista de tasks. Por defecto sin `measureData` (estado del panel más barato).
@@ -43,16 +100,10 @@ export type FetchTasksOptions = {
 export async function fetchTasks(
   options?: FetchTasksOptions,
 ): Promise<Task[]> {
-  const { data, error } = await supabase
-    .from("tasks")
-    .select("id, payload, updated_at")
-    .order("updated_at", { ascending: false });
-
-  if (error) throw error;
-
-  const rows = (data ?? []) as { payload: unknown }[];
-  const tasks = rows.map((r) => r.payload).filter(isTaskPayload);
-  return options?.includeMeasureData ? tasks : tasks.map(toListTask);
+  const include = Boolean(options?.includeMeasureData);
+  const viaRpc = await fetchTasksViaRpc(include);
+  if (viaRpc) return viaRpc;
+  return fetchTasksViaSelect(include);
 }
 
 /** Carga el payload completo de un RA (incluye measureData). */
@@ -83,16 +134,20 @@ export async function fetchTaskRow(id: string): Promise<TaskRowMeta | null> {
       : typeof data.payload.updatedAt === "string"
         ? data.payload.updatedAt
         : null;
-  return { task: data.payload, updatedAt };
+  return {
+    task: sanitizeTaskTextFields(data.payload),
+    updatedAt,
+  };
 }
 
 /**
  * Crea una fila nueva (RA nuevo).
  */
 export async function insertTask(task: Task): Promise<void> {
+  const payload = sanitizeTaskTextFields(task);
   const { error } = await supabase.from("tasks").insert({
-    id: task.id,
-    payload: task,
+    id: payload.id,
+    payload,
   });
   if (error) throw error;
 }
@@ -102,10 +157,13 @@ export async function insertTask(task: Task): Promise<void> {
  */
 export async function insertTasks(tasks: Task[]): Promise<void> {
   if (tasks.length === 0) return;
-  const rows = tasks.map((task) => ({
-    id: task.id,
-    payload: task,
-  }));
+  const rows = tasks.map((task) => {
+    const payload = sanitizeTaskTextFields(task);
+    return {
+      id: payload.id,
+      payload,
+    };
+  });
   const { error } = await supabase.from("tasks").insert(rows);
   if (error) throw error;
 }
@@ -114,13 +172,14 @@ export async function insertTasks(tasks: Task[]): Promise<void> {
  * Actualiza el payload de una tarea existente.
  */
 export async function updateTask(task: Task): Promise<void> {
+  const payload = sanitizeTaskTextFields(task);
   const { error } = await supabase
     .from("tasks")
     .update({
-      payload: task,
+      payload,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", task.id);
+    .eq("id", payload.id);
   if (error) throw error;
 }
 
@@ -133,14 +192,17 @@ export async function updateTaskIfMatch(
   expectedUpdatedAt: string | null,
 ): Promise<"ok" | "conflict"> {
   const nextUpdatedAt = new Date().toISOString();
-  const payload: Task = { ...task, updatedAt: nextUpdatedAt };
+  const payload: Task = {
+    ...sanitizeTaskTextFields(task),
+    updatedAt: nextUpdatedAt,
+  };
   let query = supabase
     .from("tasks")
     .update({
       payload,
       updated_at: nextUpdatedAt,
     })
-    .eq("id", task.id);
+    .eq("id", payload.id);
 
   if (expectedUpdatedAt) {
     query = query.eq("updated_at", expectedUpdatedAt);

@@ -155,7 +155,16 @@ function countTaskRows(task: Task): number {
   const rows = Array.isArray(task.measureData)
     ? (task.measureData as Record<string, unknown>[])
     : [];
-  return rows.filter((row) => hasAnyRowData(row)).length;
+  const fromRows = rows.filter((row) => hasAnyRowData(row)).length;
+  if (fromRows > 0) return fromRows;
+  // Lista slim: usar meta liviana si el payload no trae measureData.
+  if (typeof task.rowCount === "number" && task.rowCount > 0) {
+    return task.rowCount;
+  }
+  if (typeof task.completeRowCount === "number" && task.completeRowCount > 0) {
+    return task.completeRowCount;
+  }
+  return 0;
 }
 
 function parseActivityDate(iso: string | undefined | null): Date | null {

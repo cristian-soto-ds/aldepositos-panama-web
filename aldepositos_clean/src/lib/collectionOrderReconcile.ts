@@ -4,6 +4,7 @@ import {
   pesoTotalFromLine,
 } from "@/lib/collectionLineUtils";
 import { cubicajeM3FromRow, roundMeasureNearest } from "@/lib/measureDecimals";
+import { repairLatinText } from "@/lib/repairLatinText";
 
 function parseN(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -197,11 +198,23 @@ export function normalizeCollectionOrderFields(order: CollectionOrder): Collecti
 
   return {
     ...order,
-    expedidor,
+    cliente: repairLatinText(order.cliente),
+    proveedor: repairLatinText(order.proveedor),
+    marca: order.marca != null ? repairLatinText(order.marca) || undefined : undefined,
+    expedidor: repairLatinText(expedidor) || undefined,
     fechaEntrega: fechaEntrega || undefined,
+    notes: order.notes != null ? repairLatinText(order.notes) : order.notes,
     expectedBultos,
     expectedPesoKg,
     expectedCbm,
-    lines: lines.map((line) => normalizeCollectionOrderLineMeasures(line)),
+    lines: lines.map((line) => {
+      const m = normalizeCollectionOrderLineMeasures(line);
+      return {
+        ...m,
+        referencia: m.referencia != null ? repairLatinText(m.referencia) : m.referencia,
+        descripcion:
+          m.descripcion != null ? repairLatinText(m.descripcion) : m.descripcion,
+      };
+    }),
   };
 }

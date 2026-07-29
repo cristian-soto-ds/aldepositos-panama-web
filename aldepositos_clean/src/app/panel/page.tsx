@@ -106,11 +106,6 @@ const InventoryControlModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
-const CitasModule = dynamic(
-  () =>
-    import("@/components/control-panel/CitasModule").then((m) => m.CitasModule),
-  { loading: () => <PanelModuleLoader /> },
-);
 const PhotoRecordModule = dynamic(
   () =>
     import("@/components/control-panel/PhotoRecordModule").then(
@@ -552,14 +547,17 @@ export default function PanelPage() {
     }
   };
 
-  // Despacho / reportes / ranking: payload completo. Ingreso rápido: lista slim.
+  // Reportes / ranking: payload completo (con caché). Resto: lista slim local o red.
   useEffect(() => {
     if (!userEmail) return;
     const needsFull =
       currentView === "reports" ||
       currentView === "inventory-leaderboard";
     if (needsFull) {
-      void reloadTasks({ includeMeasureData: true });
+      void reloadTasks({
+        includeMeasureData: true,
+        skipIfAlreadyFull: true,
+      });
       return;
     }
     if (
@@ -568,7 +566,10 @@ export default function PanelPage() {
       currentView === "dashboard" ||
       currentView === "collection-orders"
     ) {
-      void reloadTasks({ includeMeasureData: false });
+      void reloadTasks({
+        includeMeasureData: false,
+        localSlimOnly: true,
+      });
     }
   }, [currentView, userEmail, reloadTasks]);
 
@@ -661,8 +662,6 @@ export default function PanelPage() {
         )}
 
         {visibleView === "truck-direction" && <TruckDirectionModule />}
-
-        {visibleView === "citas" && <CitasModule />}
 
         {visibleView === "photo-record" && (
           <PhotoRecordModule

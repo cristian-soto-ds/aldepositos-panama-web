@@ -10,6 +10,7 @@ import {
   normalizeOrNumero,
   parseCollectionOrdersFromHtm,
 } from "@/lib/parseCollectionOrdersHtm";
+import { readTextFileRepairingEncoding } from "@/lib/repairLatinText";
 
 type ImportCollectionOrdersHtmModalProps = {
   open: boolean;
@@ -89,10 +90,9 @@ export function ImportCollectionOrdersHtmModal({
     setParseError(null);
     setFileName(file.name);
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    void (async () => {
       try {
-        const text = String(reader.result ?? "");
+        const text = await readTextFileRepairingEncoding(file);
         const result = parseCollectionOrdersFromHtm(text);
         if (result.error) {
           setParseError(result.error);
@@ -108,12 +108,7 @@ export function ImportCollectionOrdersHtmModal({
       } finally {
         setReading(false);
       }
-    };
-    reader.onerror = () => {
-      setParseError("No se pudo leer el archivo.");
-      setReading(false);
-    };
-    reader.readAsText(file, "utf-8");
+    })();
   };
 
   if (!open) return null;

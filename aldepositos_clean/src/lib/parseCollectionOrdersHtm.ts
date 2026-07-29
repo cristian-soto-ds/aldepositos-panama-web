@@ -5,6 +5,7 @@
 
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import { parseMeasureNumber } from "@/lib/measureDecimals";
+import { repairLatinText } from "@/lib/repairLatinText";
 
 export type ParsedOrHtmRow = {
   numero: string;
@@ -552,10 +553,10 @@ export function collectionOrdersFromHtmRows(
     return {
       id: generateId(),
       numero: row.numero.trim(),
-      cliente: row.cliente.trim() || String(clienteGlobal ?? "").trim(),
-      proveedor: row.proveedor.trim(),
-      marca: row.marca.trim() || undefined,
-      expedidor: row.expedidor.trim() || undefined,
+      cliente: repairLatinText(row.cliente.trim() || String(clienteGlobal ?? "").trim()),
+      proveedor: repairLatinText(row.proveedor.trim()),
+      marca: repairLatinText(row.marca.trim()) || undefined,
+      expedidor: repairLatinText(row.expedidor.trim()) || undefined,
       fechaEntrega: row.fechaEntrega?.trim() || undefined,
       expectedBultos: bultos > 0 ? bultos : undefined,
       expectedPesoKg: row.pesoKg > 0 ? row.pesoKg : undefined,

@@ -27,6 +27,23 @@ type UseSupabaseTasksOptions = {
   userKey?: string | null;
 };
 
+export type ReloadTasksOptions = {
+  includeMeasureData?: boolean;
+  /**
+   * Si ya estamos en modo full y hay measureData en memoria, no vuelve a bajar
+   * el payload completo (Reportes ↔ Ranking).
+   */
+  skipIfAlreadyFull?: boolean;
+  /**
+   * Al pasar a lista slim: recorta measureData en memoria sin round-trip a la BD
+   * (el panel no necesita filas; abrir un RA sigue usando fetchTaskById).
+   */
+  localSlimOnly?: boolean;
+};
+
+/** Mínimo entre refetch por focus / visibility. */
+const FOCUS_RELOAD_MIN_MS = 90_000;
+
 /**
  * Estado de tareas sincronizado con `public.tasks`:
  * - lista slim (sin measureData) + detalle hidratado al abrir RA
@@ -39,15 +56,55 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
   const [tasksLoading, setTasksLoading] = useState(true);
   /** Reportes/despacho necesitan filas; no volver a slim en focus/realtime. */
   const includeMeasureDataRef = useRef(false);
+  const tasksRef = useRef<Task[]>([]);
+  const lastNetworkReloadAtRef = useRef(0);
+  const fullHydratedAtRef = useRef(0);
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  const listHasSubstantialMeasureData = useCallback((list: Task[]) => {
+    let withRows = 0;
+    for (const t of list) {
+      if (!measureDataLooksEmpty(t.measureData)) withRows += 1;
+      if (withRows >= 3) return true;
+    }
+    return withRows > 0 && list.length > 0 && withRows >= Math.min(3, list.length);
+  }, []);
 
   const reloadTasks = useCallback(
-    async (options?: { includeMeasureData?: boolean }) => {
+    async (options?: ReloadTasksOptions) => {
       if (options?.includeMeasureData !== undefined) {
         includeMeasureDataRef.current = options.includeMeasureData;
       }
       const include = includeMeasureDataRef.current;
+
+      if (
+        include &&
+        options?.skipIfAlreadyFull &&
+        fullHydratedAtRef.current > 0 &&
+        listHasSubstantialMeasureData(tasksRef.current)
+      ) {
+        return;
+      }
+
+      if (!include && options?.localSlimOnly) {
+        setTasks((prev) => {
+          const next = prev.map(toListTask);
+          return tasksListFingerprint(prev) === tasksListFingerprint(next)
+            ? prev
+            : next;
+        });
+        return;
+      }
+
       try {
         const list = await fetchTasks({ includeMeasureData: include });
+        lastNetworkReloadAtRef.current = Date.now();
+        if (include) {
+          fullHydratedAtRef.current = Date.now();
+        }
         setTasks((prev) => {
           if (include) {
             // Fingerprint no mira measureData: hay que aplicar el payload completo siempre.
@@ -67,7 +124,7 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
         setTasksLoading(false);
       }
     },
-    [],
+    [listHasSubstantialMeasureData],
   );
 
   const applyRealtimeChange = useCallback((change: TaskRealtimeChange) => {
@@ -176,12 +233,10 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
 
   useEffect(() => {
     if (!enabled) return;
-    const lastFocusReloadRef = { current: 0 };
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       const now = Date.now();
-      if (now - lastFocusReloadRef.current < 30_000) return;
-      lastFocusReloadRef.current = now;
+      if (now - lastNetworkReloadAtRef.current < FOCUS_RELOAD_MIN_MS) return;
       void reloadTasks();
     };
     document.addEventListener("visibilitychange", onVisible);

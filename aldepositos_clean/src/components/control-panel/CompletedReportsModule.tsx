@@ -14,6 +14,7 @@ import {
 } from "@/lib/inventariadoresRoster";
 import { getPeriodBounds, type LeaderboardPeriod } from "@/lib/inventoryLeaderboard";
 import { inventoryCompletedByLabel } from "@/lib/taskContributors";
+import { formatRaFieldLabel } from "@/lib/collectionOrderToTask";
 import { fetchTaskById } from "@/lib/supabase";
 import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 import {
@@ -751,8 +752,10 @@ export function CompletedReportsModule({
                           RA: {t.ra}
                         </h3>
                         <p className="text-[10px] md:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase">
-                          {t.provider}
-                          {t.brand ? ` — ${t.brand}` : ""}
+                          {formatRaFieldLabel(t.provider)}
+                          {t.brand?.trim()
+                            ? ` — ${formatRaFieldLabel(t.brand)}`
+                            : ""}
                         </p>
                         {completedBy ? (
                           <p className="mt-0.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">

@@ -1,4 +1,5 @@
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { sanitizeTaskTextFields } from "@/lib/collectionOrderToTask";
 import type { Task } from "@/lib/types/task";
 
 export type DbPayloadRow = {
@@ -19,10 +20,11 @@ export function isTaskPayload(value: unknown): value is Task {
 export function taskFromDbRow(row: DbPayloadRow | null | undefined): Task | null {
   if (!row?.id) return null;
   if (!isTaskPayload(row.payload)) return null;
-  if (row.payload.id !== row.id) {
-    return { ...row.payload, id: row.id };
-  }
-  return row.payload;
+  const base =
+    row.payload.id !== row.id
+      ? { ...row.payload, id: row.id }
+      : row.payload;
+  return sanitizeTaskTextFields(base);
 }
 
 export type TaskRealtimeChange = {

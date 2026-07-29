@@ -1,6 +1,7 @@
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import { totalsFromCapturedLines } from "@/lib/collectionOrderReconcile";
+import { repairLatinText } from "@/lib/repairLatinText";
 
 const EMPTY_CLIENT_LABELS = new Set(["", "Sin Cliente"]);
 const EMPTY_TEXT_LABELS = new Set(["", "N/A"]);
@@ -16,9 +17,9 @@ function pickText(
   empty: Set<string>,
   overwrite: boolean,
 ): string | undefined {
-  const next = String(incoming ?? "").trim();
+  const next = repairLatinText(String(incoming ?? "").trim());
   if (!next) return undefined;
-  const cur = String(current ?? "").trim();
+  const cur = repairLatinText(String(current ?? "").trim());
   if (overwrite || !hasMeaningfulText(cur, empty)) return next;
   return undefined;
 }
@@ -116,6 +117,18 @@ export function raClientGroupLabel(mainClient: string | undefined): string {
 }
 
 export function formatRaFieldLabel(value: string | undefined): string {
-  const v = String(value ?? "").trim();
+  const v = repairLatinText(String(value ?? "").trim());
   return v && !EMPTY_TEXT_LABELS.has(v) ? v : "—";
+}
+
+/** Normaliza campos de texto del RA (marca, proveedor, etc.) al guardar/leer. */
+export function sanitizeTaskTextFields(task: Task): Task {
+  return {
+    ...task,
+    mainClient: repairLatinText(task.mainClient),
+    provider: repairLatinText(task.provider),
+    subClient: repairLatinText(task.subClient),
+    brand: repairLatinText(task.brand),
+    notes: task.notes != null ? repairLatinText(task.notes) : task.notes,
+  };
 }

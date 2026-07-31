@@ -34,6 +34,12 @@ import { isPublicAvatarUrl } from "@/lib/profileAvatar";
 import { fetchPerfilUsuario } from "@/lib/perfiles";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { fetchWithTimeout } from "@/lib/clientFetch";
+import {
+  clampViewForRole,
+  INVENTARIADOR_DEFAULT_VIEW,
+  normalizeRole,
+  type AppRole,
+} from "@/lib/userRole";
 
 function PanelModuleLoader() {
   return (
@@ -141,6 +147,7 @@ export default function PanelPage() {
   const [userDisplayName, setUserDisplayName] = useState<string | null>(null);
   /** `perfiles.nombre_completo` en Supabase (ej. "Cristian Soto"); prioridad explícita en el saludo. */
   const [profileFullName, setProfileFullName] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<AppRole>("admin");
   const [preferences, setPreferences] = useState<UserPreferences>(
     DEFAULT_USER_PREFERENCES,
   );
@@ -192,6 +199,7 @@ export default function PanelPage() {
         const perfil = await fetchPerfilUsuario(user.id, email);
         let fullName = perfil.nombreCompleto || metaFullName;
         let avatarUrl = perfil.avatarUrl;
+        let rol: AppRole = perfil.rol;
 
         if (accessToken && typeof window !== "undefined") {
           try {
@@ -206,17 +214,23 @@ export default function PanelPage() {
               const payload = (await res.json()) as {
                 fullName?: string | null;
                 avatarUrl?: string | null;
+                rol?: string | null;
+                skipped?: boolean;
               };
               const fromServer = payload.fullName?.trim();
               if (fromServer) fullName = fullName || fromServer;
               const av = payload.avatarUrl?.trim();
               if (av) avatarUrl = avatarUrl || av;
+              if (payload.rol != null && payload.skipped !== true) {
+                rol = normalizeRole(payload.rol);
+              }
             }
           } catch {
             /* ignorar: sin service role o red */
           }
         }
 
+        setUserRole(rol);
         setProfileFullName(fullName ? fullName : null);
 
         /** Solo `nombre_completo` (o equivalente en metadata); nunca correo ni `nombre_usuario` suelto. */
@@ -265,9 +279,17 @@ export default function PanelPage() {
 
   useEffect(() => {
     if (!loading && preferences.startView) {
-      setCurrentView(preferences.startView);
+      const preferred =
+        userRole === "inventariador"
+          ? INVENTARIADOR_DEFAULT_VIEW
+          : preferences.startView;
+      setCurrentView(clampViewForRole(userRole, preferred));
     }
-  }, [preferences.startView, loading]);
+  }, [preferences.startView, loading, userRole]);
+
+  useEffect(() => {
+    setCurrentView((prev) => clampViewForRole(userRole, prev));
+  }, [userRole]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -579,22 +601,32 @@ export default function PanelPage() {
     }
   }, [currentView]);
 
+  const setCurrentViewGuarded = useCallback(
+    (view: string) => {
+      setCurrentView(clampViewForRole(userRole, view));
+    },
+    [userRole],
+  );
+
   if (loading || !userEmail) {
     return null;
   }
 
-  const visibleView =
-    !showOptionsModule && currentView === "options" ? "dashboard" : currentView;
+  const visibleView = clampViewForRole(
+    userRole,
+    !showOptionsModule && currentView === "options" ? "dashboard" : currentView,
+  );
 
   return (
     <ControlPanelLayout
       currentView={visibleView}
-      setCurrentView={setCurrentView}
+      setCurrentView={setCurrentViewGuarded}
       userDisplayName={userDisplayName}
       userEmail={userEmail}
       userAvatarSrc={sidebarAvatarUrl}
       preferences={preferences}
       showOptionsModule={showOptionsModule}
+      userRole={userRole}
     >
       {tasksLoading && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-white/70 backdrop-blur-sm panel-loading-overlay safe-area-insets">

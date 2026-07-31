@@ -26,6 +26,7 @@ import { supabase } from "@/lib/supabase";
 import { clearWorkPresence, getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import { useRouter } from "next/navigation";
 import type { UserPreferences } from "@/lib/userPreferences";
+import { canAccessView, type AppRole } from "@/lib/userRole";
 
 type ControlPanelLayoutProps = {
   children: ReactNode;
@@ -37,6 +38,8 @@ type ControlPanelLayoutProps = {
   userAvatarSrc?: string | null;
   preferences?: UserPreferences;
   showOptionsModule?: boolean;
+  /** Rol de panel (admin ve todo; inventariador solo 4 módulos). */
+  userRole?: AppRole;
 };
 
 function NavIcon({ Icon }: { Icon: LucideIcon }) {
@@ -52,7 +55,23 @@ export function ControlPanelLayout({
   userAvatarSrc = null,
   preferences,
   showOptionsModule = false,
+  userRole = "admin",
 }: ControlPanelLayoutProps) {
+  const can = (view: string) => canAccessView(userRole, view);
+  const showIngreso =
+    can("quick-entry") ||
+    can("collection-orders") ||
+    can("receptionist") ||
+    can("truck-direction") ||
+    can("photo-record");
+  const showLogistica = can("reference-catalog");
+  const showAdmin =
+    can("dashboard") ||
+    can("reports") ||
+    can("photo-reports") ||
+    can("inventory-leaderboard") ||
+    can("inventory-control") ||
+    (showOptionsModule && can("options"));
   const avatarSrc =
     (userAvatarSrc && userAvatarSrc.trim()) ||
     preferences?.avatarDataUrl ||
@@ -137,121 +156,153 @@ export function ControlPanelLayout({
         </div>
 
         <nav className="hide-scrollbar flex-1 space-y-1.5 overflow-y-auto p-3 sm:space-y-2 sm:p-4 md:space-y-3 md:p-5 lg:p-6">
-          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
-            Ingreso de carga
-          </p>
-          <NavItem
-            icon={<NavIcon Icon={Box} />}
-            text="Inventarios"
-            active={currentView === "quick-entry"}
-            onClick={() => {
-              setCurrentView("quick-entry");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={HandHelping} />}
-            text="Orden de Recolección"
-            active={currentView === "collection-orders"}
-            onClick={() => {
-              setCurrentView("collection-orders");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={UserCheck} />}
-            text="Recepcionista"
-            active={currentView === "receptionist"}
-            onClick={() => {
-              setCurrentView("receptionist");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Route} />}
-            text="Recepción de Camiones"
-            active={currentView === "truck-direction"}
-            onClick={() => {
-              setCurrentView("truck-direction");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Camera} />}
-            text="Registro Fotográfico"
-            active={currentView === "photo-record"}
-            onClick={() => {
-              setCurrentView("photo-record");
-              setSidebarOpen(false);
-            }}
-          />
+          {showIngreso && (
+            <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
+              Ingreso de carga
+            </p>
+          )}
+          {can("quick-entry") && (
+            <NavItem
+              icon={<NavIcon Icon={Box} />}
+              text="Inventarios"
+              active={currentView === "quick-entry"}
+              onClick={() => {
+                setCurrentView("quick-entry");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("collection-orders") && (
+            <NavItem
+              icon={<NavIcon Icon={HandHelping} />}
+              text="Orden de Recolección"
+              active={currentView === "collection-orders"}
+              onClick={() => {
+                setCurrentView("collection-orders");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("receptionist") && (
+            <NavItem
+              icon={<NavIcon Icon={UserCheck} />}
+              text="Recepcionista"
+              active={currentView === "receptionist"}
+              onClick={() => {
+                setCurrentView("receptionist");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("truck-direction") && (
+            <NavItem
+              icon={<NavIcon Icon={Route} />}
+              text="Recepción de Camiones"
+              active={currentView === "truck-direction"}
+              onClick={() => {
+                setCurrentView("truck-direction");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("photo-record") && (
+            <NavItem
+              icon={<NavIcon Icon={Camera} />}
+              text="Registro Fotográfico"
+              active={currentView === "photo-record"}
+              onClick={() => {
+                setCurrentView("photo-record");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
 
-          <div className="my-3 border-b border-white/5 md:my-4" />
+          {showIngreso && (showLogistica || showAdmin) && (
+            <div className="my-3 border-b border-white/5 md:my-4" />
+          )}
 
-          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
-            Logística y control
-          </p>
-          <NavItem
-            icon={<NavIcon Icon={BookMarked} />}
-            text="Catálogo de Referencias"
-            active={currentView === "reference-catalog"}
-            onClick={() => {
-              setCurrentView("reference-catalog");
-              setSidebarOpen(false);
-            }}
-          />
+          {showLogistica && (
+            <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
+              Logística y control
+            </p>
+          )}
+          {can("reference-catalog") && (
+            <NavItem
+              icon={<NavIcon Icon={BookMarked} />}
+              text="Catálogo de Referencias"
+              active={currentView === "reference-catalog"}
+              onClick={() => {
+                setCurrentView("reference-catalog");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
 
-          <div className="my-3 border-b border-white/5 md:my-4" />
+          {showLogistica && showAdmin && (
+            <div className="my-3 border-b border-white/5 md:my-4" />
+          )}
 
-          <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
-            Administración y rendimiento
-          </p>
-          <NavItem
-            icon={<NavIcon Icon={LayoutDashboard} />}
-            text="Panel Principal"
-            active={currentView === "dashboard"}
-            onClick={() => {
-              setCurrentView("dashboard");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={ClipboardList} />}
-            text="Reportes"
-            active={currentView === "reports"}
-            onClick={() => {
-              setCurrentView("reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Images} />}
-            text="Reportes Registro Foto"
-            active={currentView === "photo-reports"}
-            onClick={() => {
-              setCurrentView("photo-reports");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={Trophy} />}
-            text="Ranking Inventariadores"
-            active={currentView === "inventory-leaderboard"}
-            onClick={() => {
-              setCurrentView("inventory-leaderboard");
-              setSidebarOpen(false);
-            }}
-          />
-          <NavItem
-            icon={<NavIcon Icon={PauseCircle} />}
-            text="Control inventarios"
-            active={currentView === "inventory-control"}
-            onClick={() => {
-              setCurrentView("inventory-control");
-              setSidebarOpen(false);
-            }}
-          />
-          {showOptionsModule && (
+          {showAdmin && (
+            <p className="mb-1 px-3 text-[8px] font-bold uppercase tracking-widest text-slate-500 sm:px-4 sm:text-[9px]">
+              Administración y rendimiento
+            </p>
+          )}
+          {can("dashboard") && (
+            <NavItem
+              icon={<NavIcon Icon={LayoutDashboard} />}
+              text="Panel Principal"
+              active={currentView === "dashboard"}
+              onClick={() => {
+                setCurrentView("dashboard");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("reports") && (
+            <NavItem
+              icon={<NavIcon Icon={ClipboardList} />}
+              text="Reportes"
+              active={currentView === "reports"}
+              onClick={() => {
+                setCurrentView("reports");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("photo-reports") && (
+            <NavItem
+              icon={<NavIcon Icon={Images} />}
+              text="Reportes Registro Foto"
+              active={currentView === "photo-reports"}
+              onClick={() => {
+                setCurrentView("photo-reports");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("inventory-leaderboard") && (
+            <NavItem
+              icon={<NavIcon Icon={Trophy} />}
+              text="Ranking Inventariadores"
+              active={currentView === "inventory-leaderboard"}
+              onClick={() => {
+                setCurrentView("inventory-leaderboard");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("inventory-control") && (
+            <NavItem
+              icon={<NavIcon Icon={PauseCircle} />}
+              text="Control inventarios"
+              active={currentView === "inventory-control"}
+              onClick={() => {
+                setCurrentView("inventory-control");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {showOptionsModule && can("options") && (
             <NavItem
               icon={<NavIcon Icon={Settings} />}
               text="Opciones de Usuario"

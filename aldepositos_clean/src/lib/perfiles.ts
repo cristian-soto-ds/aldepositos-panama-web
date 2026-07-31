@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { normalizeRole, type AppRole } from "@/lib/userRole";
 
 /** Tabla principal en español. */
 export const PERFILES_TABLE = "perfiles";
@@ -11,6 +12,8 @@ export type PerfilNormalizado = {
   nombreUsuario: string;
   correoPerfil: string;
   avatarUrl: string | null;
+  /** Panel: admin | inventariador (default admin si falta columna). */
+  rol: AppRole;
 };
 
 function trimStr(v: unknown): string {
@@ -48,6 +51,7 @@ export function normalizarFilaPerfil(
       nombreUsuario: "",
       correoPerfil: "",
       avatarUrl: null,
+      rol: "admin",
     };
   }
   const nombreCompleto = pickNombreCompleto(row);
@@ -66,7 +70,8 @@ export function normalizarFilaPerfil(
   const rawAvatar = row.avatar_url;
   const avatarUrl =
     typeof rawAvatar === "string" && rawAvatar.trim() ? rawAvatar.trim() : null;
-  return { nombreCompleto, nombreUsuario, correoPerfil, avatarUrl };
+  const rol = normalizeRole(row.rol ?? row.role);
+  return { nombreCompleto, nombreUsuario, correoPerfil, avatarUrl, rol };
 }
 
 async function maybeSingleRowWithClient(

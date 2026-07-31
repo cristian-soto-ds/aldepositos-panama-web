@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       fullName: null as string | null,
       avatarUrl: null as string | null,
+      rol: "admin" as const,
       skipped: true,
     });
   }
@@ -60,6 +61,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     fullName: perfil.nombreCompleto || null,
     avatarUrl: perfil.avatarUrl,
+    rol: perfil.rol,
     skipped: false,
   });
 }

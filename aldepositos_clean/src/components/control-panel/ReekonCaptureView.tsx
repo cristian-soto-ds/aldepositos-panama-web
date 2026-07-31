@@ -1092,7 +1092,7 @@ export function ReekonCaptureView({
               </div>
 
               <div>
-                {!forceFullscreen ? (
+                {!forceFullscreen || allowKeyboardMeasures ? (
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {allowKeyboardMeasures
                       ? "Medidas con teclado (Largo → Ancho → Alto)"
@@ -1119,7 +1119,7 @@ export function ReekonCaptureView({
                     </div>
                   ))}
                 </div>
-                {!forceFullscreen ? (
+                {!forceFullscreen || allowKeyboardMeasures ? (
                   <p className="mt-1.5 text-center text-[11px] text-slate-400">
                     {allowKeyboardMeasures
                       ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."

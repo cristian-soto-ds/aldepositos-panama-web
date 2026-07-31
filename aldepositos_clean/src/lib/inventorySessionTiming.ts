@@ -77,7 +77,30 @@ export function resumeInventory(
  */
 export function releaseInventoryPause(task: Task, at?: string | Date): Task {
   const closed = resumeInventory(task, "in_progress", at);
-  return { ...closed, status: "pending" };
+  return {
+    ...closed,
+    status: "pending",
+    inventoryPausedAt: undefined,
+  };
+}
+
+/**
+ * Libera un RA «en curso» (in_progress/partial) desde control: vuelve a pending
+ * sin borrar medidas; quita pausa abierta si la hubiera.
+ */
+export function releaseInventoryInProgress(
+  task: Task,
+  at?: string | Date,
+): Task {
+  const base =
+    task.status === "paused" || task.inventoryPausedAt
+      ? resumeInventory(task, "in_progress", at)
+      : task;
+  return {
+    ...base,
+    status: "pending",
+    inventoryPausedAt: undefined,
+  };
 }
 
 /**

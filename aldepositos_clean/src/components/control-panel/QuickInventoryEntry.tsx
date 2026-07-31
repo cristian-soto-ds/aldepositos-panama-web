@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
-import { InventariadorModePicker } from "@/components/control-panel/InventariadorModePicker";
+import { InventariadorModePicker, type ModePickerPreviewRow } from "@/components/control-panel/InventariadorModePicker";
 import { useAllowKeyboardMeasures } from "@/hooks/useAllowKeyboardMeasures";
 import { useSharedNow } from "@/hooks/useSharedNow";
 
@@ -3246,11 +3246,7 @@ export function QuickInventoryEntry({
                       <RaTaskCard
                         task={t}
                         viewMode={viewMode}
-                        liveWorkers={
-                          isInventariador
-                            ? []
-                            : liveOperatorsForRa(presenceByRa, t.ra)
-                        }
+                        liveWorkers={liveOperatorsForRa(presenceByRa, t.ra)}
                         nowMs={sharedNowMs}
                         onSelect={onSelectRaCard}
                         onEdit={onEditRaCard}
@@ -3342,6 +3338,7 @@ export function QuickInventoryEntry({
     return (
       <InventariadorModePicker
         raLabel={String(t.ra ?? "")}
+        previewRows={measureRows as ModePickerPreviewRow[]}
         onSelect={confirmInventariadorMode}
         onBack={requestLeave}
       />
@@ -3424,7 +3421,7 @@ export function QuickInventoryEntry({
           }
           autosaveState={autosaveState}
           isSaving={autosaveState === "saving"}
-          allowKeyboardMeasures={isInventariador ? false : allowKeyboardMeasures}
+          allowKeyboardMeasures={allowKeyboardMeasures}
           forceFullscreen={isInventariador}
           lockReferenceMode={isInventariador}
           canFinalize={isInventariador ? inventoryComplete : true}

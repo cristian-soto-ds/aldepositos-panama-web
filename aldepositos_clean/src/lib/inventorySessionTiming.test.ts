@@ -6,6 +6,7 @@ import {
   applyInventorySessionOnSave,
   ensureInventoryStarted,
   pauseInventory,
+  releaseInventoryInProgress,
   releaseInventoryPause,
   resumeInventory,
 } from "@/lib/inventorySessionTiming";
@@ -97,6 +98,17 @@ describe("inventorySessionTiming", () => {
     expect(released.status).toBe("pending");
     expect(released.inventoryPausedAt).toBeUndefined();
     expect(released.inventoryPausedMs).toBe(60_000 + 3_600_000);
+  });
+
+  it("releaseInventoryInProgress deja pending y limpia pausa abierta", () => {
+    const active = baseTask({
+      status: "in_progress",
+      inventoryStartedAt: "2026-07-10T10:00:00.000Z",
+      inventoryPausedAt: undefined,
+    });
+    const released = releaseInventoryInProgress(active);
+    expect(released.status).toBe("pending");
+    expect(released.inventoryPausedAt).toBeUndefined();
   });
 
   it("activeInventoryMs excluye pausas cerradas y abiertas", () => {

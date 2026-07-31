@@ -126,11 +126,42 @@ describe("resolveLatestAllowedContributor", () => {
 });
 
 describe("resolveActiveInventoryOperatorLabel", () => {
-  it("usa presencia en vivo si hay inventariador en el RA", () => {
-    const label = resolveActiveInventoryOperatorLabel(baseTask({ status: "pending" }), [
-      { userKey: "jahir@example.com", name: "Jahir", rawLabel: "Jahir Jimenez" },
-    ]);
+  it("usa presencia en vivo solo si el RA está in_progress/partial", () => {
+    const label = resolveActiveInventoryOperatorLabel(
+      baseTask({ status: "in_progress" }),
+      [
+        {
+          userKey: "jahir@example.com",
+          name: "Jahir",
+          rawLabel: "Jahir Jimenez",
+        },
+      ],
+    );
     expect(label).toBe("Jahir Jimenez");
+  });
+
+  it("presencia en vivo no marca En curso si el RA está pending", () => {
+    expect(
+      resolveActiveInventoryOperatorLabel(baseTask({ status: "pending" }), [
+        {
+          userKey: "jahir@example.com",
+          name: "Jahir",
+          rawLabel: "Jahir Jimenez",
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it("presencia en vivo no marca En curso si el RA está paused", () => {
+    expect(
+      resolveActiveInventoryOperatorLabel(baseTask({ status: "paused" }), [
+        {
+          userKey: "jahir@example.com",
+          name: "Jahir",
+          rawLabel: "Jahir Jimenez",
+        },
+      ]),
+    ).toBeNull();
   });
 
   it("sin presencia muestra En curso por el contributor más reciente", () => {

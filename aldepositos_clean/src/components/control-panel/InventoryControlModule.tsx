@@ -11,8 +11,14 @@ import {
   X,
 } from "lucide-react";
 import type { Task } from "@/lib/types/task";
-import { releaseInventoryPause } from "@/lib/inventorySessionTiming";
-import { resolvePausedInventoryOperatorLabel } from "@/lib/inventoryOperatorsAllowlist";
+import {
+  releaseInventoryInProgress,
+  releaseInventoryPause,
+} from "@/lib/inventorySessionTiming";
+import {
+  resolveActiveInventoryOperatorLabel,
+  resolvePausedInventoryOperatorLabel,
+} from "@/lib/inventoryOperatorsAllowlist";
 import { INVENTARIADORES } from "@/lib/inventariadoresRoster";
 import {
   fetchInventoryControlSettings,
@@ -48,12 +54,18 @@ function ResumeAllConfirmModal({
   busy,
   onCancel,
   onConfirm,
+  title = "Quitar todas las pausas",
+  subtitle = "Quedarán libres, sin badge En curso (como un RA pendiente).",
+  questionNoun = "inventario",
 }: {
   open: boolean;
   count: number;
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  title?: string;
+  subtitle?: string;
+  questionNoun?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -91,10 +103,10 @@ function ResumeAllConfirmModal({
                 id="resume-all-title"
                 className="text-base font-black uppercase tracking-wide text-[#16263F] dark:text-slate-100"
               >
-                Quitar todas las pausas
+                {title}
               </h2>
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                Quedarán libres, sin badge En curso (como un RA pendiente).
+                {subtitle}
               </p>
             </div>
           </div>
@@ -111,9 +123,10 @@ function ResumeAllConfirmModal({
 
         <div className="px-5 py-5">
           <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-            ¿Quitar la pausa de{" "}
+            ¿Liberar{" "}
             <span className="font-black text-[#16263F] dark:text-white">{count}</span>{" "}
-            inventario{count === 1 ? "" : "s"}?
+            {questionNoun}
+            {count === 1 ? "" : "s"}?
           </p>
         </div>
 
@@ -156,6 +169,8 @@ export function InventoryControlModule({
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [resumeAllOpen, setResumeAllOpen] = useState(false);
+  const [releaseAllInProgressOpen, setReleaseAllInProgressOpen] =
+    useState(false);
   const [resumeAllBusy, setResumeAllBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -185,6 +200,21 @@ export function InventoryControlModule({
     [tasks],
   );
 
+  const inProgressTasks = useMemo(
+    () =>
+      tasks
+        .filter(
+          (t) =>
+            (t.status === "in_progress" || t.status === "partial") &&
+            !t.dispatched,
+        )
+        .slice()
+        .sort((a, b) =>
+          String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")),
+        ),
+    [tasks],
+  );
+
   const handleResumeOne = async (task: Task) => {
     setActionError(null);
     setResumingId(task.id);
@@ -194,6 +224,22 @@ export function InventoryControlModule({
     } catch (e) {
       console.error(e);
       setActionError("No se pudo quitar la pausa. Revisá la conexión e intentá de nuevo.");
+    } finally {
+      setResumingId(null);
+    }
+  };
+
+  const handleReleaseInProgressOne = async (task: Task) => {
+    setActionError(null);
+    setResumingId(task.id);
+    try {
+      const next = releaseInventoryInProgress(task);
+      await Promise.resolve(onUpdateTask(next));
+    } catch (e) {
+      console.error(e);
+      setActionError(
+        "No se pudo liberar el inventario en curso. Revisá la conexión e intentá de nuevo.",
+      );
     } finally {
       setResumingId(null);
     }
@@ -211,6 +257,23 @@ export function InventoryControlModule({
     } catch (e) {
       console.error(e);
       setActionError("Algunas pausas no se pudieron quitar. Revisá Supabase.");
+    } finally {
+      setResumeAllBusy(false);
+    }
+  };
+
+  const handleReleaseAllInProgress = async () => {
+    setActionError(null);
+    setResumeAllBusy(true);
+    try {
+      for (const task of inProgressTasks) {
+        const next = releaseInventoryInProgress(task);
+        await Promise.resolve(onUpdateTask(next));
+      }
+      setReleaseAllInProgressOpen(false);
+    } catch (e) {
+      console.error(e);
+      setActionError("Algunos inventarios en curso no se pudieron liberar.");
     } finally {
       setResumeAllBusy(false);
     }
@@ -262,7 +325,8 @@ export function InventoryControlModule({
               Control de inventarios
             </h1>
             <p className="mt-0.5 text-sm font-medium text-indigo-100/90">
-              Quitá pausas y habilitá teclado cuando la cinta no esté disponible.
+              Liberá inventarios en curso o pausa, y habilitá teclado cuando la
+              cinta no esté disponible.
             </p>
           </div>
         </div>
@@ -273,6 +337,82 @@ export function InventoryControlModule({
           {actionError}
         </div>
       ) : null}
+
+      {/* En curso */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-wider text-[#16263F] dark:text-slate-100">
+              Inventarios en curso
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {inProgressTasks.length} RA
+              {inProgressTasks.length === 1 ? "" : "s"} activa
+              {inProgressTasks.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          {inProgressTasks.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setReleaseAllInProgressOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+            >
+              <Play className="h-3.5 w-3.5" />
+              Liberar todas
+            </button>
+          ) : null}
+        </div>
+
+        {inProgressTasks.length === 0 ? (
+          <div className="rounded-xl border-2 border-dashed border-slate-200 px-4 py-10 text-center dark:border-slate-700">
+            <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
+            <p className="text-sm font-bold text-slate-500 dark:text-slate-400">
+              No hay inventarios en curso.
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {inProgressTasks.map((t) => {
+              const who = resolveActiveInventoryOperatorLabel(t, []);
+              const busy = resumingId === t.id;
+              return (
+                <li
+                  key={t.id}
+                  className="flex flex-col gap-2 rounded-xl border border-amber-200/80 bg-amber-50/40 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/40 dark:bg-amber-950/20"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-[#16263F] dark:text-slate-100">
+                      RA {t.ra || "—"}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-slate-600 dark:text-slate-300">
+                      {formatRaFieldLabel(t.mainClient)} ·{" "}
+                      {formatRaFieldLabel(t.brand)}
+                    </p>
+                    <p className="mt-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                      {who ? `En curso — ${who}` : "En curso"}
+                      {" · "}
+                      {formatRelative(t.updatedAt)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleReleaseInProgressOne(t)}
+                    className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {busy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5" />
+                    )}
+                    Liberar
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       {/* Pausas */}
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:p-5">
@@ -426,6 +566,16 @@ export function InventoryControlModule({
         busy={resumeAllBusy}
         onCancel={() => setResumeAllOpen(false)}
         onConfirm={() => void handleResumeAll()}
+      />
+      <ResumeAllConfirmModal
+        open={releaseAllInProgressOpen}
+        count={inProgressTasks.length}
+        busy={resumeAllBusy}
+        onCancel={() => setReleaseAllInProgressOpen(false)}
+        onConfirm={() => void handleReleaseAllInProgress()}
+        title="Liberar todos en curso"
+        subtitle="Quedarán como pendientes, sin badge En curso. Las medidas capturadas se conservan."
+        questionNoun="inventario en curso"
       />
     </div>
   );

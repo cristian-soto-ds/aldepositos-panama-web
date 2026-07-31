@@ -9,11 +9,9 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
 import {
   resolveActiveInventoryOperatorLabel,
   resolveInventoryActivityAt,
-  resolveLiveInventoryOperator,
   resolvePausedInventoryOperatorLabel,
 } from "@/lib/inventoryOperatorsAllowlist";
 import { inventoryCompletedByLabel } from "@/lib/taskContributors";
@@ -71,11 +69,10 @@ function RaTaskCardInner({
   showManageActions = true,
   onSendToRectification,
 }: RaTaskCardProps) {
-  const liveOp = resolveLiveInventoryOperator(liveWorkers);
   const activeInventariador = resolveActiveInventoryOperatorLabel(t, liveWorkers);
   const pausedInventariador = resolvePausedInventoryOperatorLabel(t);
   const completedBy = inventoryCompletedByLabel(t);
-  const showPaused = t.status === "paused" && !liveOp && !!pausedInventariador;
+  const showPaused = t.status === "paused" && !!pausedInventariador;
   const providerLabel = formatRaFieldLabel(t.provider);
   const brandLabel = formatRaFieldLabel(t.brand);
   const expected = t.expectedBultos > 0 ? t.expectedBultos : 0;
@@ -263,7 +260,6 @@ function RaTaskCardInner({
           </div>
         </div>
       </div>
-      <InventoryLiveOperators operators={liveWorkers} />
 
       {/* Móvil: proveedor · marca en una sola línea */}
       <p className="truncate text-[11px] font-semibold leading-tight text-[#16263F] dark:text-slate-100 sm:hidden">

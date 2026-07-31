@@ -263,21 +263,22 @@ export function resolveLatestAllowedContributor(
 
 /**
  * Etiqueta «En curso»:
- * 1) inventariador con presencia en vivo
+ * 1) inventariador con presencia en vivo solo si el RA está in_progress/partial
  * 2) si status in_progress/partial → último inventariador por `at`
+ * No mostrar «En curso» en pending/paused/completed (evita badge fantasma por presencia stale).
  */
 export function resolveActiveInventoryOperatorLabel(
   task: Task,
   operators: LivePresenceIdentity[],
 ): string | null {
+  if (task.status !== "in_progress" && task.status !== "partial") {
+    return null;
+  }
+
   const live = resolveLiveInventoryOperator(operators);
   if (live?.displayName) return live.displayName;
 
-  if (task.status === "in_progress" || task.status === "partial") {
-    return resolveLatestAllowedContributor(task)?.displayName ?? null;
-  }
-
-  return null;
+  return resolveLatestAllowedContributor(task)?.displayName ?? null;
 }
 
 /** Nombre para badge «En pausa» (último inventariador por `at`). */

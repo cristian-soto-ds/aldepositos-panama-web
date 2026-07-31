@@ -246,6 +246,8 @@ type QuickDraft = {
   sourceReferences?: Record<string, string>;
   /** Filas originales del modo «Con refs» para restaurar al volver. */
   withModeRowsSnapshot?: MeasureRow[];
+  /** Inventariador ya eligió Con/Sin/Paletizado para este RA. */
+  modeChosen?: boolean;
 };
 
 const inventoryDraftKey = (taskId: string, kind: "quick" | "airway") =>
@@ -398,6 +400,47 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
       reempaqueRefsCount > 0 ||
       referenciaContenedora.length > 0
     );
+  });
+}
+
+/** Refs montadas por admin desde OR (no la numeración 1,2,3 del modo «Sin refs»). */
+function serverHasAdminPreparedRefs(
+  task: Task,
+  rows: MeasureRow[],
+): boolean {
+  if (String(task.linkedCollectionOrderId ?? "").trim()) return true;
+  if (!taskHasImportedReferences(rows)) return false;
+  return !isAutoConsecutiveBlock(rows);
+}
+
+/** Fusiona L/A/H/peso del borrador local sobre las filas del servidor (misma id o ref). */
+function mergeDraftMeasuresOntoServerRows(
+  serverRows: MeasureRow[],
+  draftRows: MeasureRow[],
+): MeasureRow[] {
+  if (draftRows.length === 0) return serverRows;
+  const byId = new Map(draftRows.map((r) => [String(r.id), r]));
+  const byRef = new Map(
+    draftRows.map((r) => [String(r.referencia ?? "").trim().toUpperCase(), r]),
+  );
+  return serverRows.map((s) => {
+    const d =
+      byId.get(String(s.id)) ??
+      byRef.get(String(s.referencia ?? "").trim().toUpperCase());
+    if (!d) return s;
+    const pick = (field: "l" | "w" | "h" | "weight" | "bultos") => {
+      const dv = String(d[field] ?? "").trim();
+      return dv ? d[field] : s[field];
+    };
+    return {
+      ...s,
+      l: pick("l"),
+      w: pick("w"),
+      h: pick("h"),
+      weight: pick("weight"),
+      bultos: pick("bultos"),
+      reempaque: d.reempaque === true ? true : s.reempaque,
+    };
   });
 }
 
@@ -816,6 +859,8 @@ export function QuickInventoryEntry({
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
   /** Inventariador: elegir Con/Sin/Paletizado una sola vez al entrar. */
   const [modePickerPending, setModePickerPending] = useState(false);
+  /** true cuando el inventariador ya confirmó el modo (borrador / sesión). */
+  const inventariadorModeChosenRef = useRef(false);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [palletModalOpen, setPalletModalOpen] = useState(false);
   const [palletModalValue, setPalletModalValue] = useState("");
@@ -1422,7 +1467,6 @@ export function QuickInventoryEntry({
     }
     if (pendingSelectIdRef.current !== listTask.id) return;
 
-    setSelectedTask(task);
     activeTaskIdRef.current = task.id;
     withModeRowsSnapshotRef.current = null;
     sourceReferencesRef.current = {};
@@ -1435,6 +1479,7 @@ export function QuickInventoryEntry({
         : [createEmptyMeasureRow()];
     const serverRows = taskRows;
     const serverHasCapture = quickRowsHaveAnyCapture(taskRows);
+    const adminPreparedRefs = serverHasAdminPreparedRefs(task, taskRows);
     let rowsToUse = taskRows;
     // Si las filas guardadas ya traen número de paleta, la tarea es paletizada:
     // así se restaura la agrupación y el peso de paleta aunque no exista borrador local.
@@ -1443,15 +1488,26 @@ export function QuickInventoryEntry({
     );
     let refModeToUse: ReferenceCaptureMode = serverIsPalletized
       ? "palletized"
-      : taskHasImportedReferences(taskRows)
+      : adminPreparedRefs || taskHasImportedReferences(taskRows)
         ? "with"
         : "without";
-    let modeAlreadyLocked =
-      isReferenceCaptureMode(task.referenceMode) ||
-      serverHasCapture ||
-      serverIsPalletized ||
-      taskHasImportedReferences(taskRows);
     if (isReferenceCaptureMode(task.referenceMode)) {
+      refModeToUse = task.referenceMode;
+    }
+    // Admin montó OR: por defecto «Con refs» en memoria (para preview), pero el
+    // inventariador SIEMPRE elige el modo salvo que ya lo haya confirmado.
+    if (adminPreparedRefs && refModeToUse !== "palletized") {
+      refModeToUse = "with";
+    }
+    let inventariadorModeChosen = false;
+    // Si ya hay captura en servidor con modo guardado, no pedir modo otra vez
+    // (p. ej. borrador local borrado / otro dispositivo).
+    if (
+      isInventariador &&
+      serverHasCapture &&
+      isReferenceCaptureMode(task.referenceMode)
+    ) {
+      inventariadorModeChosen = true;
       refModeToUse = task.referenceMode;
     }
     let layoutToUse: CaptureLayout =
@@ -1468,9 +1524,18 @@ export function QuickInventoryEntry({
       if (rawDraft) {
         try {
           const parsed = JSON.parse(rawDraft) as QuickDraft;
-          if (isReferenceCaptureMode(parsed.referenceMode)) {
+          inventariadorModeChosen = parsed.modeChosen === true;
+          if (
+            inventariadorModeChosen &&
+            isReferenceCaptureMode(parsed.referenceMode)
+          ) {
             refModeToUse = parsed.referenceMode;
-            modeAlreadyLocked = true;
+          } else if (
+            !isInventariador &&
+            !adminPreparedRefs &&
+            isReferenceCaptureMode(parsed.referenceMode)
+          ) {
+            refModeToUse = parsed.referenceMode;
           }
           if (!isInventariador && isCaptureLayout(parsed.captureLayout)) {
             layoutToUse = parsed.captureLayout;
@@ -1492,7 +1557,33 @@ export function QuickInventoryEntry({
               parsed.withModeRowsSnapshot,
             );
           }
-          if (
+          if (adminPreparedRefs && !(isInventariador && inventariadorModeChosen && parsed.referenceMode !== "with")) {
+            // Base = filas del servidor (OR); el borrador solo aporta medidas si ya eligió «Con refs».
+            rowsToUse = taskRows;
+            if (
+              inventariadorModeChosen &&
+              parsed.referenceMode === "with" &&
+              Array.isArray(parsed.rows) &&
+              parsed.rows.length > 0
+            ) {
+              const draftRows = stripQuickRowsForPersist(parsed.rows);
+              if (quickRowsHaveAnyCapture(draftRows)) {
+                rowsToUse = mergeDraftMeasuresOntoServerRows(
+                  taskRows,
+                  draftRows,
+                );
+              }
+            }
+          } else if (
+            inventariadorModeChosen &&
+            isReferenceCaptureMode(parsed.referenceMode) &&
+            parsed.referenceMode !== "with"
+          ) {
+            if (Array.isArray(parsed.rows)) {
+              rowsToUse = stripQuickRowsForPersist(parsed.rows);
+            }
+          } else if (
+            !adminPreparedRefs &&
             isReferenceCaptureMode(parsed.referenceMode) &&
             parsed.referenceMode !== "with"
           ) {
@@ -1503,7 +1594,7 @@ export function QuickInventoryEntry({
             const draftHasCapture = quickRowsHaveAnyCapture(parsed.rows);
             if (!serverHasCapture && draftHasCapture) {
               rowsToUse = stripQuickRowsForPersist(parsed.rows);
-            } else if (serverHasCapture) {
+            } else if (serverHasCapture || adminPreparedRefs) {
               rowsToUse = taskRows;
             } else {
               rowsToUse = stripQuickRowsForPersist(parsed.rows);
@@ -1517,6 +1608,23 @@ export function QuickInventoryEntry({
 
     if (isInventariador) {
       layoutToUse = "reekon";
+      // Mientras no eligió modo: mostrar refs del OR en el picker (modo with en memoria).
+      if (!inventariadorModeChosen && adminPreparedRefs) {
+        refModeToUse = "with";
+        rowsToUse = taskRows;
+      }
+    }
+
+    inventariadorModeChosenRef.current =
+      isInventariador && inventariadorModeChosen;
+
+    // Asegura que el task en memoria lleve el modo que usará Tabla y Reekon.
+    if (
+      adminPreparedRefs &&
+      (!isReferenceCaptureMode(task.referenceMode) ||
+        task.referenceMode !== refModeToUse)
+    ) {
+      task = { ...task, referenceMode: refModeToUse };
     }
 
     const serverSnapshot = taskHasImportedReferences(serverRows)
@@ -1566,6 +1674,8 @@ export function QuickInventoryEntry({
     setReferenceMode(refModeToUse);
     setCaptureLayout(layoutToUse);
     setMeasureRows(rowsToUse);
+    setSelectedTask(task);
+    activeTaskIdRef.current = task.id;
     latestRowsRef.current = rowsToUse;
     latestTaskRef.current = task;
     serverBaselineRowsRef.current = JSON.parse(
@@ -1577,7 +1687,22 @@ export function QuickInventoryEntry({
       captureLayout: layoutToUse,
     });
     setAutosaveState("idle");
-    setModePickerPending(isInventariador && !modeAlreadyLocked);
+    // Inventariador: siempre elige modo (ve refs del OR y decide), salvo que ya lo confirmó.
+    setModePickerPending(
+      isInventariador && !inventariadorModeChosenRef.current,
+    );
+    // Si el admin montó el OR, sincroniza referenceMode en BD (Tabla + Reekon).
+    if (
+      adminPreparedRefs &&
+      task.referenceMode === refModeToUse &&
+      listTask.referenceMode !== refModeToUse
+    ) {
+      void Promise.resolve(
+        (onUpdateTask as (t: Task, o?: { skipRemote?: boolean }) => unknown)(
+          { ...task, measureData: rowsToUse },
+        ),
+      ).catch((e) => console.warn("[sync referenceMode]", e));
+    }
     })();
   };
   selectTaskRef.current = handleSelectTask;
@@ -1590,6 +1715,7 @@ export function QuickInventoryEntry({
     setSelectedTask(null);
     activeTaskIdRef.current = null;
     setModePickerPending(false);
+    inventariadorModeChosenRef.current = false;
     withModeRowsSnapshotRef.current = null;
     sourceReferencesRef.current = {};
     if (autosaveTimerRef.current) {
@@ -1800,11 +1926,36 @@ export function QuickInventoryEntry({
   };
 
   const confirmInventariadorMode = (mode: ReferenceCaptureMode) => {
+    inventariadorModeChosenRef.current = true;
+    // Asegura snapshot de refs del OR antes de pasar a Sin refs / Paletizado.
+    if (
+      mode !== "with" &&
+      referenceModeRef.current === "with" &&
+      !withModeRowsSnapshotRef.current
+    ) {
+      withModeRowsSnapshotRef.current = buildWithModeSnapshot(
+        latestRowsRef.current,
+        sourceReferencesRef.current,
+      );
+    }
     if (mode !== referenceModeRef.current) {
       switchReferenceMode(mode);
     } else if (selectedTask) {
       persistQuickDraft(
         selectedTask.id,
+        latestRowsRef.current,
+        mode,
+        captureLayoutRef.current,
+        { force: true },
+      );
+    } else {
+      /* no-op */
+    }
+    // Re-persiste con modeChosen=true (switchReferenceMode también escribe draft).
+    if (selectedTask || latestTaskRef.current) {
+      const taskId = (selectedTask ?? latestTaskRef.current)!.id;
+      persistQuickDraft(
+        taskId,
         latestRowsRef.current,
         mode,
         captureLayoutRef.current,
@@ -1817,9 +1968,14 @@ export function QuickInventoryEntry({
       if (!prev) return prev;
       const next = { ...prev, referenceMode: mode };
       latestTaskRef.current = next;
+      void Promise.resolve(
+        (onUpdateTask as (t: Task) => unknown)({
+          ...next,
+          measureData: latestRowsRef.current,
+        }),
+      ).catch((e) => console.warn("[confirmInventariadorMode]", e));
       return next;
     });
-    // Fuerza autosave para persistir referenceMode aunque aún no haya medidas.
     lastSavedHashRef.current = "";
     setModePickerPending(false);
   };
@@ -2275,6 +2431,7 @@ export function QuickInventoryEntry({
             JSON.stringify(withModeRowsSnapshotRef.current),
           ) as MeasureRow[])
         : undefined,
+      modeChosen: inventariadorModeChosenRef.current || undefined,
     };
     window.localStorage.setItem(
       inventoryDraftKey(taskId, taskDraftKind(latestTaskRef.current)),
@@ -3340,7 +3497,7 @@ export function QuickInventoryEntry({
         raLabel={String(t.ra ?? "")}
         previewRows={measureRows as ModePickerPreviewRow[]}
         onSelect={confirmInventariadorMode}
-        onBack={requestLeave}
+        onBack={clearTask}
       />
     );
   }

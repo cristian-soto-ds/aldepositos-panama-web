@@ -1559,6 +1559,8 @@ export function CollectionOrderModule({
           ...task,
           measureData: sanitizedMeasure,
           linkedCollectionOrderId: baseOrder.id,
+          // Admin montó refs desde OR: el inventariador entra en modo «Con refs».
+          referenceMode: "with",
         },
         baseOrder,
         lines,

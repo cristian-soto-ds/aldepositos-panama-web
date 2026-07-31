@@ -12,19 +12,19 @@ const OPTIONS: {
   {
     id: "with",
     label: "Con referencias",
-    hint: "Usá las referencias del packing list o catálogo.",
+    hint: "Trabajá con las referencias del pedido (las que ves arriba).",
     icon: FileText,
   },
   {
     id: "without",
     label: "Sin referencias",
-    hint: "Numeración automática; solo medidas y peso.",
+    hint: "Si en el bulto físico no viene la etiqueta/código: numeración automática y solo medidas/peso.",
     icon: Boxes,
   },
   {
     id: "palletized",
     label: "Paletizado",
-    hint: "Agrupá por paleta y peso de paleta.",
+    hint: "Agrupá por paleta y peso de paleta (aunque hayas visto refs arriba).",
     icon: Layers,
   },
 ];

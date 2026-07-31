@@ -9,6 +9,8 @@ export type LiveOperatorOnRa = {
   rawLabel: string;
   module: WorkPresenceModule;
   avatarUrl?: string | null;
+  /** Paleta reclamada (modo paletizado), si aplica. */
+  activePallet?: number | null;
 };
 
 const INVENTORY_MODULES: WorkPresenceModule[] = ["quick", "detailed", "airway"];
@@ -45,7 +47,22 @@ export function buildPresenceByRa(
         rawLabel: rawLabel || name,
         module: entry.module,
         avatarUrl: entry.avatarUrl,
+        activePallet:
+          typeof entry.activePallet === "number" && entry.activePallet >= 1
+            ? entry.activePallet
+            : null,
       });
+    } else {
+      // Actualizar (o limpiar) paleta si el mismo operador ya estaba en la lista.
+      const op = list.find(
+        (o) => o.userKey === entry.userKey && o.module === entry.module,
+      );
+      if (op) {
+        op.activePallet =
+          typeof entry.activePallet === "number" && entry.activePallet >= 1
+            ? entry.activePallet
+            : null;
+      }
     }
     map.set(raKey, list);
   }

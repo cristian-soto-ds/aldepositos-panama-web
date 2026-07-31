@@ -10,9 +10,15 @@ import {
   type TaskLiveUpdate,
 } from "@/lib/liveCollaboration";
 import type { Task } from "@/lib/types/task";
-import { measureDataLooksEmpty } from "@/lib/taskListSlim";
+import {
+  measureDataLooksEmpty,
+  isIntentionalEmptyMeasureClear,
+} from "@/lib/taskListSlim";
 
-type MergeRemoteOptions = { fromLive?: boolean };
+type MergeRemoteOptions = {
+  fromLive?: boolean;
+  allowEmptyRemoteWipe?: boolean;
+};
 
 type InventoryRealtimeSyncOptions<TRow> = {
   tasks: Task[];
@@ -138,15 +144,33 @@ export function useInventoryRealtimeSync<TRow>({
       // Colaboración: fusionar con el baseline ANTERIOR al snapshot remoto.
       // Si actualizamos el baseline antes del merge, los borrados remotos se
       // reinsertan como «filas locales nuevas» y los conteos divergen.
+      // También mergear con local vacío si el inventariador limpió a propósito
+      // (sin refs / paletizado): así aplican tombstones y no vuelven las filas del OR.
+      const intentionalRemoteWipe =
+        remoteRows.length === 0 &&
+        remote.referenceModeChosen === true &&
+        remote.referenceMode === "without";
+
+      const intentionalLocalClear =
+        localRows.length === 0 &&
+        latestTaskRef.current?.referenceModeChosen === true &&
+        (String(latestTaskRef.current?.referenceMode ?? "") === "without" ||
+          String(latestTaskRef.current?.referenceMode ?? "") === "palletized");
+
       const shouldMerge =
         Boolean(mergeRowsWithRemote) &&
         (isDirty || fromLive || preferRemoteUpdates) &&
-        localRows.length > 0;
+        (localRows.length > 0 || intentionalLocalClear || intentionalRemoteWipe);
 
       const newRows =
         shouldMerge && mergeRowsWithRemote
-          ? mergeRowsWithRemote(localRows, remoteRows, { fromLive })
-          : remoteRows;
+          ? mergeRowsWithRemote(localRows, remoteRows, {
+              fromLive,
+              allowEmptyRemoteWipe: intentionalRemoteWipe,
+            })
+          : intentionalLocalClear
+            ? localRows
+            : remoteRows;
 
       // Snapshot persistido DESPUÉS del merge.
       if (!fromLive) {
@@ -292,6 +316,17 @@ export function useInventoryRealtimeSync<TRow>({
         ...(typeof update.completeRowCount === "number"
           ? { completeRowCount: update.completeRowCount }
           : {}),
+        ...(typeof update.referenceMode === "string" && update.referenceMode
+          ? {
+              referenceMode: update.referenceMode as Task["referenceMode"],
+              // Si el remoto cambió a sin refs con filas vacías, marcar elegido.
+              ...(update.referenceMode === "without" &&
+              Array.isArray(update.measureData) &&
+              update.measureData.length === 0
+                ? { referenceModeChosen: true as const, rowCount: 0 }
+                : {}),
+            }
+          : {}),
       };
 
       if (isSavingRef.current) {
@@ -352,8 +387,13 @@ export function useInventoryRealtimeSync<TRow>({
       return;
     }
 
-    // Lista slim (sin measureData): no pisar filas locales del editor abierto.
+    // Lista slim (sin measureData): no pisar filas locales del editor abierto,
+    // salvo vaciado intencional «Sin referencias» (rowCount === 0).
     if (measureDataLooksEmpty(remote.measureData)) {
+      if (isIntentionalEmptyMeasureClear(remote)) {
+        applyRemote(remote, false);
+        return;
+      }
       setSelectedTask((prev) => {
         if (!prev || prev.id !== remote.id) return prev;
         if (
@@ -376,6 +416,9 @@ export function useInventoryRealtimeSync<TRow>({
           completeRowCount: remote.completeRowCount,
           rowCount: remote.rowCount,
           updatedAt: remote.updatedAt,
+          referenceMode: remote.referenceMode ?? prev.referenceMode,
+          referenceModeChosen:
+            remote.referenceModeChosen ?? prev.referenceModeChosen,
         };
       });
       return;

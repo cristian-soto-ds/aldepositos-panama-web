@@ -90,7 +90,14 @@ import {
 } from "@/lib/panelPresence";
 import { presenceVisibleLabel } from "@/lib/viewerIdentity";
 import { useInventoryPresenceByRa } from "@/hooks/useInventoryPresenceByRa";
+import {
+  buildPalletClaimsForRa,
+  findNextFreePallet,
+  isPalletClaimedByOther,
+  claimForPallet,
+} from "@/lib/palletLocks";
 import { liveOperatorsForRa } from "@/lib/presenceByRa";
+import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
 import {
   canEditInventoryCapture,
   canManageInventoryPause,
@@ -131,7 +138,10 @@ type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type QuickInventoryEntryProps = {
   tasks: Task[];
-  onUpdateTask: (task: Task, options?: { skipRemote?: boolean }) => void;
+  onUpdateTask: (
+    task: Task,
+    options?: { skipRemote?: boolean; allowEmptyMeasureData?: boolean },
+  ) => void;
   onDeleteTask: (id: string) => void;
   openManualModal: () => void;
   openEditModal: (task: Task) => void;
@@ -420,6 +430,14 @@ function serverHasAdminPreparedRefs(
   task: Task,
   rows: MeasureRow[],
 ): boolean {
+  // Si el inventariador ya eligió sin refs / paletizado, las filas del OR
+  // ya no mandan: no forzar merge «admin-prepared».
+  if (
+    task.referenceModeChosen === true &&
+    (task.referenceMode === "without" || task.referenceMode === "palletized")
+  ) {
+    return false;
+  }
   if (String(task.linkedCollectionOrderId ?? "").trim()) return true;
   if (!taskHasImportedReferences(rows)) return false;
   return !isAutoConsecutiveBlock(rows);
@@ -440,7 +458,9 @@ function mergeDraftMeasuresOntoServerRows(
       byId.get(String(s.id)) ??
       byRef.get(String(s.referencia ?? "").trim().toUpperCase());
     if (!d) return s;
-    const pick = (field: "l" | "w" | "h" | "weight" | "bultos") => {
+    const pick = (
+      field: "l" | "w" | "h" | "weight" | "bultos" | "palletWeight",
+    ) => {
       const dv = String(d[field] ?? "").trim();
       return dv ? d[field] : s[field];
     };
@@ -451,6 +471,9 @@ function mergeDraftMeasuresOntoServerRows(
       h: pick("h"),
       weight: pick("weight"),
       bultos: pick("bultos"),
+      palletWeight: pick("palletWeight"),
+      pallet:
+        d.pallet !== undefined && Number(d.pallet) >= 1 ? d.pallet : s.pallet,
       reempaque: d.reempaque === true ? true : s.reempaque,
     };
   });
@@ -508,6 +531,8 @@ type MeasureTableRowProps = {
   showReferenceColumn: boolean;
   showWeightColumn: boolean;
   referenceMode: ReferenceCaptureMode;
+  /** Paleta reclamada por otro: no editar. */
+  readOnly?: boolean;
   onUpdateValue: (
     id: string,
     field: keyof MeasureRow | keyof QuickMeasureRow,
@@ -535,6 +560,7 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
   showReferenceColumn,
   showWeightColumn,
   referenceMode,
+  readOnly = false,
   onUpdateValue,
   onCommitMeasure,
   onToggleReempaque,
@@ -560,6 +586,8 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
   return (
     <tr
       className={`group transition-colors hover:bg-sky-50/60 dark:hover:bg-sky-950/20 ${
+        readOnly ? "pointer-events-none opacity-55" : ""
+      } ${
         isReempaque
           ? "border-l-[3px] border-l-violet-400 bg-violet-50/40 dark:bg-violet-950/20"
           : rowComplete
@@ -568,6 +596,7 @@ const MeasureTableRow = React.memo(function MeasureTableRow({
             ? "border-l-[3px] border-l-amber-400 bg-amber-50/20 dark:bg-amber-950/10"
             : "border-l-[3px] border-l-transparent odd:bg-white even:bg-slate-50/40 dark:odd:bg-slate-900 dark:even:bg-slate-800/30"
       }`}
+      aria-disabled={readOnly || undefined}
     >
       <td className="px-2 py-1.5 text-center">
         <div
@@ -755,12 +784,14 @@ export function QuickInventoryEntry({
   userRole = "admin",
 }: QuickInventoryEntryProps) {
   const isInventariador = userRole === "inventariador";
+  const isInventariadorRef = useRef(isInventariador);
+  isInventariadorRef.current = isInventariador;
   const [viewMode, setViewMode] = useState<
     "pending" | "completed" | "priority" | "rectification"
   >("pending");
   const [listVisibleCount, setListVisibleCount] = useState(RA_LIST_PAGE_SIZE);
   const sharedNowMs = useSharedNow(30_000);
-  const presenceByRa = useInventoryPresenceByRa();
+  const { presenceByRa, presenceList } = useInventoryPresenceByRa();
   const pendingSelectIdRef = useRef<string | null>(null);
   const lastDraftPersistAtRef = useRef(0);
   const canPauseInventory = canManageInventoryPause(
@@ -871,6 +902,9 @@ export function QuickInventoryEntry({
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
   /** Inventariador: elegir Con/Sin/Paletizado una sola vez al entrar. */
   const [modePickerPending, setModePickerPending] = useState(false);
+  /** Paleta reclamada por este usuario en modo paletizado. */
+  const [claimedPallet, setClaimedPallet] = useState<number | null>(null);
+  const claimedPalletRef = useRef<number | null>(null);
   /** true cuando el inventariador ya confirmó el modo (borrador / sesión). */
   const inventariadorModeChosenRef = useRef(false);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -888,6 +922,7 @@ export function QuickInventoryEntry({
   // Espejo del modo de captura para leerlo de forma síncrona (p. ej. al aplicar
   // un modo que acaba de llegar por el canal en vivo, antes del re-render).
   const referenceModeRef = useRef<ReferenceCaptureMode>(referenceMode);
+  referenceModeRef.current = referenceMode;
   const captureLayoutRef = useRef<CaptureLayout>(captureLayout);
   const catalogDebounceRef = useRef<
     Record<string, ReturnType<typeof setTimeout>>
@@ -963,10 +998,17 @@ export function QuickInventoryEntry({
     (
       localRows: MeasureRow[],
       remoteRows: MeasureRow[],
-      options?: { fromLive?: boolean },
+      options?: { fromLive?: boolean; allowEmptyRemoteWipe?: boolean },
     ) => {
-      // Payload remoto vacío = incompleto; no marcar borrados masivos.
-      if (remoteRows.length > 0) {
+      // Payload remoto vacío = incompleto; no marcar borrados masivos —
+      // salvo vaciado intencional del inventariador (sin refs).
+      const intentionalWipe =
+        options?.allowEmptyRemoteWipe === true ||
+        (remoteRows.length === 0 &&
+          latestTaskRef.current?.referenceModeChosen === true &&
+          latestTaskRef.current?.referenceMode === "without");
+
+      if (remoteRows.length > 0 || intentionalWipe) {
         const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
         // Confirmación: la alta local ya está en el remoto.
         for (const id of Array.from(pendingLocalCreationIdsRef.current)) {
@@ -974,7 +1016,7 @@ export function QuickInventoryEntry({
         }
         // Solo en vivo: un eco de BD atrasado NO debe borrar paletas/filas
         // recién publicadas por live (causaba el parpadeo pone/quita).
-        if (options?.fromLive) {
+        if (options?.fromLive && remoteRows.length > 0) {
           for (const id of lastSeenRemoteIdsRef.current) {
             if (
               id &&
@@ -996,7 +1038,11 @@ export function QuickInventoryEntry({
             pendingDeletionIdsRef.current.add(id);
           }
         }
-        lastSeenRemoteIdsRef.current = remoteIds;
+        if (remoteRows.length > 0) {
+          lastSeenRemoteIdsRef.current = remoteIds;
+        } else if (intentionalWipe) {
+          lastSeenRemoteIdsRef.current = new Set();
+        }
       }
       return mergeConcurrentQuickRows(
         serverBaselineRowsRef.current,
@@ -1005,6 +1051,7 @@ export function QuickInventoryEntry({
         {
           deletedIds: pendingDeletionIdsRef.current,
           protectIds: pendingLocalCreationIdsRef.current,
+          allowEmptyRemoteWipe: intentionalWipe,
         },
       );
     },
@@ -1130,6 +1177,15 @@ export function QuickInventoryEntry({
     : "";
   const selectedTaskIdForPresence = selectedTask?.id ?? null;
 
+  const palletClaims = useMemo(
+    () => buildPalletClaimsForRa(presenceList, selectedRaForPresence),
+    [presenceList, selectedRaForPresence],
+  );
+
+  useEffect(() => {
+    claimedPalletRef.current = claimedPallet;
+  }, [claimedPallet]);
+
   useEffect(() => {
     const key = (presenceUserKey ?? "").trim();
     const tabId = getSharedWorkPresenceTabId();
@@ -1150,6 +1206,10 @@ export function QuickInventoryEntry({
         avatarUrl: presenceAvatarUrl?.trim() || null,
         ra: selectedRaForPresence,
         module: presenceModule,
+        activePallet:
+          referenceMode === "palletized" && claimedPallet != null
+            ? claimedPallet
+            : null,
       });
     };
     send();
@@ -1164,6 +1224,8 @@ export function QuickInventoryEntry({
     presenceUserKey,
     presenceUserLabel,
     presenceAvatarUrl,
+    referenceMode,
+    claimedPallet,
   ]);
 
   useEffect(() => {
@@ -1743,6 +1805,8 @@ export function QuickInventoryEntry({
     activeTaskIdRef.current = null;
     setModePickerPending(false);
     inventariadorModeChosenRef.current = false;
+    setClaimedPallet(null);
+    claimedPalletRef.current = null;
     withModeRowsSnapshotRef.current = null;
     sourceReferencesRef.current = {};
     if (autosaveTimerRef.current) {
@@ -1937,18 +2001,51 @@ export function QuickInventoryEntry({
             );
       nextRows = restoreSourceReferences(nextRows, sourceReferencesRef.current);
     } else {
+      // Sin refs / paletizado: tombstone filas actuales para que no vuelvan por merge.
+      for (const r of measureRows) {
+        const id = String(r.id ?? "");
+        if (id) pendingDeletionIdsRef.current.add(id);
+      }
       nextRows = [];
     }
 
     referenceModeRef.current = mode;
     setReferenceMode(mode);
     setMeasureRows(nextRows);
+    latestRowsRef.current = nextRows;
+    serverBaselineRowsRef.current = JSON.parse(
+      JSON.stringify(nextRows),
+    ) as MeasureRow[];
+    lastSeenRemoteIdsRef.current = new Set(nextRows.map((r) => String(r.id)));
     setExpandedRowId(
       nextRows.find((r) => !isQuickRowComplete(r))?.id ?? nextRows[0]?.id ?? null,
     );
 
     if (selectedTask) {
       persistQuickDraft(selectedTask.id, nextRows, mode, captureLayout);
+      const captureMeta = computeQuickCaptureMeta(nextRows, mode);
+      const nextTask = {
+        ...selectedTask,
+        referenceMode: mode,
+        measureData: nextRows,
+        currentBultos: captureMeta.currentBultos,
+        capturedWeight: captureMeta.capturedWeight,
+        rowCount: captureMeta.rowCount,
+        completeRowCount: captureMeta.completeRowCount,
+        updatedAt: new Date().toISOString(),
+      } as Task;
+      latestTaskRef.current = nextTask;
+      setSelectedTask(nextTask);
+      void Promise.resolve(
+        (
+          onUpdateTask as (
+            t: Task,
+            o?: { allowEmptyMeasureData?: boolean },
+          ) => unknown
+        )(nextTask, {
+          allowEmptyMeasureData: mode === "without" && nextRows.length === 0,
+        }),
+      ).catch((e) => console.warn("[switchReferenceMode]", e));
     }
   };
 
@@ -1975,10 +2072,22 @@ export function QuickInventoryEntry({
       sourceReferencesRef.current,
     );
 
+    // Tombstones: las filas del OR no deben reaparecer por merge/realtime.
+    const previousIds = [
+      ...adminRows.map((r) => String(r.id ?? "")),
+      ...latestRowsRef.current.map((r) => String(r.id ?? "")),
+    ].filter(Boolean);
+    for (const id of previousIds) {
+      pendingDeletionIdsRef.current.add(id);
+      pendingLocalCreationIdsRef.current.delete(id);
+    }
+
     let nextRows: MeasureRow[] = [];
 
     if (mode === "with") {
       // Conserva referencias y bultos tal como el admin los dejó.
+      // No tombstonear esas filas: siguen vigentes.
+      pendingDeletionIdsRef.current.clear();
       const snapshot = withModeRowsSnapshotRef.current;
       nextRows =
         snapshot && snapshot.length > 0
@@ -2006,6 +2115,7 @@ export function QuickInventoryEntry({
       for (let i = 1; i <= count; i++) {
         const id = generateId();
         pendingLocalCreationIdsRef.current.add(id);
+        pendingDeletionIdsRef.current.delete(id);
         seeded.push({
           id,
           referencia: String(i),
@@ -2025,41 +2135,127 @@ export function QuickInventoryEntry({
       nextRows = stripQuickRowsForPersist(seeded);
     }
 
+    const captureMeta = computeQuickCaptureMeta(nextRows, mode);
+    const nowIso = new Date().toISOString();
+    const layout = captureLayoutRef.current;
+
     referenceModeRef.current = mode;
     setReferenceMode(mode);
     setMeasureRows(nextRows);
     latestRowsRef.current = nextRows;
+    serverBaselineRowsRef.current = JSON.parse(
+      JSON.stringify(nextRows),
+    ) as MeasureRow[];
+    lastSeenRemoteIdsRef.current = new Set(nextRows.map((r) => String(r.id)));
     setExpandedRowId(
       nextRows.find((r) => !isQuickRowComplete(r))?.id ?? nextRows[0]?.id ?? null,
     );
 
     const taskId = (selectedTask ?? latestTaskRef.current)?.id;
     if (taskId) {
-      persistQuickDraft(taskId, nextRows, mode, captureLayoutRef.current, {
-        force: true,
-      });
+      persistQuickDraft(taskId, nextRows, mode, layout, { force: true });
     }
 
-    setSelectedTask((prev) => {
-      if (!prev) return prev;
-      const next = {
-        ...prev,
-        referenceMode: mode,
-        referenceModeChosen: true,
-      };
-      latestTaskRef.current = next;
-      // Sync inmediato a BD: la vista Tabla (admin) ve el mismo modo y filas.
-      void Promise.resolve(
-        (onUpdateTask as (t: Task) => unknown)({
-          ...next,
-          measureData: nextRows,
-        }),
-      ).catch((e) => console.warn("[confirmInventariadorMode]", e));
-      return next;
-    });
+    const nextTaskBase = {
+      ...(selectedTask ?? latestTaskRef.current)!,
+      referenceMode: mode,
+      referenceModeChosen: true,
+      measureData: nextRows,
+      currentBultos: captureMeta.currentBultos,
+      capturedWeight: captureMeta.capturedWeight,
+      rowCount: captureMeta.rowCount,
+      completeRowCount: captureMeta.completeRowCount,
+      updatedAt: nowIso,
+    } as Task;
+
+    latestTaskRef.current = nextTaskBase;
+    setSelectedTask(nextTaskBase);
+
+    // Hash vacío: fuerza publish live para que la Tabla admin vea el cambio al instante.
     lastSavedHashRef.current = "";
+
+    // Sync inmediato a BD + lista React (Tabla admin). allowEmpty para sin refs.
+    void Promise.resolve(
+      (
+        onUpdateTask as (
+          t: Task,
+          o?: { allowEmptyMeasureData?: boolean },
+        ) => unknown
+      )(nextTaskBase, {
+        allowEmptyMeasureData: mode === "without" && nextRows.length === 0,
+      }),
+    ).catch((e) => console.warn("[confirmInventariadorMode]", e));
+
     setModePickerPending(false);
+
+    if (mode === "palletized") {
+      const existing = nextRows.map((r) => Math.max(1, Number(r.pallet) || 1));
+      const free = findNextFreePallet(
+        existing.length > 0 ? existing : [1],
+        palletClaims,
+        String(presenceUserKey ?? ""),
+      );
+      setClaimedPallet(free);
+      claimedPalletRef.current = free;
+      const firstInClaim = nextRows.find(
+        (r) => Math.max(1, Number(r.pallet) || 1) === free,
+      );
+      if (firstInClaim) {
+        setExpandedRowId(firstInClaim.id);
+      } else {
+        // Todas las paletas existentes están ocupadas → crear la libre.
+        createPalletWithNumber(free);
+      }
+    } else {
+      setClaimedPallet(null);
+      claimedPalletRef.current = null;
+    }
   };
+
+  const claimPallet = useCallback(
+    (palletNum: number) => {
+      const p = Math.max(1, Math.floor(palletNum));
+      const myKey = String(presenceUserKey ?? "");
+      if (isPalletClaimedByOther(palletClaims, p, myKey)) {
+        const free = findNextFreePallet(
+          measureRows.map((r) => Math.max(1, Number(r.pallet) || 1)),
+          palletClaims,
+          myKey,
+        );
+        setClaimedPallet(free);
+        claimedPalletRef.current = free;
+        const row = measureRows.find(
+          (r) => Math.max(1, Number(r.pallet) || 1) === free,
+        );
+        if (row) setExpandedRowId(row.id);
+        else createPalletWithNumber(free);
+        return { ok: false as const, redirectedTo: free };
+      }
+      setClaimedPallet(p);
+      claimedPalletRef.current = p;
+      const row = measureRows.find(
+        (r) => Math.max(1, Number(r.pallet) || 1) === p,
+      );
+      if (row) setExpandedRowId(row.id);
+      return { ok: true as const, redirectedTo: p };
+    },
+    [palletClaims, presenceUserKey, measureRows],
+  );
+
+  const releasePalletClaim = useCallback(() => {
+    setClaimedPallet(null);
+    claimedPalletRef.current = null;
+  }, []);
+
+  const canEditPallet = useCallback(
+    (palletNum: number) => {
+      if (referenceMode !== "palletized") return true;
+      if (!isInventariador) return true;
+      if (claimedPallet == null) return false;
+      return Math.max(1, Math.floor(palletNum)) === claimedPallet;
+    },
+    [referenceMode, isInventariador, claimedPallet],
+  );
 
   const addRow = () => {
     // Paletizado: insertar en el grupo de la paleta activa (no al final de la lista).
@@ -2069,6 +2265,10 @@ export function QuickInventoryEntry({
           latestRowsRef.current.find((r) => r.id === expandedRowId)) ||
         latestRowsRef.current[latestRowsRef.current.length - 1];
       const palletNum = Math.max(1, Number(active?.pallet) || 1);
+      if (!canEditPallet(palletNum)) {
+        claimPallet(palletNum);
+        return;
+      }
       addRowToPallet(palletNum);
       return;
     }
@@ -2224,13 +2424,35 @@ export function QuickInventoryEntry({
   const confirmPalletModal = () => {
     const num = parseInt(palletModalValue, 10);
     if (!Number.isFinite(num) || num < 1) return;
-    // Si chocó con una paleta que llegó en vivo, allocatePalletNumber corrige.
-    createPalletWithNumber(num);
+    let target = num;
+    if (
+      isInventariador &&
+      isPalletClaimedByOther(palletClaims, num, String(presenceUserKey ?? ""))
+    ) {
+      target = findNextFreePallet(
+        [
+          ...latestRowsRef.current.map((r) => Math.max(1, Number(r.pallet) || 1)),
+          num,
+        ],
+        palletClaims,
+        String(presenceUserKey ?? ""),
+      );
+    }
+    createPalletWithNumber(target);
+    if (isInventariador) claimPallet(target);
     setPalletModalOpen(false);
   };
 
   /** Paletizado: fija el peso total de una paleta (se replica en todas sus filas). */
   const setPalletWeight = useCallback((palletNum: number, value: string) => {
+    if (
+      isInventariadorRef.current &&
+      referenceModeRef.current === "palletized"
+    ) {
+      const claimed = claimedPalletRef.current;
+      const p = Math.max(1, Math.floor(palletNum));
+      if (claimed == null || claimed !== p) return;
+    }
     setMeasureRows((prev) => {
       const next = prev.map((r) => {
         if (Math.max(1, Number(r.pallet) || 1) !== palletNum) return r;
@@ -2248,6 +2470,7 @@ export function QuickInventoryEntry({
 
   /** Paletizado: añade una fila dentro de una paleta concreta (la inserta al final de su grupo). */
   const addRowToPallet = (palletNum: number) => {
+    if (!canEditPallet(palletNum)) return;
     const newId = generateId();
     pendingLocalCreationIdsRef.current.add(newId);
     setMeasureRows((prev) => {
@@ -2318,9 +2541,12 @@ export function QuickInventoryEntry({
       );
       let next: MeasureRow[];
       if (remaining.length === 0) {
+        const shellId = generateId();
+        pendingLocalCreationIdsRef.current.add(shellId);
         next = [
           {
             ...createEmptyMeasureRow(),
+            id: shellId,
             bultos: "1",
             referencia: "1",
             pallet: 1,
@@ -2336,6 +2562,7 @@ export function QuickInventoryEntry({
   };
 
   const deletePallet = (palletNum: number) => {
+    if (!canEditPallet(palletNum)) return;
     const rowsInPallet = measureRows.filter(
       (r) => Math.max(1, Number(r.pallet) || 1) === palletNum,
     );
@@ -2349,6 +2576,15 @@ export function QuickInventoryEntry({
 
   const deleteRow = useCallback(
     (idToRemove: string) => {
+      if (
+        isInventariadorRef.current &&
+        referenceModeRef.current === "palletized"
+      ) {
+        const row = latestRowsRef.current.find((r) => r.id === idToRemove);
+        const p = Math.max(1, Number(row?.pallet) || 1);
+        const claimed = claimedPalletRef.current;
+        if (claimed == null || claimed !== p) return;
+      }
       // Quitar foco antes de desmontar el input: evita el pitido del sistema en Windows.
       if (typeof document !== "undefined") {
         const active = document.activeElement;
@@ -2361,7 +2597,15 @@ export function QuickInventoryEntry({
       }
       delete sourceReferencesRef.current[idToRemove];
       setMeasureRows((prev) => {
-        if (prev.length <= 1) return prev;
+        // Sin refs: permitir lista vacía (cargar bulto por bulto desde cero).
+        if (prev.length <= 1) {
+          if (referenceMode === "without") {
+            pendingDeletionIdsRef.current.add(idToRemove);
+            latestRowsRef.current = [];
+            return [];
+          }
+          return prev;
+        }
         pendingDeletionIdsRef.current.add(idToRemove);
         const next = prev.filter((r) => r.id !== idToRemove);
         const normalized =
@@ -2382,6 +2626,15 @@ export function QuickInventoryEntry({
       field: keyof MeasureRow | keyof QuickMeasureRow,
       value: string | boolean | string[],
     ) => {
+      if (
+        isInventariadorRef.current &&
+        referenceModeRef.current === "palletized"
+      ) {
+        const row = latestRowsRef.current.find((r) => r.id === id);
+        const p = Math.max(1, Number(row?.pallet) || 1);
+        const claimed = claimedPalletRef.current;
+        if (claimed == null || claimed !== p) return;
+      }
       setMeasureRows((prev) => {
         const next = prev.map((row) =>
           row.id === id ? { ...row, [field]: value } : row,
@@ -2396,6 +2649,15 @@ export function QuickInventoryEntry({
 
   /** Marca/desmarca una fila como reempaque (sin bultos, peso ni medidas). */
   const toggleReempaque = useCallback((id: string) => {
+    if (
+      isInventariadorRef.current &&
+      referenceModeRef.current === "palletized"
+    ) {
+      const row = latestRowsRef.current.find((r) => r.id === id);
+      const p = Math.max(1, Number(row?.pallet) || 1);
+      const claimed = claimedPalletRef.current;
+      if (claimed == null || claimed !== p) return;
+    }
     setMeasureRows((prev) => {
       const next = prev.map((row) => {
         if (row.id !== id) return row;
@@ -2684,6 +2946,9 @@ export function QuickInventoryEntry({
         completeRowCount: hasCapture ? captureMeta.completeRowCount : 0,
         weightMode: QUICK_WEIGHT_MODE,
         referenceMode: referenceModeRef.current,
+        ...(inventariadorModeChosenRef.current
+          ? { referenceModeChosen: true as const }
+          : {}),
         originalExpectedBultos: originalExpected,
         manualTotalWeight:
           task.manualTotalWeight !== undefined ? task.manualTotalWeight : 0,
@@ -2832,9 +3097,16 @@ export function QuickInventoryEntry({
           (
             onUpdateTask as (
               t: Task,
-              o?: { skipRemote?: boolean },
+              o?: { skipRemote?: boolean; allowEmptyMeasureData?: boolean },
             ) => unknown
-          )(updatedTask, { skipRemote: true }),
+          )(updatedTask, {
+            skipRemote: true,
+            allowEmptyMeasureData:
+              updatedTask.referenceModeChosen === true &&
+              updatedTask.referenceMode === "without" &&
+              (!Array.isArray(updatedTask.measureData) ||
+                updatedTask.measureData.length === 0),
+          }),
         );
         // CAS ya escribió en BD: copiar historial aquí (skipRemote no lo hace).
         void saveRaInventorySnapshotAfterPersist({
@@ -3627,11 +3899,37 @@ export function QuickInventoryEntry({
             void runCatalogLookup(id, value);
           }}
           onAddRow={addRow}
-          onAddPallet={() =>
-            createPalletWithNumber(allocatePalletNumber(latestRowsRef.current))
-          }
-          onAddRowToPallet={addRowToPallet}
-          onSetPalletWeight={setPalletWeight}
+          onAddPallet={() => {
+            if (isInventariador && claimedPallet != null) {
+              // Inventariador: crea nueva paleta libre y la reclama.
+              const nextNum = allocatePalletNumber(latestRowsRef.current);
+              if (isPalletClaimedByOther(palletClaims, nextNum, String(presenceUserKey ?? ""))) {
+                const free = findNextFreePallet(
+                  [...measureRows.map((r) => Math.max(1, Number(r.pallet) || 1)), nextNum],
+                  palletClaims,
+                  String(presenceUserKey ?? ""),
+                );
+                createPalletWithNumber(free);
+                claimPallet(free);
+                return;
+              }
+              createPalletWithNumber(nextNum);
+              claimPallet(nextNum);
+              return;
+            }
+            createPalletWithNumber(allocatePalletNumber(latestRowsRef.current));
+          }}
+          onAddRowToPallet={(p) => {
+            if (!canEditPallet(p)) {
+              claimPallet(p);
+              return;
+            }
+            addRowToPallet(p);
+          }}
+          onSetPalletWeight={(p, v) => {
+            if (!canEditPallet(p)) return;
+            setPalletWeight(p, v);
+          }}
           onDeleteRow={deleteRow}
           raLabel={String(t.ra ?? "")}
           declaredBultos={originalExpected}
@@ -3666,6 +3964,11 @@ export function QuickInventoryEntry({
           finalizeLabel={
             isInventariador ? "Finalizar inventario" : "Guardar"
           }
+          claimedPallet={claimedPallet}
+          palletClaims={palletClaims}
+          onClaimPallet={claimPallet}
+          onReleasePallet={releasePalletClaim}
+          enforcePalletClaims={isInventariador}
         />
         </div>
         {leavePromptOpen ? (
@@ -3793,6 +4096,12 @@ export function QuickInventoryEntry({
         ) : null}
 
         {correctionBanner}
+
+        {!isInventariador && selectedTask ? (
+          <InventoryLiveOperators
+            operators={liveOperatorsForRa(presenceByRa, selectedTask.ra)}
+          />
+        ) : null}
       </div>
 
       {t && (
@@ -3972,12 +4281,35 @@ export function QuickInventoryEntry({
                     {isNewPallet && (
                       <tr className="bg-indigo-50/80 dark:bg-indigo-950/30">
                         <td colSpan={measureColumnCount} className="px-3 py-1.5">
+                          {(() => {
+                            const claim = claimForPallet(palletClaims, rowPallet);
+                            const myKey = String(presenceUserKey ?? "")
+                              .trim()
+                              .toLowerCase();
+                            const mine =
+                              claim != null &&
+                              claim.userKey.trim().toLowerCase() === myKey;
+                            const lockedByOther =
+                              claim != null && !mine;
+                            const editable = canEditPallet(rowPallet);
+                            return (
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                            <span className="inline-flex flex-wrap items-center gap-1.5 text-xs font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
                               <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
                               Paleta {rowPallet}
+                              {lockedByOther ? (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold normal-case tracking-normal text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
+                                  En uso · {claim.userLabel}
+                                </span>
+                              ) : mine || claimedPallet === rowPallet ? (
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                                  Trabajando vos
+                                </span>
+                              ) : null}
                             </span>
-                            <div className="ml-auto flex items-center gap-1.5">
+                            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                              {editable ? (
+                                <>
                               <label className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
                                 Peso paleta
                               </label>
@@ -3989,8 +4321,46 @@ export function QuickInventoryEntry({
                               <span className="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400">
                                 kg
                               </span>
+                                </>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  Solo lectura
+                                </span>
+                              )}
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {isInventariador || referenceMode === "palletized" ? (
+                                lockedByOther ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => claimPallet(rowPallet)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:border-slate-600 dark:bg-slate-900"
+                                    title="Ocupada: te lleva a la siguiente libre"
+                                  >
+                                    Saltar
+                                  </button>
+                                ) : claimedPallet === rowPallet ? (
+                                  <button
+                                    type="button"
+                                    onClick={releasePalletClaim}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                                    title="Dejá de trabajar en esta paleta"
+                                  >
+                                    Liberar
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => claimPallet(rowPallet)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:border-indigo-800 dark:bg-slate-900 dark:text-indigo-300"
+                                    title="Reclamar esta paleta"
+                                  >
+                                    Trabajar aquí
+                                  </button>
+                                )
+                              ) : null}
+                              {editable ? (
+                                <>
                               <button
                                 type="button"
                                 onClick={() => addRowToPallet(rowPallet)}
@@ -4008,8 +4378,12 @@ export function QuickInventoryEntry({
                               >
                                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
                               </button>
+                                </>
+                              ) : null}
                             </div>
                           </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     )}
@@ -4020,6 +4394,7 @@ export function QuickInventoryEntry({
                       showReferenceColumn={showReferenceColumn}
                       showWeightColumn={showWeightColumn}
                       referenceMode={referenceMode}
+                      readOnly={!canEditPallet(rowPallet)}
                       onUpdateValue={updateRowValue}
                       onCommitMeasure={commitMeasureField}
                       onToggleReempaque={toggleReempaque}

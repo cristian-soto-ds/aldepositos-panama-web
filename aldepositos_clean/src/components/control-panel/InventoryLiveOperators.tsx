@@ -12,6 +12,13 @@ type InventoryLiveOperatorsProps = {
 };
 
 function operatorSubtitle(op: LiveOperatorOnRa): string {
+  if (
+    typeof op.activePallet === "number" &&
+    Number.isFinite(op.activePallet) &&
+    op.activePallet >= 1
+  ) {
+    return `Paleta ${Math.floor(op.activePallet)}`;
+  }
   const key = String(op.userKey ?? "").trim();
   if (key.includes("@")) return key;
   return PRESENCE_MODULE_LABELS[op.module];
@@ -30,7 +37,11 @@ export function InventoryLiveOperators({ operators }: InventoryLiveOperatorsProp
           <div
             key={`${op.userKey}-${op.module}`}
             className="flex items-center gap-2 rounded-lg border border-slate-200/90 bg-slate-50/95 px-1.5 py-1 dark:border-slate-600/80 dark:bg-slate-800/50 sm:gap-3 sm:rounded-2xl sm:p-2.5"
-            title={`${op.name} · ${PRESENCE_MODULE_LABELS[op.module]}`}
+            title={
+              op.activePallet
+                ? `${op.name} · Paleta ${op.activePallet}`
+                : `${op.name} · ${PRESENCE_MODULE_LABELS[op.module]}`
+            }
           >
             <div className="relative h-6 w-6 shrink-0 overflow-hidden rounded-full border border-slate-200/90 bg-white dark:border-slate-600 dark:bg-slate-900 sm:h-10 sm:w-10">
               {op.avatarUrl ? (
@@ -60,9 +71,15 @@ export function InventoryLiveOperators({ operators }: InventoryLiveOperatorsProp
               </p>
             </div>
 
-            <span className="hidden shrink-0 rounded-xl border border-slate-200/90 bg-white px-2 py-1 text-[8px] font-black uppercase tracking-wide text-slate-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 sm:inline sm:text-[9px]">
-              {PRESENCE_MODULE_LABELS[op.module]}
-            </span>
+            {op.activePallet != null && op.activePallet >= 1 ? (
+              <span className="shrink-0 rounded-xl border border-violet-200 bg-violet-50 px-2 py-1 text-[8px] font-black uppercase tracking-wide text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200 sm:text-[9px]">
+                Paleta {Math.floor(op.activePallet)}
+              </span>
+            ) : (
+              <span className="hidden shrink-0 rounded-xl border border-slate-200/90 bg-white px-2 py-1 text-[8px] font-black uppercase tracking-wide text-slate-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 sm:inline sm:text-[9px]">
+                {PRESENCE_MODULE_LABELS[op.module]}
+              </span>
+            )}
           </div>
         ))}
       </div>

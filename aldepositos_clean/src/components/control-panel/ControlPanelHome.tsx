@@ -951,10 +951,14 @@ function ActivityPresenceRow({
   operatorCount: number;
 }) {
   const summary = entries
-    .map(
-      (e) =>
-        `${peerPresenceVisibleName(e.userLabel, e.userKey)} (${moduleShort(e.module)})`,
-    )
+    .map((e) => {
+      const name = peerPresenceVisibleName(e.userLabel, e.userKey);
+      const pallet =
+        typeof e.activePallet === "number" && e.activePallet >= 1
+          ? ` · P${Math.floor(e.activePallet)}`
+          : "";
+      return `${name}${pallet} (${moduleShort(e.module)})`;
+    })
     .join(" · ");
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 dark:border-slate-700 dark:bg-slate-800/90">

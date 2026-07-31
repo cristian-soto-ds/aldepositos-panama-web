@@ -36,7 +36,13 @@ import {
   sanitizeMeasureTyping,
 } from "@/lib/measureDecimals";
 import { useReekonTapeInput } from "@/hooks/useReekonTapeInput";
+import {
+  claimForPallet,
+  type PalletClaim,
+} from "@/lib/palletLocks";
 type DimField = "l" | "w" | "h";
+
+const EMPTY_PALLET_CLAIMS = new Map<number, PalletClaim>();
 
 type ReekonCaptureViewProps = {
   measureRows: QuickMeasureRow[];
@@ -85,6 +91,14 @@ type ReekonCaptureViewProps = {
   canFinalize?: boolean;
   /** Texto del botón primario (Guardar / Finalizar inventario). */
   finalizeLabel?: string;
+  /** Paleta reclamada por este usuario (modo grupo). */
+  claimedPallet?: number | null;
+  /** Quién trabaja en cada paleta (presencia). */
+  palletClaims?: Map<number, PalletClaim>;
+  onClaimPallet?: (palletNum: number) => void;
+  onReleasePallet?: () => void;
+  /** Inventariador: bloquear edición de paletas ajenas. */
+  enforcePalletClaims?: boolean;
 };
 
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
@@ -357,6 +371,11 @@ export function ReekonCaptureView({
   lockReferenceMode = false,
   canFinalize = true,
   finalizeLabel = "Guardar",
+  claimedPallet = null,
+  palletClaims,
+  onClaimPallet,
+  onReleasePallet,
+  enforcePalletClaims = false,
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
@@ -570,6 +589,19 @@ export function ReekonCaptureView({
 
   const activePalletNum = activeRow ? palletOf(activeRow) : 1;
 
+  const claimsMap = palletClaims ?? EMPTY_PALLET_CLAIMS;
+  const activeClaim = palletized
+    ? claimForPallet(claimsMap, activePalletNum)
+    : null;
+  const editingAllowed =
+    !enforcePalletClaims ||
+    !palletized ||
+    (claimedPallet != null && claimedPallet === activePalletNum);
+  const lockedByOther =
+    enforcePalletClaims &&
+    activeClaim != null &&
+    claimedPallet !== activePalletNum;
+
   const palletSummaries = useMemo(() => {
     if (!palletized) return [];
     const map = new Map<number, { count: number; firstRowId: string; completed: number }>();
@@ -610,10 +642,14 @@ export function ReekonCaptureView({
 
   const selectPallet = useCallback(
     (palletNum: number) => {
+      if (enforcePalletClaims && onClaimPallet) {
+        onClaimPallet(palletNum);
+        return;
+      }
       const first = measureRows.find((r) => palletOf(r) === palletNum);
       if (first) selectRow(first.id);
     },
-    [measureRows, selectRow],
+    [measureRows, selectRow, enforcePalletClaims, onClaimPallet],
   );
 
   const goPrev = () => {
@@ -625,10 +661,24 @@ export function ReekonCaptureView({
 
   const goNextPending = () => {
     if (measureRows.length === 0) return;
-    const start = activeIndex >= 0 ? activeIndex + 1 : 0;
-    for (let i = 0; i < measureRows.length; i += 1) {
-      const idx = (start + i) % measureRows.length;
-      const row = measureRows[idx];
+    const pool =
+      enforcePalletClaims && claimedPallet != null
+        ? measureRows.filter((r) => palletOf(r) === claimedPallet)
+        : measureRows;
+    if (pool.length === 0) return;
+    const startInAll = activeIndex >= 0 ? activeIndex + 1 : 0;
+    // Busca primero en el pool (paleta reclamada) a partir de la fila activa.
+    const ordered = [
+      ...pool.filter((_, i) => {
+        const abs = measureRows.indexOf(pool[i]);
+        return abs >= startInAll;
+      }),
+      ...pool.filter((_, i) => {
+        const abs = measureRows.indexOf(pool[i]);
+        return abs < startInAll;
+      }),
+    ];
+    for (const row of ordered) {
       if (!isQuickRowComplete(row)) {
         selectRow(row.id);
         return;
@@ -984,6 +1034,14 @@ export function ReekonCaptureView({
                       {palletSummaries.map((p) => {
                         const isActive = p.num === activePalletNum;
                         const allDone = p.completed === p.count && p.count > 0;
+                        const claim = claimForPallet(claimsMap, p.num);
+                        const mine =
+                          claimedPallet === p.num ||
+                          (claim != null && claimedPallet === p.num);
+                        const busy =
+                          enforcePalletClaims &&
+                          claim != null &&
+                          claimedPallet !== p.num;
                         return (
                           <button
                             key={p.num}
@@ -991,18 +1049,37 @@ export function ReekonCaptureView({
                             onClick={() => selectPallet(p.num)}
                             className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-sm font-bold transition active:scale-[0.98] ${
                               isActive
-                                ? "border-violet-500 bg-violet-100 text-violet-900 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-100"
-                                : allDone
-                                  ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-                                  : "border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                                ? mine
+                                  ? "border-emerald-500 bg-emerald-100 text-emerald-900 shadow-sm dark:border-emerald-400 dark:bg-emerald-900/50 dark:text-emerald-100"
+                                  : busy
+                                    ? "border-amber-400 bg-amber-50 text-amber-900 shadow-sm dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100"
+                                    : "border-violet-500 bg-violet-100 text-violet-900 shadow-sm dark:border-violet-400 dark:bg-violet-900/50 dark:text-violet-100"
+                                : busy
+                                  ? "border-amber-200 bg-amber-50/80 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                                  : allDone
+                                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                                    : "border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                             }`}
                             aria-pressed={isActive}
-                            aria-label={`Ir a paleta ${p.num}`}
+                            aria-label={
+                              busy
+                                ? `Paleta ${p.num} en uso por ${claim?.userLabel ?? "otro"}`
+                                : `Ir a paleta ${p.num}`
+                            }
+                            title={
+                              busy
+                                ? `En uso · ${claim?.userLabel ?? "otro"}`
+                                : mine
+                                  ? "Trabajando vos"
+                                  : undefined
+                            }
                           >
                             <Layers className="h-3.5 w-3.5 shrink-0" />
                             P{p.num}
                             <span className="text-[10px] font-semibold opacity-70">
-                              {p.completed}/{p.count}
+                              {busy
+                                ? claim?.userLabel?.split(" ")[0] ?? "ocupada"
+                                : `${p.completed}/${p.count}`}
                             </span>
                           </button>
                         );
@@ -1020,13 +1097,60 @@ export function ReekonCaptureView({
                       </button>
                     ) : null}
                   </div>
-                  <div className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-violet-50 py-2 text-sm font-bold text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300">
+                  <div
+                    className={`flex flex-wrap items-center justify-center gap-2 rounded-xl border py-2 text-sm font-bold ${
+                      editingAllowed
+                        ? "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
+                        : lockedByOther
+                          ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                          : "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-300"
+                    }`}
+                  >
                     <Layers className="h-4 w-4" />
                     Paleta {activePalletNum}
-                    <span className="font-semibold text-violet-500 dark:text-violet-400">
+                    <span className="font-semibold opacity-80">
                       · Fila {rowIndexInPallet}/{rowsInActivePallet.length || 1}
                     </span>
+                    {lockedByOther ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-900 dark:bg-amber-950/60 dark:text-amber-100">
+                        En uso · {activeClaim?.userLabel}
+                      </span>
+                    ) : claimedPallet === activePalletNum ? (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                        Trabajando vos
+                      </span>
+                    ) : null}
                   </div>
+                  {enforcePalletClaims ? (
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      {lockedByOther ? (
+                        <button
+                          type="button"
+                          onClick={() => onClaimPallet?.(activePalletNum)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-slate-600 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+                        >
+                          <SkipForward className="h-3.5 w-3.5" />
+                          Saltar a libre
+                        </button>
+                      ) : claimedPallet === activePalletNum ? (
+                        <button
+                          type="button"
+                          onClick={() => onReleasePallet?.()}
+                          className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                        >
+                          Liberar paleta
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onClaimPallet?.(activePalletNum)}
+                          className="inline-flex items-center gap-1 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-violet-800 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200"
+                        >
+                          Trabajar aquí
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1041,7 +1165,14 @@ export function ReekonCaptureView({
                   </div>
                 </div>
               ) : (
-                <>
+                <div
+                  className={
+                    editingAllowed
+                      ? "flex flex-col gap-4"
+                      : "pointer-events-none flex flex-col gap-4 opacity-50"
+                  }
+                  aria-disabled={!editingAllowed || undefined}
+                >
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -1138,7 +1269,7 @@ export function ReekonCaptureView({
                   </span>
                 ) : null}
               </div>
-                </>
+                </div>
               )}
             </div>
           )}
@@ -1188,7 +1319,7 @@ export function ReekonCaptureView({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleDeleteCurrent}
-              disabled={!activeId || measureRows.length <= 1}
+              disabled={!activeId || measureRows.length <= 1 || !editingAllowed}
               className="flex h-14 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-200 bg-red-50 text-red-600 active:scale-95 disabled:opacity-30 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400 sm:w-14"
               aria-label="Eliminar línea"
             >
@@ -1218,7 +1349,8 @@ export function ReekonCaptureView({
                 <button
                   type="button"
                   onClick={addRowHere}
-                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                  disabled={!editingAllowed}
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-slate-300 bg-slate-50 text-slate-700 active:scale-95 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                   aria-label="Agregar línea"
                 >
                   <Plus className="h-6 w-6" />
@@ -1240,7 +1372,8 @@ export function ReekonCaptureView({
                 <button
                   type="button"
                   onClick={addRowHere}
-                  className="flex h-14 min-w-0 flex-1 items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-slate-50 px-2 text-sm font-bold text-slate-700 active:scale-[0.98] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 sm:gap-2 sm:text-base"
+                  disabled={!editingAllowed}
+                  className="flex h-14 min-w-0 flex-1 items-center justify-center gap-1 rounded-2xl border border-slate-300 bg-slate-50 px-2 text-sm font-bold text-slate-700 active:scale-[0.98] disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 sm:gap-2 sm:text-base"
                 >
                   <Plus className="h-5 w-5 shrink-0" />
                   <span className="truncate">

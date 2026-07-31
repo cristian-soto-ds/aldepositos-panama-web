@@ -20,6 +20,8 @@ export type WorkPresenceEntry = {
   avatarUrl?: string | null;
   ra: string;
   module: WorkPresenceModule;
+  /** Paleta reclamada en modo paletizado (null/undefined = ninguna). */
+  activePallet?: number | null;
   updatedAt: number;
 };
 
@@ -64,7 +66,7 @@ function membershipKey(entries: WorkPresenceEntry[]): string {
   return entries
     .map(
       (e) =>
-        `${e.tabId}\t${e.userKey}\t${e.ra}\t${e.module}\t${e.avatarUrl ?? ""}\t${e.userLabel}`,
+        `${e.tabId}\t${e.userKey}\t${e.ra}\t${e.module}\t${e.activePallet ?? ""}\t${e.avatarUrl ?? ""}\t${e.userLabel}`,
     )
     .sort()
     .join("|");
@@ -78,6 +80,7 @@ function payloadKey(entry: Omit<WorkPresenceEntry, "updatedAt">): string {
     entry.avatarUrl ?? "",
     entry.ra,
     entry.module,
+    entry.activePallet ?? "",
   ].join("\t");
 }
 
@@ -121,6 +124,13 @@ function parsePresenceState(
         mod === "quick" || mod === "detailed" || mod === "airway" || mod === "none"
           ? mod
           : "none";
+      let activePallet: number | null = null;
+      if (typeof m.activePallet === "number" && Number.isFinite(m.activePallet)) {
+        activePallet = Math.max(1, Math.floor(m.activePallet));
+      } else if (typeof m.activePallet === "string" && m.activePallet.trim()) {
+        const n = Number(m.activePallet);
+        if (Number.isFinite(n) && n >= 1) activePallet = Math.floor(n);
+      }
       out.push({
         tabId,
         userKey,
@@ -128,6 +138,7 @@ function parsePresenceState(
         avatarUrl,
         ra,
         module,
+        activePallet,
         updatedAt: now,
       });
     }
@@ -216,6 +227,12 @@ async function flushTrackNow(force = false): Promise<void> {
       ra: lastPayload.ra,
       module: lastPayload.module,
       tabId: lastPayload.tabId,
+      activePallet:
+        typeof lastPayload.activePallet === "number" &&
+        Number.isFinite(lastPayload.activePallet) &&
+        lastPayload.activePallet >= 1
+          ? Math.floor(lastPayload.activePallet)
+          : null,
     });
     lastTrackedKey = key;
     lastTrackAt = Date.now();
@@ -263,6 +280,12 @@ export function publishWorkPresence(entry: Omit<WorkPresenceEntry, "updatedAt">)
     ra: (entry.ra ?? "").trim(),
     module: entry.module,
     avatarUrl: entry.avatarUrl?.trim() || null,
+    activePallet:
+      typeof entry.activePallet === "number" &&
+      Number.isFinite(entry.activePallet) &&
+      entry.activePallet >= 1
+        ? Math.floor(entry.activePallet)
+        : null,
   };
   const prevKey = lastPayload ? payloadKey(lastPayload) : "";
   const nextKey = payloadKey(next);

@@ -51,3 +51,22 @@ export function tasksListFingerprint(tasks: Task[]): string {
 export function measureDataLooksEmpty(measureData: unknown): boolean {
   return !Array.isArray(measureData) || measureData.length === 0;
 }
+
+/**
+ * Vacío intencional: inventariador eligió «Sin referencias» y limpió las filas del OR.
+ * Exige `rowCount === 0` para no confundir con payloads slim de lista (`measureData: []`
+ * pero con filas reales en BD).
+ */
+export function isIntentionalEmptyMeasureClear(task: {
+  referenceMode?: string;
+  referenceModeChosen?: boolean;
+  measureData?: unknown;
+  rowCount?: number;
+}): boolean {
+  return (
+    task.referenceModeChosen === true &&
+    task.referenceMode === "without" &&
+    measureDataLooksEmpty(task.measureData) &&
+    (task.rowCount ?? 0) === 0
+  );
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { User, Lock, ArrowRight, Loader2 } from "lucide-react";
+import { User, Lock, ArrowRight, Loader2, Eye, EyeOff } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
 import { signInWithUsername } from "@/lib/auth/sign-in-with-username";
 
@@ -12,6 +12,7 @@ type LoginFormProps = {
 export function LoginForm({ onSuccess }: LoginFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +70,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
               onChange={(e) => setUsername(e.target.value)}
               className="panel-input w-full rounded-xl py-3.5 pl-11 pr-4 text-base font-medium transition-all focus:bg-[var(--panel-surface)] sm:py-4 sm:pl-12"
               placeholder="Ingresa tu usuario"
+              autoComplete="username"
             />
           </div>
         </div>
@@ -80,13 +82,27 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
           <div className="group relative">
             <Lock className="icon-md absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-[#16263F] dark:group-focus-within:text-blue-400" />
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="panel-input w-full rounded-xl py-3.5 pl-11 pr-12 text-base font-medium transition-all focus:bg-[var(--panel-surface)] sm:py-4 sm:pl-12"
+              className="panel-input w-full rounded-xl py-3.5 pl-11 pr-12 text-base font-medium transition-all focus:bg-[var(--panel-surface)] sm:py-4 sm:pl-12 sm:pr-14"
               placeholder="••••••••"
+              autoComplete="current-password"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute right-3 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-[#16263F] dark:hover:bg-slate-800 dark:hover:text-blue-300"
+              aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+              title={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+            >
+              {showPassword ? (
+                <EyeOff className="h-5 w-5" aria-hidden />
+              ) : (
+                <Eye className="h-5 w-5" aria-hidden />
+              )}
+            </button>
           </div>
         </div>
 
@@ -119,4 +135,3 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
     </div>
   );
 }
-

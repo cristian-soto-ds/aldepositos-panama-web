@@ -568,6 +568,11 @@ export type MergeConcurrentQuickRowsOptions = {
   deletedIds?: Iterable<string>;
   /** Altas locales aún no confirmadas — no se borran por eco de BD atrasado. */
   protectIds?: Iterable<string>;
+  /**
+   * Si true, `remoteRows=[]` es un vaciado real (p. ej. inventariador eligió
+   * «Sin referencias»), no un payload slim incompleto.
+   */
+  allowEmptyRemoteWipe?: boolean;
 };
 
 /**
@@ -583,8 +588,13 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   options?: MergeConcurrentQuickRowsOptions,
 ): T[] {
   // Payload remoto vacío = incompleto (slim/eco), no un borrado masivo real.
-  // En captura siempre queda ≥1 fila; [] no debe vaciar el editor local.
-  if (remoteRows.length === 0 && localRows.length > 0) {
+  // En captura siempre queda ≥1 fila; [] no debe vaciar el editor local —
+  // salvo vaciado intencional (sin referencias).
+  if (
+    remoteRows.length === 0 &&
+    localRows.length > 0 &&
+    !options?.allowEmptyRemoteWipe
+  ) {
     return groupRowsByPallet(stripQuickRowsForPersist(localRows) as T[]);
   }
 

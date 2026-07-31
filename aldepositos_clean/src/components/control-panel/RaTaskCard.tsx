@@ -70,6 +70,14 @@ function RaTaskCardInner({
   onSendToRectification,
 }: RaTaskCardProps) {
   const activeInventariador = resolveActiveInventoryOperatorLabel(t, liveWorkers);
+  const palletLiveLabels = liveWorkers
+    .filter(
+      (op) =>
+        typeof op.activePallet === "number" &&
+        Number.isFinite(op.activePallet) &&
+        op.activePallet >= 1,
+    )
+    .map((op) => `P${Math.floor(op.activePallet!)} · ${op.name}`);
   const pausedInventariador = resolvePausedInventoryOperatorLabel(t);
   const completedBy = inventoryCompletedByLabel(t);
   const showPaused = t.status === "paused" && !!pausedInventariador;
@@ -156,6 +164,13 @@ function RaTaskCardInner({
               title={`Inventario en pausa · ${pausedInventariador}`}
             >
               En pausa · {pausedInventariador}
+            </span>
+          ) : palletLiveLabels.length > 0 ? (
+            <span
+              className="max-w-[11rem] truncate rounded-full bg-violet-100 px-1.5 py-px text-[8px] font-semibold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200 sm:max-w-none sm:px-2 sm:py-0.5 sm:text-[9px]"
+              title={palletLiveLabels.join(" · ")}
+            >
+              {palletLiveLabels.join(" · ")}
             </span>
           ) : activeInventariador ? (
             <span
@@ -365,7 +380,12 @@ function RaTaskCardInner({
 
 function liveWorkersKey(ops: LiveOperatorOnRa[]): string {
   if (ops.length === 0) return "";
-  return ops.map((o) => `${o.userKey}:${o.module}:${o.avatarUrl ?? ""}`).join("|");
+  return ops
+    .map(
+      (o) =>
+        `${o.userKey}:${o.module}:${o.avatarUrl ?? ""}:${o.activePallet ?? ""}`,
+    )
+    .join("|");
 }
 
 export const RaTaskCard = memo(RaTaskCardInner, (prev, next) => {

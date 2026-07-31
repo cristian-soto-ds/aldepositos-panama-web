@@ -17,6 +17,7 @@ import {
   mergeSlimTasksPreservingDetail,
   tasksListFingerprint,
   toListTask,
+  isIntentionalEmptyMeasureClear,
 } from "@/lib/taskListSlim";
 import type { Task } from "@/lib/types/task";
 
@@ -140,10 +141,14 @@ export function useSupabaseTasks({ enabled, userKey }: UseSupabaseTasksOptions) 
           !measureDataLooksEmpty(existing.measureData) &&
           measureDataLooksEmpty(incoming.measureData)
         ) {
-          nextChange = {
-            ...change,
-            task: { ...toListTask(incoming), measureData: existing.measureData },
-          };
+          if (isIntentionalEmptyMeasureClear(incoming)) {
+            nextChange = { ...change, task: incoming };
+          } else {
+            nextChange = {
+              ...change,
+              task: { ...toListTask(incoming), measureData: existing.measureData },
+            };
+          }
         } else if (keepFull || !measureDataLooksEmpty(incoming.measureData)) {
           // Módulo que necesita filas, o el UPDATE ya trae measureData.
           nextChange = { ...change, task: incoming };

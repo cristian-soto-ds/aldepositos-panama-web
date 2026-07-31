@@ -13,7 +13,7 @@ import {
 } from "@/lib/supabase";
 import { saveRaInventorySnapshotAfterPersist } from "@/lib/raInventorySnapshots";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
-import { measureDataLooksEmpty, toListTask } from "@/lib/taskListSlim";
+import { measureDataLooksEmpty, toListTask, isIntentionalEmptyMeasureClear } from "@/lib/taskListSlim";
 import type { Task } from "@/lib/types/task";
 import { ControlPanelLayout } from "@/components/layout/ControlPanelLayout";
 import { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
@@ -416,11 +416,15 @@ export default function PanelPage() {
 
   const handleUpdateTask = useCallback(async (
     updatedTask: Task,
-    options?: { skipRemote?: boolean },
+    options?: { skipRemote?: boolean; allowEmptyMeasureData?: boolean },
   ) => {
-    // Protección: no escribir payload slim (measureData []) sobre un RA con captura.
+    // Protección: no escribir payload slim (measureData []) sobre un RA con captura,
+    // salvo vaciado intencional (sin refs) o allowEmptyMeasureData.
     let toSave = updatedTask;
-    if (measureDataLooksEmpty(updatedTask.measureData)) {
+    const allowEmpty =
+      options?.allowEmptyMeasureData === true ||
+      isIntentionalEmptyMeasureClear(updatedTask);
+    if (measureDataLooksEmpty(updatedTask.measureData) && !allowEmpty) {
       try {
         const full = await fetchTaskById(updatedTask.id);
         if (full && !measureDataLooksEmpty(full.measureData)) {
@@ -438,6 +442,7 @@ export default function PanelPage() {
       prev.map((t) => {
         if (t.id !== toSave.id) return t;
         if (
+          !allowEmpty &&
           measureDataLooksEmpty(toSave.measureData) &&
           !measureDataLooksEmpty(t.measureData)
         ) {

@@ -123,6 +123,7 @@ import {
   type InventoryCatalogModule,
 } from "@/lib/referenceCatalog";
 import { formatRaFieldLabel, raClientGroupLabel } from "@/lib/collectionOrderToTask";
+import type { AppRole } from "@/lib/userRole";
 
 type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
@@ -139,6 +140,8 @@ type QuickInventoryEntryProps = {
   presenceUserLabel?: string | null;
   /** URL pública del avatar (visible para otros en presencia). */
   presenceAvatarUrl?: string | null;
+  /** Rol de panel: inventariador oculta gestión de órdenes / pestaña Completados. */
+  userRole?: AppRole;
 };
 
 type MeasureRow = {
@@ -683,9 +686,11 @@ export function QuickInventoryEntry({
   presenceUserKey = null,
   presenceUserLabel = null,
   presenceAvatarUrl = null,
+  userRole = "admin",
 }: QuickInventoryEntryProps) {
+  const isInventariador = userRole === "inventariador";
   const [viewMode, setViewMode] = useState<
-    "pending" | "completed" | "priority"
+    "pending" | "completed" | "priority" | "rectification"
   >("pending");
   const [listVisibleCount, setListVisibleCount] = useState(RA_LIST_PAGE_SIZE);
   const sharedNowMs = useSharedNow(30_000);
@@ -706,11 +711,20 @@ export function QuickInventoryEntry({
     presenceUserLabel,
   );
 
+  useEffect(() => {
+    if (isInventariador && viewMode === "completed") {
+      setViewMode("pending");
+    }
+  }, [isInventariador, viewMode]);
+
   const moduleTasks = useMemo(() => {
     const filtered = tasks.filter((t) => {
       if (!isQuickInventoryTask(t)) return false;
       if (viewMode === "completed") {
         return t.status === "completed";
+      }
+      if (viewMode === "rectification") {
+        return t.status === "rectification";
       }
       if (viewMode === "priority") {
         return (
@@ -955,6 +969,7 @@ export function QuickInventoryEntry({
       const expected = selectedTask?.expectedBultos ?? 0;
       const requiredOk = hasCapture && hasQuickRequiredData(rows);
       // Correcciones: un RA ya completado no pierde ese estado al ajustar bultos.
+      // Rectificación: vuelve a completed solo cuando cumple requisitos + bultos.
       const isCompleted =
         selectedTask?.status === "completed"
           ? requiredOk
@@ -1091,10 +1106,15 @@ export function QuickInventoryEntry({
     let pending = 0;
     let priority = 0;
     let completed = 0;
+    let rectification = 0;
     for (const t of tasks) {
       if (!isQuickInventoryTask(t)) continue;
       if (t.status === "completed") {
         completed += 1;
+        continue;
+      }
+      if (t.status === "rectification") {
+        rectification += 1;
         continue;
       }
       if (
@@ -1110,7 +1130,7 @@ export function QuickInventoryEntry({
         pending += 1;
       }
     }
-    return { pending, priority, completed };
+    return { pending, priority, completed, rectification };
   }, [tasks]);
 
   const providerOptions = useMemo(() => {
@@ -1217,7 +1237,7 @@ export function QuickInventoryEntry({
 
   const onEditRaCard = useCallback(
     (task: Task) => {
-      if (viewMode === "completed") {
+      if (viewMode === "completed" || viewMode === "rectification") {
         selectTaskRef.current(task);
       } else {
         openEditModal(task);
@@ -1243,6 +1263,28 @@ export function QuickInventoryEntry({
         );
       } catch (e) {
         console.error("No se pudo cambiar prioridad contenedor:", e);
+      }
+    },
+    [onUpdateTask],
+  );
+
+  const onSendToRectification = useCallback(
+    async (task: Task) => {
+      try {
+        const full = await fetchTaskById(task.id);
+        const base = full ?? task;
+        await Promise.resolve(
+          (onUpdateTask as (t: Task) => unknown)({
+            ...base,
+            status: "rectification",
+            inventoryPausedAt: undefined,
+            updatedAt: new Date().toISOString(),
+          }),
+        );
+      } catch (e) {
+        console.error("No se pudo enviar a rectificación:", e);
+        // eslint-disable-next-line no-alert
+        alert("No se pudo enviar el RA a rectificación. Intentá de nuevo.");
       }
     },
     [onUpdateTask],
@@ -1503,9 +1545,13 @@ export function QuickInventoryEntry({
       selectedTask.status === "completed"
         ? requiredOk
         : requiredOk && totalsBultos >= selectedTask.expectedBultos;
-    // Inventariador con trabajo abierto (no pausado): pedir pausa al volver.
-    // Correcciones de completados: salir sin pedir pausa.
-    if (selectedTask.status !== "completed" && hasCapture && !isCompleted) {
+    // Correcciones de completados / rectificación: salir sin pedir pausa.
+    if (
+      selectedTask.status !== "completed" &&
+      selectedTask.status !== "rectification" &&
+      hasCapture &&
+      !isCompleted
+    ) {
       setLeavePromptOpen(true);
       return;
     }
@@ -2827,18 +2873,24 @@ export function QuickInventoryEntry({
                   Inventarios
                 </h2>
               </div>
-              <button
-                type="button"
-                onClick={openManualModal}
-                className="flex w-auto cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#16263F] px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-md transition hover:bg-[#0f172a] active:scale-95 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-xs md:px-5 md:py-3 md:text-sm"
-              >
-                <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                <span className="sm:hidden">Nueva</span>
-                <span className="hidden sm:inline">Nueva orden manual</span>
-              </button>
+              {!isInventariador ? (
+                <button
+                  type="button"
+                  onClick={openManualModal}
+                  className="flex w-auto cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[#16263F] px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-md transition hover:bg-[#0f172a] active:scale-95 sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-xs md:px-5 md:py-3 md:text-sm"
+                >
+                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="sm:hidden">Nueva</span>
+                  <span className="hidden sm:inline">Nueva orden manual</span>
+                </button>
+              ) : null}
             </div>
 
-            <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:gap-1 sm:rounded-xl sm:p-1">
+            <div
+              className={`grid gap-0.5 rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:gap-1 sm:rounded-xl sm:p-1 ${
+                isInventariador ? "grid-cols-3" : "grid-cols-4"
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -2897,28 +2949,63 @@ export function QuickInventoryEntry({
                   </span>
                 ) : null}
               </button>
+              {!isInventariador ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode("completed");
+                    clearListFilters();
+                  }}
+                  className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
+                    viewMode === "completed"
+                      ? "bg-white text-emerald-600 shadow-sm dark:bg-slate-900"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+                >
+                  Completados
+                  {inventoryTabCounts.completed > 0 ? (
+                    <span
+                      className={`rounded-full px-1 py-px text-[9px] font-bold tabular-nums sm:px-1.5 sm:text-[10px] ${
+                        viewMode === "completed"
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                          : "bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                      }`}
+                    >
+                      {inventoryTabCounts.completed}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
-                  setViewMode("completed");
+                  setViewMode("rectification");
                   clearListFilters();
                 }}
                 className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
-                  viewMode === "completed"
-                    ? "bg-white text-emerald-600 shadow-sm dark:bg-slate-900"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  viewMode === "rectification"
+                    ? "bg-amber-500 text-white shadow-sm"
+                    : inventoryTabCounts.rectification > 0
+                      ? "bg-amber-50 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900/50"
+                      : "text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/30"
                 }`}
+                title={
+                  inventoryTabCounts.rectification > 0
+                    ? `${inventoryTabCounts.rectification} inventario(s) en rectificación`
+                    : "Rectificación"
+                }
               >
-                Completados
-                {inventoryTabCounts.completed > 0 ? (
+                <span className="sm:hidden">Rectif.</span>
+                <span className="hidden sm:inline">Rectificación</span>
+                {inventoryTabCounts.rectification > 0 ? (
                   <span
-                    className={`rounded-full px-1 py-px text-[9px] font-bold tabular-nums sm:px-1.5 sm:text-[10px] ${
-                      viewMode === "completed"
-                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                        : "bg-slate-200/80 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                    className={`rounded-full px-1 py-px text-[9px] font-black tabular-nums sm:px-1.5 sm:text-[10px] ${
+                      viewMode === "rectification"
+                        ? "bg-white text-amber-700"
+                        : "bg-amber-500 text-white"
                     }`}
                   >
-                    {inventoryTabCounts.completed}
+                    {inventoryTabCounts.rectification}
                   </span>
                 ) : null}
               </button>
@@ -3003,6 +3090,8 @@ export function QuickInventoryEntry({
                     ? "Ningún RA coincide con la búsqueda o los filtros."
                     : viewMode === "completed"
                       ? "No hay órdenes completadas."
+                      : viewMode === "rectification"
+                        ? "No hay órdenes en rectificación."
                       : viewMode === "priority"
                         ? "No hay órdenes marcadas como prioridad para contenedor."
                         : "No hay órdenes pendientes regulares."}
@@ -3019,7 +3108,15 @@ export function QuickInventoryEntry({
                         onSelect={onSelectRaCard}
                         onEdit={onEditRaCard}
                         onDelete={onDeleteTask}
-                        onToggleContainerPriority={onToggleContainerPriority}
+                        onToggleContainerPriority={
+                          isInventariador ? undefined : onToggleContainerPriority
+                        }
+                        showManageActions={!isInventariador}
+                        onSendToRectification={
+                          !isInventariador && viewMode === "completed"
+                            ? onSendToRectification
+                            : undefined
+                        }
                       />
                     </div>
                   ))}

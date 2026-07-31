@@ -667,6 +667,7 @@ export default function PanelPage() {
             presenceUserKey={userEmail}
             presenceUserLabel={userDisplayName}
             presenceAvatarUrl={presenceBroadcastAvatarUrl}
+            userRole={userRole}
           />
         )}
 

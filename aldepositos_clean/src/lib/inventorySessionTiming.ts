@@ -162,6 +162,7 @@ export function resolveInventoryWorkStatus(opts: {
   } = opts;
 
   if (isCompleted) return "completed";
+  if (task.status === "rectification") return "rectification";
   if (!hasCapture) return "pending";
   if (task.status === "paused" && !forceResume) return "paused";
   return workStatusWhenActive;

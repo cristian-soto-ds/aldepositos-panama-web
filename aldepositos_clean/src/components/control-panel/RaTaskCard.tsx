@@ -6,6 +6,7 @@ import {
   Clock,
   Container,
   Edit,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import { InventoryLiveOperators } from "@/components/control-panel/InventoryLiveOperators";
@@ -23,7 +24,7 @@ import type { Task } from "@/lib/types/task";
 
 export type RaTaskCardProps = {
   task: Task;
-  viewMode: "pending" | "completed" | "priority";
+  viewMode: "pending" | "completed" | "priority" | "rectification";
   liveWorkers: LiveOperatorOnRa[];
   /** Epoch ms del reloj compartido (fuerza refresh de "hace X"). */
   nowMs: number;
@@ -32,6 +33,10 @@ export type RaTaskCardProps = {
   onDelete: (taskId: string) => void;
   /** Marca / quita prioridad contenedor (`containerDraft`). */
   onToggleContainerPriority?: (task: Task) => void;
+  /** false: oculta editar / eliminar (p. ej. rol inventariador). Default true. */
+  showManageActions?: boolean;
+  /** Admin: envía un RA completado a la pestaña Rectificación. */
+  onSendToRectification?: (task: Task) => void;
 };
 
 function LastUpdatedLabel({
@@ -63,6 +68,8 @@ function RaTaskCardInner({
   onEdit,
   onDelete,
   onToggleContainerPriority,
+  showManageActions = true,
+  onSendToRectification,
 }: RaTaskCardProps) {
   const liveOp = resolveLiveInventoryOperator(liveWorkers);
   const activeInventariador = resolveActiveInventoryOperatorLabel(t, liveWorkers);
@@ -80,7 +87,11 @@ function RaTaskCardInner({
   const isContainerPriority =
     t.containerDraft === true || t.dispatched === true;
   const showPriorityToggle =
-    viewMode !== "completed" && typeof onToggleContainerPriority === "function";
+    viewMode !== "completed" &&
+    viewMode !== "rectification" &&
+    typeof onToggleContainerPriority === "function";
+  const showSendToRectification =
+    viewMode === "completed" && typeof onSendToRectification === "function";
 
   const handleTogglePriority = useCallback(
     (e: React.MouseEvent) => {
@@ -89,6 +100,17 @@ function RaTaskCardInner({
     },
     [onToggleContainerPriority, t],
   );
+
+  const handleSendToRectification = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onSendToRectification?.(t);
+    },
+    [onSendToRectification, t],
+  );
+
+  const isRectification =
+    viewMode === "rectification" || t.status === "rectification";
 
   return (
     <div
@@ -102,7 +124,9 @@ function RaTaskCardInner({
         }
       }}
       className={`group flex cursor-pointer flex-col gap-1.5 rounded-xl border px-3 py-2.5 shadow-sm transition-all hover:shadow-md sm:gap-2 sm:rounded-xl sm:p-4 ${
-        isContainerPriority || viewMode === "priority"
+        isRectification
+          ? "border-amber-300 bg-amber-50 ring-1 ring-amber-200/80 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/25 dark:ring-amber-900/40 dark:hover:border-amber-700"
+          : isContainerPriority || viewMode === "priority"
           ? "border-red-300 bg-red-50 ring-1 ring-red-200/80 hover:border-red-400 dark:border-red-800 dark:bg-red-950/25 dark:ring-red-900/40 dark:hover:border-red-700"
           : "border-slate-200 bg-white hover:border-blue-200 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-blue-800"
       }`}
@@ -111,7 +135,9 @@ function RaTaskCardInner({
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:gap-2">
           <h3
             className={`shrink-0 text-sm font-black tabular-nums leading-none sm:text-xl ${
-              isContainerPriority || viewMode === "priority"
+              isRectification
+                ? "text-amber-800 dark:text-amber-300"
+                : isContainerPriority || viewMode === "priority"
                 ? "text-red-700 dark:text-red-300"
                 : "text-[#16263F] dark:text-slate-100"
             }`}
@@ -199,27 +225,41 @@ function RaTaskCardInner({
                 <Container className="h-3.5 w-3.5" />
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(t);
-              }}
-              title={viewMode === "completed" ? "Editar medidas" : "Editar orden"}
-              className="flex items-center justify-center rounded-md p-1 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
-            >
-              <Edit className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(t.id);
-              }}
-              className="flex items-center justify-center rounded-md p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            {showSendToRectification ? (
+              <button
+                type="button"
+                onClick={handleSendToRectification}
+                title="Enviar a rectificación"
+                className="flex items-center justify-center rounded-md p-1 text-amber-600 transition-colors hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-950/50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            {showManageActions ? (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(t);
+                  }}
+                  title={viewMode === "completed" ? "Editar medidas" : "Editar orden"}
+                  className="flex items-center justify-center rounded-md p-1 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDelete(t.id);
+                  }}
+                  className="flex items-center justify-center rounded-md p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>
@@ -283,27 +323,41 @@ function RaTaskCardInner({
               <Container className="h-4 w-4" />
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(t);
-            }}
-            title={viewMode === "completed" ? "Editar medidas" : "Editar orden"}
-            className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
-          >
-            <Edit className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(t.id);
-            }}
-            className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {showSendToRectification ? (
+            <button
+              type="button"
+              onClick={handleSendToRectification}
+              title="Enviar a rectificación"
+              className="flex items-center justify-center rounded-lg p-1.5 text-amber-600 transition-colors hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-950/50"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </button>
+          ) : null}
+          {showManageActions ? (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(t);
+                }}
+                title={viewMode === "completed" ? "Editar medidas" : "Editar orden"}
+                className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/45"
+              >
+                <Edit className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(t.id);
+                }}
+                className="flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          ) : null}
           <span className="flex items-center justify-center rounded-lg bg-slate-50 p-1.5 text-slate-400 group-hover:text-blue-500 dark:bg-slate-800/60">
             <ArrowRight className="h-4 w-4" />
           </span>
@@ -327,6 +381,8 @@ export const RaTaskCard = memo(RaTaskCardInner, (prev, next) => {
     prev.onEdit === next.onEdit &&
     prev.onDelete === next.onDelete &&
     prev.onToggleContainerPriority === next.onToggleContainerPriority &&
+    prev.showManageActions === next.showManageActions &&
+    prev.onSendToRectification === next.onSendToRectification &&
     liveWorkersKey(prev.liveWorkers) === liveWorkersKey(next.liveWorkers)
   );
 });

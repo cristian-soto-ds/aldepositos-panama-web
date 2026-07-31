@@ -27,6 +27,7 @@ export type Task = {
   rowCount?: number;
   /** Filas completas (refs + bultos + LWH cuando aplica). */
   completeRowCount?: number;
+  /** pending | in_progress | paused | completed | rectification | … */
   status: string;
   measureData: unknown[];
   weightMode: string;

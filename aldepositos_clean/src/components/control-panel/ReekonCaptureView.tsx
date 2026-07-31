@@ -1092,11 +1092,9 @@ export function ReekonCaptureView({
               </div>
 
               <div>
-                {!forceFullscreen || allowKeyboardMeasures ? (
+                {!forceFullscreen && !allowKeyboardMeasures ? (
                   <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    {allowKeyboardMeasures
-                      ? "Medidas con teclado (Largo → Ancho → Alto)"
-                      : "Medidas con la cinta (Largo → Ancho → Alto)"}
+                    Medidas con la cinta (Largo → Ancho → Alto)
                   </label>
                 ) : null}
                 <div className="reekon-measure-grid">
@@ -1119,16 +1117,10 @@ export function ReekonCaptureView({
                     </div>
                   ))}
                 </div>
-                {!forceFullscreen || allowKeyboardMeasures ? (
+                {!forceFullscreen && !allowKeyboardMeasures ? (
                   <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                    {allowKeyboardMeasures
-                      ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."
-                      : "Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea."}
-                  </p>
-                ) : null}
-                {allowKeyboardMeasures ? (
-                  <p className="mt-1 text-center text-[11px] font-semibold text-violet-600 dark:text-violet-300">
-                    Modo teclado activo — podés escribir L / A / H
+                    Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto
+                    pasa a la siguiente línea.
                   </p>
                 ) : null}
               </div>

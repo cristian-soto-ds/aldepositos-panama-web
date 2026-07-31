@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
-import { InventariadorModePicker, type ModePickerPreviewRow } from "@/components/control-panel/InventariadorModePicker";
+import { InventariadorModePicker, type ModePickerPreviewRow, type InventariadorModeSelectOptions } from "@/components/control-panel/InventariadorModePicker";
 import { useAllowKeyboardMeasures } from "@/hooks/useAllowKeyboardMeasures";
 import { useSharedNow } from "@/hooks/useSharedNow";
 
@@ -400,6 +400,18 @@ function quickRowsHaveAnyCapture(rows: MeasureRow[]): boolean {
       reempaqueRefsCount > 0 ||
       referenciaContenedora.length > 0
     );
+  });
+}
+
+/** Medidas reales del inventariador (no basta con refs/bultos del OR). */
+function quickRowsHaveMeasureCapture(rows: MeasureRow[]): boolean {
+  return rows.some((row) => {
+    const l = parseFloat(String(row.l ?? 0)) || 0;
+    const w = parseFloat(String(row.w ?? 0)) || 0;
+    const h = parseFloat(String(row.h ?? 0)) || 0;
+    const weight = parseFloat(String(row.weight ?? 0)) || 0;
+    const palletWeight = parseFloat(String(row.palletWeight ?? 0)) || 0;
+    return l > 0 || w > 0 || h > 0 || weight > 0 || palletWeight > 0;
   });
 }
 
@@ -1500,11 +1512,17 @@ export function QuickInventoryEntry({
       refModeToUse = "with";
     }
     let inventariadorModeChosen = false;
-    // Si ya hay captura en servidor con modo guardado, no pedir modo otra vez
-    // (p. ej. borrador local borrado / otro dispositivo).
+    // Solo si un inventariador YA eligió modo (flag en RA), o hay medidas reales.
+    // Las refs del OR + referenceMode "with" NO cuentan: deben ver el selector.
     if (
+      task.referenceModeChosen === true &&
+      isReferenceCaptureMode(task.referenceMode)
+    ) {
+      inventariadorModeChosen = true;
+      refModeToUse = task.referenceMode;
+    } else if (
       isInventariador &&
-      serverHasCapture &&
+      quickRowsHaveMeasureCapture(taskRows) &&
       isReferenceCaptureMode(task.referenceMode)
     ) {
       inventariadorModeChosen = true;
@@ -1524,7 +1542,16 @@ export function QuickInventoryEntry({
       if (rawDraft) {
         try {
           const parsed = JSON.parse(rawDraft) as QuickDraft;
-          inventariadorModeChosen = parsed.modeChosen === true;
+          // modeChosen local solo cuenta si el RA ya tiene el flag o hay medidas
+          // (evita borradores viejos que marcaban modeChosen sin elegir).
+          if (
+            parsed.modeChosen === true &&
+            (task.referenceModeChosen === true ||
+              (Array.isArray(parsed.rows) &&
+                quickRowsHaveMeasureCapture(parsed.rows)))
+          ) {
+            inventariadorModeChosen = true;
+          }
           if (
             inventariadorModeChosen &&
             isReferenceCaptureMode(parsed.referenceMode)
@@ -1925,53 +1952,107 @@ export function QuickInventoryEntry({
     }
   };
 
-  const confirmInventariadorMode = (mode: ReferenceCaptureMode) => {
+  const confirmInventariadorMode = (
+    mode: ReferenceCaptureMode,
+    options?: InventariadorModeSelectOptions,
+  ) => {
     inventariadorModeChosenRef.current = true;
-    // Asegura snapshot de refs del OR antes de pasar a Sin refs / Paletizado.
-    if (
-      mode !== "with" &&
-      referenceModeRef.current === "with" &&
-      !withModeRowsSnapshotRef.current
-    ) {
+
+    // Snapshot de lo que dejó el admin (refs + bultos) antes de borrar en Sin/Paletizado.
+    const adminRows = stripQuickRowsForPersist(
+      latestRowsRef.current.length > 0
+        ? latestRowsRef.current
+        : withModeRowsSnapshotRef.current ?? [],
+    );
+    if (!withModeRowsSnapshotRef.current && adminRows.length > 0) {
       withModeRowsSnapshotRef.current = buildWithModeSnapshot(
-        latestRowsRef.current,
+        adminRows,
         sourceReferencesRef.current,
       );
     }
-    if (mode !== referenceModeRef.current) {
-      switchReferenceMode(mode);
-    } else if (selectedTask) {
-      persistQuickDraft(
-        selectedTask.id,
-        latestRowsRef.current,
-        mode,
-        captureLayoutRef.current,
-        { force: true },
+    sourceReferencesRef.current = captureSourceReferencesFromRows(
+      withModeRowsSnapshotRef.current ?? adminRows,
+      sourceReferencesRef.current,
+    );
+
+    let nextRows: MeasureRow[] = [];
+
+    if (mode === "with") {
+      // Conserva referencias y bultos tal como el admin los dejó.
+      const snapshot = withModeRowsSnapshotRef.current;
+      nextRows =
+        snapshot && snapshot.length > 0
+          ? (JSON.parse(JSON.stringify(snapshot)) as MeasureRow[])
+          : (JSON.parse(JSON.stringify(adminRows)) as MeasureRow[]);
+      nextRows = restoreSourceReferences(
+        stripPalletFields(nextRows),
+        sourceReferencesRef.current,
       );
+      nextRows = stripQuickRowsForPersist(nextRows);
+      if (!withModeRowsSnapshotRef.current && nextRows.length > 0) {
+        withModeRowsSnapshotRef.current = buildWithModeSnapshot(
+          nextRows,
+          sourceReferencesRef.current,
+        );
+      }
+    } else if (mode === "without") {
+      // Vacío: el inventariador carga bulto por bulto.
+      nextRows = [];
     } else {
-      /* no-op */
+      // Paletizado: crea N paletas (1 fila vacía cada una). Luego puede agregar/quitar.
+      const raw = options?.palletCount ?? 1;
+      const count = Math.max(1, Math.min(200, Math.floor(Number(raw) || 1)));
+      const seeded: MeasureRow[] = [];
+      for (let i = 1; i <= count; i++) {
+        const id = generateId();
+        pendingLocalCreationIdsRef.current.add(id);
+        seeded.push({
+          id,
+          referencia: String(i),
+          bultos: "1",
+          l: "",
+          w: "",
+          h: "",
+          weight: "",
+          reempaque: false,
+          bultoContenedor: "",
+          referenciasContenedor: "",
+          reempaqueRefs: [],
+          referenciaContenedora: "",
+          pallet: i,
+        });
+      }
+      nextRows = stripQuickRowsForPersist(seeded);
     }
-    // Re-persiste con modeChosen=true (switchReferenceMode también escribe draft).
-    if (selectedTask || latestTaskRef.current) {
-      const taskId = (selectedTask ?? latestTaskRef.current)!.id;
-      persistQuickDraft(
-        taskId,
-        latestRowsRef.current,
-        mode,
-        captureLayoutRef.current,
-        { force: true },
-      );
-    }
+
     referenceModeRef.current = mode;
     setReferenceMode(mode);
+    setMeasureRows(nextRows);
+    latestRowsRef.current = nextRows;
+    setExpandedRowId(
+      nextRows.find((r) => !isQuickRowComplete(r))?.id ?? nextRows[0]?.id ?? null,
+    );
+
+    const taskId = (selectedTask ?? latestTaskRef.current)?.id;
+    if (taskId) {
+      persistQuickDraft(taskId, nextRows, mode, captureLayoutRef.current, {
+        force: true,
+      });
+    }
+
     setSelectedTask((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, referenceMode: mode };
+      const next = {
+        ...prev,
+        referenceMode: mode,
+        referenceModeChosen: true,
+      };
       latestTaskRef.current = next;
+      // Sync inmediato a BD: la vista Tabla (admin) ve el mismo modo y filas.
       void Promise.resolve(
         (onUpdateTask as (t: Task) => unknown)({
           ...next,
-          measureData: latestRowsRef.current,
+          measureData: nextRows,
         }),
       ).catch((e) => console.warn("[confirmInventariadorMode]", e));
       return next;

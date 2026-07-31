@@ -35,6 +35,11 @@ export type Task = {
   type?: "quick" | "detailed" | "airway";
   /** Modo de captura del ingreso rápido: con refs, sin refs o paletizado. */
   referenceMode?: ReferenceCaptureMode;
+  /**
+   * true cuando un inventariador ya eligió cómo inventariar este RA.
+   * Sin esto, `referenceMode: "with"` del OR no debe saltar el selector.
+   */
+  referenceModeChosen?: boolean;
   dispatched?: boolean;
   containerDraft?: boolean;
   dispatchInfo?: {

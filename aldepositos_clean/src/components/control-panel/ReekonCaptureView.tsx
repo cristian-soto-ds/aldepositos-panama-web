@@ -67,7 +67,7 @@ type ReekonCaptureViewProps = {
   expectedCbm?: number;
   completedCount: number;
   onBack: () => void;
-  onSwitchToTable: () => void;
+  onSwitchToTable?: () => void;
   onSave: () => void;
   onPause?: () => void;
   onResume?: () => void;
@@ -77,6 +77,8 @@ type ReekonCaptureViewProps = {
   isSaving: boolean;
   /** Si true: L/A/H editables con teclado (sin cinta). */
   allowKeyboardMeasures?: boolean;
+  /** Inventariador: siempre pantalla completa al abrir el RA. */
+  forceFullscreen?: boolean;
 };
 
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
@@ -345,6 +347,7 @@ export function ReekonCaptureView({
   autosaveState,
   isSaving,
   allowKeyboardMeasures = false,
+  forceFullscreen = false,
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
@@ -485,14 +488,15 @@ export function ReekonCaptureView({
     }
   }, [enterFullscreen]);
 
-  // Pantalla completa automática en móvil al abrir el RA (y al cambiar de RA).
-  // Si el navegador exige gesto, entra con el primer toque dentro de la vista.
+  // Pantalla completa automática: siempre si forceFullscreen (inventariador),
+  // o en móvil al abrir el RA. Si el navegador exige gesto, entra con el primer toque.
   useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (typeof window === "undefined") return;
     const isMobile =
+      !!window.matchMedia &&
       window.matchMedia("(max-width: 900px)").matches &&
       window.matchMedia("(pointer: coarse)").matches;
-    if (!isMobile) return;
+    if (!forceFullscreen && !isMobile) return;
 
     void enterFullscreen();
 
@@ -501,7 +505,7 @@ export function ReekonCaptureView({
     };
     document.addEventListener("pointerdown", onFirstGesture, { once: true });
     return () => document.removeEventListener("pointerdown", onFirstGesture);
-  }, [raLabel, enterFullscreen]);
+  }, [raLabel, enterFullscreen, forceFullscreen]);
 
   useEffect(() => {
     if (!activeRowId && measureRows.length > 0) {
@@ -717,14 +721,16 @@ export function ReekonCaptureView({
           >
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
-          <button
-            type="button"
-            onClick={onSwitchToTable}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
-            aria-label="Vista tabla"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </button>
+          {onSwitchToTable ? (
+            <button
+              type="button"
+              onClick={onSwitchToTable}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 active:bg-slate-100 dark:active:bg-slate-800"
+              aria-label="Vista tabla"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
         <div className="mx-auto mt-2 h-1 w-full max-w-md overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
           <div
@@ -1067,11 +1073,13 @@ export function ReekonCaptureView({
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  {allowKeyboardMeasures
-                    ? "Medidas con teclado (Largo → Ancho → Alto)"
-                    : "Medidas con la cinta (Largo → Ancho → Alto)"}
-                </label>
+                {!forceFullscreen ? (
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    {allowKeyboardMeasures
+                      ? "Medidas con teclado (Largo → Ancho → Alto)"
+                      : "Medidas con la cinta (Largo → Ancho → Alto)"}
+                  </label>
+                ) : null}
                 <div className="reekon-measure-grid">
                   {DIM_ORDER.map((dim) => (
                     <div key={dim} className="reekon-measure-cell">
@@ -1092,11 +1100,13 @@ export function ReekonCaptureView({
                     </div>
                   ))}
                 </div>
-                <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                  {allowKeyboardMeasures
-                    ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."
-                    : "Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea."}
-                </p>
+                {!forceFullscreen ? (
+                  <p className="mt-1.5 text-center text-[11px] text-slate-400">
+                    {allowKeyboardMeasures
+                      ? "Teclea cada medida y pulsa Enter para pasar al siguiente lado. Tras el Alto pasa a la siguiente línea."
+                      : "Cada clic de la cinta escribe la medida y salta al siguiente lado. Tras el Alto pasa a la siguiente línea."}
+                  </p>
+                ) : null}
                 {allowKeyboardMeasures ? (
                   <p className="mt-1 text-center text-[11px] font-semibold text-violet-600 dark:text-violet-300">
                     Modo teclado activo — podés escribir L / A / H

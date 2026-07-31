@@ -292,6 +292,15 @@ const QUICK_DELETE_FLUSH_MS = 280;
 /** Throttle de borrador local (menos JSON.stringify / deep-clone que el autosave). */
 const QUICK_DRAFT_PERSIST_MS = 2000;
 const QUICK_PRESENCE_HEARTBEAT_MS = 45_000;
+
+type CompletedSort =
+  | "recent"
+  | "oldest"
+  | "bultos_desc"
+  | "bultos_asc"
+  | "ra_asc"
+  | "ra_desc";
+
 // Reintentos con backoff cuando el guardado en el servidor falla (red caída, etc.).
 const AUTOSAVE_RETRY_BACKOFF_MS = [1000, 2000, 5000, 10000];
 const QUICK_WEIGHT_MODE: WeightMode = "per_bundle";
@@ -757,6 +766,9 @@ export function QuickInventoryEntry({
   >("client");
   const [listFilterValue, setListFilterValue] = useState<string>("Todos");
   const [searchQuery, setSearchQuery] = useState("");
+  /** Orden de la lista en Completados (compacto). */
+  const [completedSort, setCompletedSort] =
+    useState<CompletedSort>("recent");
   const [measureRows, setMeasureRows] = useState<MeasureRow[]>([]);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>("idle");
   const [autosaveTick, setAutosaveTick] = useState(0);
@@ -1200,6 +1212,36 @@ export function QuickInventoryEntry({
       });
     }
 
+    if (viewMode === "completed") {
+      const raCmp = (a: Task, b: Task) =>
+        String(a.ra ?? "").localeCompare(String(b.ra ?? ""), undefined, {
+          numeric: true,
+        });
+      const timeMs = (t: Task) => {
+        const raw = t.updatedAt || t.inventoryCompletedBy?.at || "";
+        const ms = Date.parse(raw);
+        return Number.isFinite(ms) ? ms : 0;
+      };
+      const bultos = (t: Task) => Number(t.currentBultos) || 0;
+      list = [...list].sort((a, b) => {
+        switch (completedSort) {
+          case "oldest":
+            return timeMs(a) - timeMs(b) || raCmp(a, b);
+          case "bultos_desc":
+            return bultos(b) - bultos(a) || raCmp(a, b);
+          case "bultos_asc":
+            return bultos(a) - bultos(b) || raCmp(a, b);
+          case "ra_asc":
+            return raCmp(a, b);
+          case "ra_desc":
+            return raCmp(b, a);
+          case "recent":
+          default:
+            return timeMs(b) - timeMs(a) || raCmp(a, b);
+        }
+      });
+    }
+
     return list;
   }, [
     moduleTasks,
@@ -1207,6 +1249,8 @@ export function QuickInventoryEntry({
     listFilterField,
     listFilterValue,
     searchQuery,
+    viewMode,
+    completedSort,
   ]);
 
   const hasActiveListFilters =
@@ -1216,11 +1260,12 @@ export function QuickInventoryEntry({
     setListFilterField("client");
     setListFilterValue("Todos");
     setSearchQuery("");
+    setCompletedSort("recent");
   }, []);
 
   useEffect(() => {
     setListVisibleCount(RA_LIST_PAGE_SIZE);
-  }, [viewMode, listFilterField, listFilterValue, searchQuery]);
+  }, [viewMode, listFilterField, listFilterValue, searchQuery, completedSort]);
 
   const visibleListTasks = useMemo(() => {
     if (displayedTasks.length <= RA_LIST_VIRTUALIZE_THRESHOLD) {
@@ -1395,7 +1440,7 @@ export function QuickInventoryEntry({
         inventoryDraftKey(task.id, taskDraftKind(task)),
       );
       const savedLayout = window.localStorage.getItem(CAPTURE_LAYOUT_STORAGE_KEY);
-      if (isCaptureLayout(savedLayout)) {
+      if (!isInventariador && isCaptureLayout(savedLayout)) {
         layoutToUse = savedLayout;
       }
       if (rawDraft) {
@@ -1404,7 +1449,7 @@ export function QuickInventoryEntry({
           if (isReferenceCaptureMode(parsed.referenceMode)) {
             refModeToUse = parsed.referenceMode;
           }
-          if (isCaptureLayout(parsed.captureLayout)) {
+          if (!isInventariador && isCaptureLayout(parsed.captureLayout)) {
             layoutToUse = parsed.captureLayout;
           }
           if (
@@ -1445,6 +1490,10 @@ export function QuickInventoryEntry({
           // ignore invalid draft
         }
       }
+    }
+
+    if (isInventariador) {
+      layoutToUse = "reekon";
     }
 
     const serverSnapshot = taskHasImportedReferences(serverRows)
@@ -1667,11 +1716,21 @@ export function QuickInventoryEntry({
   };
 
   const setCaptureLayoutWithPersist = (layout: CaptureLayout) => {
+    if (isInventariador) {
+      setCaptureLayout("reekon");
+      return;
+    }
     setCaptureLayout(layout);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(CAPTURE_LAYOUT_STORAGE_KEY, layout);
     }
   };
+
+  useEffect(() => {
+    if (isInventariador && selectedTask && captureLayout !== "reekon") {
+      setCaptureLayout("reekon");
+    }
+  }, [isInventariador, selectedTask, captureLayout]);
 
   const switchReferenceMode = (mode: ReferenceCaptureMode) => {
     if (mode === referenceMode) return;
@@ -3078,6 +3137,33 @@ export function QuickInventoryEntry({
                     </button>
                   ) : null}
                 </div>
+
+                {viewMode === "completed" ? (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <label
+                      className="sr-only"
+                      htmlFor="quick-completed-sort"
+                    >
+                      Ordenar completados
+                    </label>
+                    <select
+                      id="quick-completed-sort"
+                      value={completedSort}
+                      onChange={(e) =>
+                        setCompletedSort(e.target.value as CompletedSort)
+                      }
+                      className="max-w-[9.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-bold text-[#16263F] outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:max-w-none sm:rounded-xl sm:px-3 sm:py-2 sm:text-xs"
+                      title="Ordenar lista"
+                    >
+                      <option value="recent">Más recientes</option>
+                      <option value="oldest">Más antiguos</option>
+                      <option value="bultos_desc">Más bultos</option>
+                      <option value="bultos_asc">Menos bultos</option>
+                      <option value="ra_asc">RA ↑</option>
+                      <option value="ra_desc">RA ↓</option>
+                    </select>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -3243,7 +3329,11 @@ export function QuickInventoryEntry({
           expectedCbm={Number(t.expectedCbm) || 0}
           completedCount={completedRows}
           onBack={requestLeave}
-          onSwitchToTable={() => setCaptureLayoutWithPersist("table")}
+          onSwitchToTable={
+            isInventariador
+              ? undefined
+              : () => setCaptureLayoutWithPersist("table")
+          }
           onSave={saveOrder}
           onPause={canPauseInventory ? () => void pauseAndExit() : undefined}
           onResume={canPauseInventory ? () => void resumePausedInventory() : undefined}
@@ -3255,7 +3345,8 @@ export function QuickInventoryEntry({
           }
           autosaveState={autosaveState}
           isSaving={autosaveState === "saving"}
-          allowKeyboardMeasures={allowKeyboardMeasures}
+          allowKeyboardMeasures={isInventariador ? false : allowKeyboardMeasures}
+          forceFullscreen={isInventariador}
         />
         </div>
         {leavePromptOpen ? (
@@ -3358,10 +3449,12 @@ export function QuickInventoryEntry({
 
           {t && (
             <div className="flex flex-wrap items-center gap-2">
-              <CaptureLayoutToggle
-                layout={captureLayout}
-                onChange={setCaptureLayoutWithPersist}
-              />
+              {!isInventariador ? (
+                <CaptureLayoutToggle
+                  layout={captureLayout}
+                  onChange={setCaptureLayoutWithPersist}
+                />
+              ) : null}
               <span className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-[#16263F] shadow-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:flex-none sm:text-sm">
                 <Box className="icon-sm text-blue-600 dark:text-blue-400" />
                 RA-{t.ra}
@@ -3369,7 +3462,7 @@ export function QuickInventoryEntry({
             </div>
           )}
 
-        {t && (
+        {t && !isInventariador ? (
           <button
             type="button"
             onClick={() => setCaptureLayoutWithPersist("reekon")}
@@ -3378,7 +3471,7 @@ export function QuickInventoryEntry({
             <Smartphone className="icon-sm" />
             Usar vista Reekon — mejor para celular
           </button>
-        )}
+        ) : null}
 
         {correctionBanner}
       </div>

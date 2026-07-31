@@ -11,6 +11,7 @@ import {
   deleteTaskById,
   fetchTaskById,
 } from "@/lib/supabase";
+import { saveRaInventorySnapshotAfterPersist } from "@/lib/raInventorySnapshots";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
 import { measureDataLooksEmpty, toListTask } from "@/lib/taskListSlim";
 import type { Task } from "@/lib/types/task";
@@ -430,6 +431,8 @@ export default function PanelPage() {
       }
     }
 
+    const priorStatus = tasks.find((t) => t.id === toSave.id)?.status;
+
     // Actualización optimista: no se revierte ante un fallo puntual de red.
     setTasks((prev) =>
       prev.map((t) => {
@@ -446,13 +449,19 @@ export default function PanelPage() {
     if (options?.skipRemote) return;
     try {
       await updateTask(toSave);
+      void saveRaInventorySnapshotAfterPersist({
+        priorStatus,
+        task: toSave,
+      }).catch((e) =>
+        console.warn("[ra_inventory_snapshots] post-save:", e),
+      );
     } catch (e) {
       // No recargamos (evita pisar lo capturado con datos viejos del servidor).
       // Propagamos el error para que el autoguardado programe un reintento.
       console.error(e);
       throw e;
     }
-  }, [setTasks]);
+  }, [setTasks, tasks]);
 
   const handleHydrateTask = useCallback(
     (task: Task) => {

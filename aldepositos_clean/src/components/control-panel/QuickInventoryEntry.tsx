@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
+import { InventariadorModePicker } from "@/components/control-panel/InventariadorModePicker";
 import { useAllowKeyboardMeasures } from "@/hooks/useAllowKeyboardMeasures";
 import { useSharedNow } from "@/hooks/useSharedNow";
 
@@ -100,6 +101,7 @@ import {
   inventoryCompletedByLabel,
 } from "@/lib/taskContributors";
 import { fetchTaskById, fetchTaskRow, updateTaskIfMatch } from "@/lib/supabase";
+import { saveRaInventorySnapshotAfterPersist } from "@/lib/raInventorySnapshots";
 import { measureDataLooksEmpty } from "@/lib/taskListSlim";
 import {
   applyInventorySessionOnSave,
@@ -812,6 +814,8 @@ export function QuickInventoryEntry({
   const [csvExportOpen, setCsvExportOpen] = useState(false);
   const [captureLayout, setCaptureLayout] = useState<CaptureLayout>("table");
   const [referenceMode, setReferenceMode] = useState<ReferenceCaptureMode>("with");
+  /** Inventariador: elegir Con/Sin/Paletizado una sola vez al entrar. */
+  const [modePickerPending, setModePickerPending] = useState(false);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [palletModalOpen, setPalletModalOpen] = useState(false);
   const [palletModalValue, setPalletModalValue] = useState("");
@@ -1064,6 +1068,11 @@ export function QuickInventoryEntry({
     };
   }, []);
 
+  const selectedRaForPresence = selectedTask
+    ? String(selectedTask.ra ?? "").trim()
+    : "";
+  const selectedTaskIdForPresence = selectedTask?.id ?? null;
+
   useEffect(() => {
     const key = (presenceUserKey ?? "").trim();
     const tabId = getSharedWorkPresenceTabId();
@@ -1082,7 +1091,7 @@ export function QuickInventoryEntry({
         userKey: key,
         userLabel: label,
         avatarUrl: presenceAvatarUrl?.trim() || null,
-        ra: selectedTask ? String(selectedTask.ra ?? "").trim() : "",
+        ra: selectedRaForPresence,
         module: presenceModule,
       });
     };
@@ -1090,14 +1099,22 @@ export function QuickInventoryEntry({
     const interval = window.setInterval(send, QUICK_PRESENCE_HEARTBEAT_MS);
     return () => {
       window.clearInterval(interval);
-      void clearWorkPresence(tabId);
+      // No untrack aquí al cambiar de RA: eso disparaba rate-limit con el autosave.
     };
   }, [
-    selectedTask,
+    selectedTaskIdForPresence,
+    selectedRaForPresence,
     presenceUserKey,
     presenceUserLabel,
     presenceAvatarUrl,
   ]);
+
+  useEffect(() => {
+    const tabId = getSharedWorkPresenceTabId();
+    return () => {
+      void clearWorkPresence(tabId);
+    };
+  }, []);
 
   const groupedTasks = useMemo(
     () =>
@@ -1429,6 +1446,11 @@ export function QuickInventoryEntry({
       : taskHasImportedReferences(taskRows)
         ? "with"
         : "without";
+    let modeAlreadyLocked =
+      isReferenceCaptureMode(task.referenceMode) ||
+      serverHasCapture ||
+      serverIsPalletized ||
+      taskHasImportedReferences(taskRows);
     if (isReferenceCaptureMode(task.referenceMode)) {
       refModeToUse = task.referenceMode;
     }
@@ -1448,6 +1470,7 @@ export function QuickInventoryEntry({
           const parsed = JSON.parse(rawDraft) as QuickDraft;
           if (isReferenceCaptureMode(parsed.referenceMode)) {
             refModeToUse = parsed.referenceMode;
+            modeAlreadyLocked = true;
           }
           if (!isInventariador && isCaptureLayout(parsed.captureLayout)) {
             layoutToUse = parsed.captureLayout;
@@ -1554,6 +1577,7 @@ export function QuickInventoryEntry({
       captureLayout: layoutToUse,
     });
     setAutosaveState("idle");
+    setModePickerPending(isInventariador && !modeAlreadyLocked);
     })();
   };
   selectTaskRef.current = handleSelectTask;
@@ -1565,6 +1589,7 @@ export function QuickInventoryEntry({
     setLeavePromptOpen(false);
     setSelectedTask(null);
     activeTaskIdRef.current = null;
+    setModePickerPending(false);
     withModeRowsSnapshotRef.current = null;
     sourceReferencesRef.current = {};
     if (autosaveTimerRef.current) {
@@ -1772,6 +1797,31 @@ export function QuickInventoryEntry({
     if (selectedTask) {
       persistQuickDraft(selectedTask.id, nextRows, mode, captureLayout);
     }
+  };
+
+  const confirmInventariadorMode = (mode: ReferenceCaptureMode) => {
+    if (mode !== referenceModeRef.current) {
+      switchReferenceMode(mode);
+    } else if (selectedTask) {
+      persistQuickDraft(
+        selectedTask.id,
+        latestRowsRef.current,
+        mode,
+        captureLayoutRef.current,
+        { force: true },
+      );
+    }
+    referenceModeRef.current = mode;
+    setReferenceMode(mode);
+    setSelectedTask((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, referenceMode: mode };
+      latestTaskRef.current = next;
+      return next;
+    });
+    // Fuerza autosave para persistir referenceMode aunque aún no haya medidas.
+    lastSavedHashRef.current = "";
+    setModePickerPending(false);
   };
 
   const addRow = () => {
@@ -2548,6 +2598,13 @@ export function QuickInventoryEntry({
             ) => unknown
           )(updatedTask, { skipRemote: true }),
         );
+        // CAS ya escribió en BD: copiar historial aquí (skipRemote no lo hace).
+        void saveRaInventorySnapshotAfterPersist({
+          priorStatus: task.status,
+          task: updatedTask,
+        }).catch((e) =>
+          console.warn("[ra_inventory_snapshots] post-cas:", e),
+        );
       }
 
       if (activeTaskIdRef.current === task.id) {
@@ -3189,7 +3246,11 @@ export function QuickInventoryEntry({
                       <RaTaskCard
                         task={t}
                         viewMode={viewMode}
-                        liveWorkers={liveOperatorsForRa(presenceByRa, t.ra)}
+                        liveWorkers={
+                          isInventariador
+                            ? []
+                            : liveOperatorsForRa(presenceByRa, t.ra)
+                        }
                         nowMs={sharedNowMs}
                         onSelect={onSelectRaCard}
                         onEdit={onEditRaCard}
@@ -3253,6 +3314,14 @@ export function QuickInventoryEntry({
     (showWeightColumn ? 1 : 0) +
     1;
   const completedRows = measureRows.filter((row) => isQuickRowComplete(row)).length;
+  const hasCaptureNow = quickRowsHaveAnyCapture(measureRows);
+  const requiredOkNow = hasCaptureNow && hasQuickRequiredData(measureRows);
+  const inventoryComplete = Boolean(
+    t &&
+      (t.status === "completed"
+        ? requiredOkNow
+        : requiredOkNow && totals.bultos >= (t.expectedBultos || 0)),
+  );
 
   const completedByLabel =
     t?.status === "completed" ? inventoryCompletedByLabel(t) : null;
@@ -3268,6 +3337,16 @@ export function QuickInventoryEntry({
         ) : null}
       </div>
     ) : null;
+
+  if (isInventariador && modePickerPending && t) {
+    return (
+      <InventariadorModePicker
+        raLabel={String(t.ra ?? "")}
+        onSelect={confirmInventariadorMode}
+        onBack={requestLeave}
+      />
+    );
+  }
 
   if (captureLayout === "reekon") {
     return (
@@ -3347,6 +3426,11 @@ export function QuickInventoryEntry({
           isSaving={autosaveState === "saving"}
           allowKeyboardMeasures={isInventariador ? false : allowKeyboardMeasures}
           forceFullscreen={isInventariador}
+          lockReferenceMode={isInventariador}
+          canFinalize={isInventariador ? inventoryComplete : true}
+          finalizeLabel={
+            isInventariador ? "Finalizar inventario" : "Guardar"
+          }
         />
         </div>
         {leavePromptOpen ? (

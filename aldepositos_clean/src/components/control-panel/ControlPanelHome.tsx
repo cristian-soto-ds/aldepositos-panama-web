@@ -26,9 +26,6 @@ import {
   panamaDayBounds,
 } from "@/lib/receptionLogistics/receptionReportFilter";
 import {
-  clearWorkPresence,
-  getSharedWorkPresenceTabId,
-  publishWorkPresence,
   subscribeWorkPresence,
   type WorkPresenceEntry,
 } from "@/lib/panelPresence";
@@ -200,45 +197,7 @@ export function ControlPanelHome({
     return subscribeWorkPresence(setPresenceList);
   }, []);
 
-  useEffect(() => {
-    const userKey = String(userEmail ?? "").trim().toLowerCase();
-    if (!userKey) return;
-    const tabId = getSharedWorkPresenceTabId();
-    const label = peerPresenceVisibleName(userDisplayName || userKey, userKey);
-    const pulse = () => {
-      publishWorkPresence({
-        tabId,
-        userKey,
-        userLabel: label,
-        avatarUrl: userAvatarSrc || null,
-        ra: "",
-        module: "none",
-      });
-    };
-    let intervalId: number | undefined;
-    const start = () => {
-      pulse();
-      if (intervalId != null) window.clearInterval(intervalId);
-      intervalId = window.setInterval(pulse, 45_000);
-    };
-    const stop = () => {
-      if (intervalId != null) {
-        window.clearInterval(intervalId);
-        intervalId = undefined;
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") start();
-      else stop();
-    };
-    if (document.visibilityState === "visible") start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      stop();
-      void clearWorkPresence(tabId);
-    };
-  }, [userEmail, userDisplayName, userAvatarSrc]);
+  // Presencia “en panel” la publica panel/page.tsx (evitar track duplicado → rate limit).
 
   useEffect(() => {
     const tick = () => setNow(new Date());

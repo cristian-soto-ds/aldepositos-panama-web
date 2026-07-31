@@ -59,6 +59,34 @@ function mergeLineThreeWay(
 }
 
 /**
+ * Remoto “atrasado” (eco live / post-save): menos filas que local, todos sus ids
+ * ya conocidos, y faltan ids que siguen en local+baseline.
+ * No usar esto para descartar UPDATEs reales de BD; solo para ignorar ecos live.
+ */
+export function isIncompleteCollectionRemote(
+  baselineLines: CollectionOrderLine[],
+  localLines: CollectionOrderLine[],
+  remoteLines: CollectionOrderLine[],
+): boolean {
+  if (remoteLines.length === 0 && localLines.length > 0) return true;
+  if (remoteLines.length >= localLines.length) return false;
+
+  const baseIds = new Set(baselineLines.map((l) => String(l.id)));
+  const localIds = new Set(localLines.map((l) => String(l.id)));
+  const remoteIds = new Set(remoteLines.map((l) => String(l.id)));
+  const known = new Set([...baseIds, ...localIds]);
+
+  for (const id of remoteIds) {
+    if (!known.has(id)) return false;
+  }
+
+  for (const id of baseIds) {
+    if (localIds.has(id) && !remoteIds.has(id)) return true;
+  }
+  return false;
+}
+
+/**
  * Une líneas concurrentes de una orden de recolección (baseline / local / remoto).
  * Conserva altas locales y remotas; respeta borrados; no pierde filas al agregar.
  */

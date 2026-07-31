@@ -79,6 +79,12 @@ type ReekonCaptureViewProps = {
   allowKeyboardMeasures?: boolean;
   /** Inventariador: siempre pantalla completa al abrir el RA. */
   forceFullscreen?: boolean;
+  /** Inventariador: no permite cambiar Con/Sin/Paletizado. */
+  lockReferenceMode?: boolean;
+  /** false: ocultar botón de finalizar/guardar (inventariador incompleto). */
+  canFinalize?: boolean;
+  /** Texto del botón primario (Guardar / Finalizar inventario). */
+  finalizeLabel?: string;
 };
 
 const DIM_ORDER: DimField[] = ["l", "w", "h"];
@@ -348,6 +354,9 @@ export function ReekonCaptureView({
   isSaving,
   allowKeyboardMeasures = false,
   forceFullscreen = false,
+  lockReferenceMode = false,
+  canFinalize = true,
+  finalizeLabel = "Guardar",
 }: ReekonCaptureViewProps) {
   const formRef = useRef<HTMLDivElement>(null);
   const { handleDimensionKeyDown } = useReekonTapeInput();
@@ -740,25 +749,35 @@ export function ReekonCaptureView({
         </div>
       </header>
 
-      {/* Selector de modo (no invasivo) */}
-      <div className="mx-auto flex w-full max-w-md shrink-0 items-center gap-2 px-3 pt-1.5">
-        <div className="inline-flex flex-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800">
-          {REEKON_MODES.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onSwitchReferenceMode(m.id)}
-              className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
-                referenceMode === m.id
-                  ? "bg-[#16263F] text-white shadow-sm"
-                  : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
+      {/* Selector de modo (admin) o chip fijo (inventariador) */}
+      {lockReferenceMode ? (
+        <div className="mx-auto flex w-full max-w-md shrink-0 px-3 pt-1.5">
+          <span className="inline-flex rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300">
+            Modo:{" "}
+            {REEKON_MODES.find((m) => m.id === referenceMode)?.label ??
+              referenceMode}
+          </span>
         </div>
-      </div>
+      ) : (
+        <div className="mx-auto flex w-full max-w-md shrink-0 items-center gap-2 px-3 pt-1.5">
+          <div className="inline-flex flex-1 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800">
+            {REEKON_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onSwitchReferenceMode(m.id)}
+                className={`flex-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                  referenceMode === m.id
+                    ? "bg-[#16263F] text-white shadow-sm"
+                    : "text-slate-600 hover:bg-white dark:text-slate-300 dark:hover:bg-slate-900"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Selector de referencia: búsqueda primero; carrusel opcional */}
       <div className="mx-auto w-full max-w-md shrink-0 space-y-1.5 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
@@ -1249,15 +1268,21 @@ export function ReekonCaptureView({
                 ) : null}
               </>
             )}
-            <button
-              type="button"
-              onClick={openSaveReview}
-              disabled={isSaving || saveReviewDismissLock}
-              className="flex h-14 min-w-0 flex-[1.2] items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-2 text-sm font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60 sm:flex-[1.5] sm:gap-2 sm:text-base"
-            >
-              {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-              Guardar
-            </button>
+            {canFinalize ? (
+              <button
+                type="button"
+                onClick={openSaveReview}
+                disabled={isSaving || saveReviewDismissLock}
+                className="flex h-14 min-w-0 flex-[1.2] items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-2 text-sm font-bold text-white shadow-sm active:scale-[0.98] disabled:opacity-60 sm:flex-[1.5] sm:gap-2 sm:text-base"
+              >
+                {isSaving ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Save className="h-5 w-5" />
+                )}
+                {finalizeLabel}
+              </button>
+            ) : null}
               </>
             )}
           </div>

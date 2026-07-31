@@ -114,7 +114,10 @@ import {
   reconcileCollectionOrder,
   totalsFromCapturedLines,
 } from "@/lib/collectionOrderReconcile";
-import { mergeConcurrentCollectionLines } from "@/lib/collectionOrderLineMerge";
+import {
+  mergeConcurrentCollectionLines,
+  isIncompleteCollectionRemote,
+} from "@/lib/collectionOrderLineMerge";
 import { supabase } from "@/lib/supabase";
 import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
 import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
@@ -588,6 +591,20 @@ export function CollectionOrderModule({
     const isDirty = localHash !== lastSavedOrderHashRef.current;
     const remoteLinesHash = JSON.stringify(remoteLines);
 
+    // Ecos live incompletos (p. ej. tras extraer refs): no pisar el editor.
+    if (
+      fromLive &&
+      isIncompleteCollectionRemote(
+        serverBaselineLinesRef.current,
+        localLines,
+        remoteLines,
+      )
+    ) {
+      lastRemoteOrderHashRef.current = remoteLinesHash;
+      pendingRemoteOrderRef.current = null;
+      return;
+    }
+
     // Siempre fusionar en vivo (sin banner ni clic): merge a 3 vías conserva
     // lo que cada operador está tipando y aplica filas/campos del otro.
     const mergedLines = mergeConcurrentCollectionLines(
@@ -957,7 +974,7 @@ export function CollectionOrderModule({
       const normalizedOrder = normalizeCollectionOrderFields(order);
 
       // Fusionar con lo último conocido en lista (eco atrasado no debe borrar altas).
-      const listRemote = orders.find((o) => o.id === normalizedOrder.id);
+      const listRemote = ordersRef.current.find((o) => o.id === normalizedOrder.id);
       const linesForSave = listRemote
         ? mergeConcurrentCollectionLines(
             serverBaselineLinesRef.current,
@@ -966,7 +983,10 @@ export function CollectionOrderModule({
           )
         : normalizedOrder.lines;
 
-      const maxExisting = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
+      const maxExisting = Math.max(
+        0,
+        ...ordersRef.current.map((o) => parseOrderNumber(o.numero)),
+      );
       const suggested = String(maxExisting + 1);
       const numeroRaw = String(normalizedOrder.numero ?? "").trim();
       const numero = numeroRaw || suggested;
@@ -977,16 +997,17 @@ export function CollectionOrderModule({
         updatedAt: new Date().toISOString(),
       };
       const snapshotHash = JSON.stringify(order);
-      const exists = orders.some((o) => o.id === payload.id);
+      const exists = ordersRef.current.some((o) => o.id === payload.id);
       if (showAlerts) setSaveBusy(true);
       isOrderSavingRef.current = true;
+      let savedOk = false;
       try {
         if (exists) await updateCollectionOrder(payload);
         else await insertCollectionOrder(payload);
+        savedOk = true;
 
-        // Guardado obsoleto: otra escritura más nueva ya arrancó.
+        // Guardado obsoleto: otra escritura más nueva ya arrancó — no pisar lista/UI.
         if (saveGen !== saveGenerationRef.current) {
-          setOrders((prev) => upsertCollectionOrderInList(prev, payload));
           return;
         }
 
@@ -1029,15 +1050,33 @@ export function CollectionOrderModule({
         if (saveGen === saveGenerationRef.current) {
           isOrderSavingRef.current = false;
           const pending = pendingRemoteOrderRef.current;
-          if (pending && editingRef.current) {
-            pendingRemoteOrderRef.current = null;
+          pendingRemoteOrderRef.current = null;
+          if (savedOk && pending && editingRef.current) {
+            const pendingLines = Array.isArray(pending.lines) ? pending.lines : [];
+            const savedLines = payload.lines;
+            const pendingAt = Date.parse(String(pending.updatedAt ?? ""));
+            const savedAt = Date.parse(payload.updatedAt);
+            const pendingOlder =
+              Number.isFinite(pendingAt) &&
+              Number.isFinite(savedAt) &&
+              pendingAt < savedAt;
+            const pendingSubset =
+              pendingLines.length < savedLines.length &&
+              pendingLines.every((p) =>
+                savedLines.some((s) => String(s.id) === String(p.id)),
+              );
+            // Eco atrasado post-save: no reaplicar (borraba refs recién extraídas).
+            if (!pendingOlder && !pendingSubset) {
+              applyMergedRemote(pending, true);
+            }
+          } else if (!savedOk && pending && editingRef.current) {
             applyMergedRemote(pending, true);
           }
         }
         if (showAlerts) setSaveBusy(false);
       }
     },
-    [orders, applyMergedRemote],
+    [applyMergedRemote, setOrders],
   );
 
   const saveOrder = async () => {
@@ -2654,9 +2693,9 @@ export function CollectionOrderModule({
     if (useful.length === 0) return;
 
     const baseOrder =
-      (editing && editing.id === orderId
-        ? editing
-        : orders.find((o) => o.id === orderId)) ?? e;
+      (editingRef.current && editingRef.current.id === orderId
+        ? editingRef.current
+        : ordersRef.current.find((o) => o.id === orderId)) ?? e;
 
     const mergedLines = [...(baseOrder.lines || [])];
     const lineIndex = new Map<string, number>();
@@ -2701,9 +2740,14 @@ export function CollectionOrderModule({
         : {}),
     };
     patchGeminiJob(orderId, { lastLines: [] });
-    setEditing((prev) =>
-      prev && prev.id === orderId ? nextOrder : prev,
-    );
+    setEditing((prev) => {
+      if (prev && prev.id === orderId) {
+        editingRef.current = nextOrder;
+        return nextOrder;
+      }
+      return prev;
+    });
+    setOrders((prev) => upsertCollectionOrderInList(prev, nextOrder));
     void persistOrder({ order: nextOrder, showAlerts: false });
   };
 

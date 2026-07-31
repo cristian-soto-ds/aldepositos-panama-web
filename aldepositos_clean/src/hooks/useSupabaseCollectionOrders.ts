@@ -12,6 +12,10 @@ import {
   subscribeCollectionOrdersRealtime,
   type CollectionOrderRealtimeChange,
 } from "@/lib/collectionOrders";
+import {
+  mergeConcurrentCollectionLines,
+  isIncompleteCollectionRemote,
+} from "@/lib/collectionOrderLineMerge";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 
 type Options = {
@@ -73,9 +77,20 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
       if (update.type !== "order") return;
       if (!isForeignLiveUpdate(update, tabId)) return;
       setOrders((prev) =>
-        prev.map((o) =>
-          o.id === update.orderId ? { ...o, lines: update.lines } : o,
-        ),
+        prev.map((o) => {
+          if (o.id !== update.orderId) return o;
+          const incoming = Array.isArray(update.lines) ? update.lines : [];
+          // Broadcast mid-edit puede traer un subset; no reemplazar la lista.
+          if (isIncompleteCollectionRemote(o.lines, o.lines, incoming)) {
+            return o;
+          }
+          const merged = mergeConcurrentCollectionLines(
+            o.lines,
+            o.lines,
+            incoming,
+          );
+          return { ...o, lines: merged };
+        }),
       );
     });
   }, [enabled, userKey]);

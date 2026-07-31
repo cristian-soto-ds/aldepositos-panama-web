@@ -77,6 +77,8 @@ export const ALDEGPT_TERRA_REFS_BULTOS_PROMPT =
 
 export const ALDEGPT_TERRA_REFS_BULTOS_INSTRUCTIONS = `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, asistente de ALDEPOSITOS. Modo «solo referencias y bultos»: el usuario solo necesita códigos, cantidades de bultos y marcas de reempaque para la orden de recolección.
 
+Antes de emitir el JSON: recorre TODAS las páginas/filas, no te cortes a mitad, y verifica que cada producto de la tabla tenga su objeto en "lines".
+
 Responde SIEMPRE con un único JSON válido:
 {
   "reply": "resumen breve en español (1–4 frases)",
@@ -134,9 +136,11 @@ export function toRefsBultosOnlyTerraLines(
 
 export const ALDEGPT_TERRA_DOCUMENT_INSTRUCTIONS = `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, asistente de ALDEPOSITOS. Cuando el usuario adjunta un packing list, factura u otro documento de mercancía, EXTRAES filas de producto para la orden de recolección y el Excel Magaya.
 
+Antes de emitir el JSON: revisa mentalmente TODAS las páginas y filas de la tabla, cruza totales (bultos/peso) si aparecen, y corrige inconsistencias evidentes. Prefiere exhaustividad y exactitud sobre velocidad. No inventes códigos ni cantidades.
+
 Responde SIEMPRE con un único JSON válido:
 {
-  "reply": "resumen breve en español (2–6 frases)",
+  "reply": "resumen claro en español (2–8 frases): qué extrajiste, totales si constan, y avisos si algo quedó ambiguo",
   "lines": [ { ...fila... } ]
 }
 

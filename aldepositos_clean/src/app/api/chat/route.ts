@@ -11,7 +11,8 @@ import {
 } from "@/lib/aldeGptTerraDocumentExtract";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+/** Pro + high puede tardar más en packing lists grandes. */
+export const maxDuration = 300;
 
 const CHAT_MODEL = "gpt-5.6-terra";
 const MAX_HISTORY_TURNS = 24;
@@ -22,12 +23,16 @@ const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 
 const GENERAL_INSTRUCTIONS =
-  "Eres un asistente de chat general, útil y claro. Responde en el mismo idioma en que te escriban (por defecto español). Sé conciso cuando baste y más detallado si te lo piden. No inventes hechos que no conozcas; si no estás seguro, dilo. " +
+  `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, asistente de ALDEPOSITOS (logística, depósito, inventario, órdenes de recolección y operaciones). ` +
+  "Razona con cuidado antes de responder: verifica coherencia, unidades y datos; no inventes números, códigos ni hechos. " +
+  "Si falta información o hay ambigüedad, dilo con claridad y ofrece la mejor interpretación posible. " +
+  "Responde en el mismo idioma en que te escriban (por defecto español). Sé preciso y útil: estructura con listas o pasos cuando ayude. " +
+  "En chat sin documento, prioriza respuestas completas y accionables (no solo una frase corta). " +
   'Tu salida debe ser un único objeto JSON válido con la forma {"reply":"<tu respuesta en texto para el usuario>","lines":[]}. Sin documento adjunto, lines debe ser [].';
 
 /**
- * Configuración fija de AldeGpt Terra:
- * gpt-5.6-terra · JSON object · reasoning estándar/medio · verbosity media · summary auto · store on
+ * Configuración fija de AldeGpt Terra (Responses API · gpt-5.6-terra):
+ * JSON object · reasoning.mode pro · effort high · verbosity high · summary detailed · store on
  */
 const ALDEGPT_TERRA_RESPONSE_OPTIONS = {
   model: CHAT_MODEL,
@@ -35,9 +40,9 @@ const ALDEGPT_TERRA_RESPONSE_OPTIONS = {
   // Packing lists grandes (50–100+ filas) necesitan salida larga; sin esto el modelo corta ~línea 48.
   max_output_tokens: 32_768,
   reasoning: {
-    mode: "standard",
-    effort: "medium",
-    summary: "auto",
+    mode: "pro",
+    effort: "high",
+    summary: "detailed",
   },
   text: {
     format: { type: "json_object" as const },
@@ -303,7 +308,7 @@ export async function POST(request: NextRequest) {
       ...ALDEGPT_TERRA_RESPONSE_OPTIONS,
       instructions,
       input,
-    // Cast: `reasoning.mode` (standard) está en GPT-5.6; el tipado del SDK aún no lo incluye.
+    // Cast: `reasoning.mode` (pro) está en GPT-5.6; el tipado del SDK aún no lo incluye.
     } as OpenAI.Responses.ResponseCreateParamsNonStreaming);
 
     const rawOut = String(response.output_text ?? "");

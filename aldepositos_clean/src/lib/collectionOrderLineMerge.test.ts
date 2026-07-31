@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeConcurrentCollectionLines } from "@/lib/collectionOrderLineMerge";
+import {
+  isIncompleteCollectionRemote,
+  mergeConcurrentCollectionLines,
+} from "@/lib/collectionOrderLineMerge";
 import type { CollectionOrderLine } from "@/lib/types/collectionOrder";
 
 function line(
@@ -70,6 +73,32 @@ describe("mergeConcurrentCollectionLines", () => {
     const local = [line("1"), line("2")];
     const merged = mergeConcurrentCollectionLines(baseline, local, []);
     expect(merged).toHaveLength(2);
+  });
+
+  it("detecta eco incompleto post-save (subset sin altas nuevas)", () => {
+    const baseline = [
+      line("1"),
+      line("2"),
+      line("3"),
+      line("4"),
+      line("5"),
+    ];
+    const local = [
+      line("1"),
+      line("2"),
+      line("3"),
+      line("4"),
+      line("5"),
+    ];
+    const remote = [line("1"), line("2"), line("3")];
+    expect(isIncompleteCollectionRemote(baseline, local, remote)).toBe(true);
+  });
+
+  it("no marca incompleto si el remoto trae altas nuevas", () => {
+    const baseline = [line("1"), line("2"), line("3")];
+    const local = [line("1"), line("2"), line("3")];
+    const remote = [line("1"), line("3"), line("remote-new")];
+    expect(isIncompleteCollectionRemote(baseline, local, remote)).toBe(false);
   });
 
   it("en el mismo campo prioriza local si ambos cambiaron", () => {

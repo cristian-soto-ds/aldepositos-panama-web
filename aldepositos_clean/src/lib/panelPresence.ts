@@ -24,8 +24,8 @@ export type WorkPresenceEntry = {
 };
 
 const PRESENCE_CHANNEL = "aldepositos-work-presence-v1";
-/** Mínimo entre tracks idénticos / heartbeats (ms). */
-const PRESENCE_TRACK_MIN_INTERVAL_MS = 20_000;
+/** Mínimo entre tracks idénticos / heartbeats (ms). Supabase: ~5 tracks / 30s. */
+const PRESENCE_TRACK_MIN_INTERVAL_MS = 35_000;
 
 declare global {
   interface Window {

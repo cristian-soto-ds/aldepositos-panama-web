@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   supabase,
   insertTask,
@@ -127,6 +127,13 @@ const PhotoReportsModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const ControlCargaModule = dynamic(
+  () =>
+    import("@/components/control-carga/ControlCargaModule").then(
+      (m) => m.ControlCargaModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -138,10 +145,26 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "reports",
   "photo-record",
   "photo-reports",
+  "control-carga",
 ]);
 
 export default function PanelPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+          <PanelModuleLoader />
+        </div>
+      }
+    >
+      <PanelPageInner />
+    </Suspense>
+  );
+}
+
+function PanelPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const showOptionsModule = true;
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -287,6 +310,14 @@ export default function PanelPage() {
       setCurrentView(clampViewForRole(userRole, preferred));
     }
   }, [preferences.startView, loading, userRole]);
+
+  useEffect(() => {
+    if (loading) return;
+    const view = searchParams.get("view");
+    if (view) {
+      setCurrentView(clampViewForRole(userRole, view));
+    }
+  }, [loading, searchParams, userRole]);
 
   useEffect(() => {
     setCurrentView((prev) => clampViewForRole(userRole, prev));
@@ -715,6 +746,13 @@ export default function PanelPage() {
             tasks={tasks}
             onUpdateTask={handleUpdateTask}
             userEmail={userEmail}
+            userDisplayName={userDisplayName}
+          />
+        )}
+
+        {visibleView === "control-carga" && (
+          <ControlCargaModule
+            userRole={userRole}
             userDisplayName={userDisplayName}
           />
         )}

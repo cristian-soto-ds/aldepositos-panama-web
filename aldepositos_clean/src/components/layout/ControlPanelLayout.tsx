@@ -19,6 +19,7 @@ import {
   PauseCircle,
   Camera,
   Images,
+  ScanBarcode,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -63,7 +64,8 @@ export function ControlPanelLayout({
     can("collection-orders") ||
     can("receptionist") ||
     can("truck-direction") ||
-    can("photo-record");
+    can("photo-record") ||
+    can("control-carga");
   const showLogistica = can("reference-catalog");
   const showAdmin =
     can("dashboard") ||
@@ -212,6 +214,17 @@ export function ControlPanelLayout({
               active={currentView === "photo-record"}
               onClick={() => {
                 setCurrentView("photo-record");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("control-carga") && (
+            <NavItem
+              icon={<NavIcon Icon={ScanBarcode} />}
+              text="Control de Carga"
+              active={currentView === "control-carga"}
+              onClick={() => {
+                setCurrentView("control-carga");
                 setSidebarOpen(false);
               }}
             />

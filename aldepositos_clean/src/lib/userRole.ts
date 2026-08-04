@@ -10,6 +10,7 @@ export const INVENTARIADOR_VIEWS = [
   "quick-entry",
   "photo-record",
   "inventory-leaderboard",
+  "control-carga",
   "options",
 ] as const;
 

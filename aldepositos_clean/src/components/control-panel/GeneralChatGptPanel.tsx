@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  ChevronDown,
   FileText,
   Loader2,
   Menu,
@@ -17,12 +19,21 @@ import {
 } from "lucide-react";
 import { AldeGptTerraIcon } from "@/components/ui/AldeGptTerraBrand";
 import { ChatMarkdown } from "@/components/ui/ChatMarkdown";
-import { ALDEGPT_TERRA_DISPLAY_NAME } from "@/lib/aldeGptTerraBrand";
+import {
+  ALDEGPT_DEFAULT_MODEL,
+  ALDEGPT_MODEL_OPTIONS,
+  aldeGptDisplayNameForModel,
+  aldeGptModelOption,
+  resolveAldeGptModelKey,
+  type AldeGptModelKey,
+} from "@/lib/aldeGptTerraBrand";
 import {
   ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
   type AldeGptTerraLine,
 } from "@/lib/aldeGptTerraDocumentExtract";
 import { supabase } from "@/lib/supabase";
+
+const MODEL_STORAGE_KEY = "aldegpt-selected-model";
 
 type ChatTurn = {
   role: "user" | "assistant";
@@ -51,6 +62,7 @@ type GeneralChatGptPanelProps = {
     text: string;
     files: File[];
     extractMode: "full" | "refsBultosOnly";
+    model: AldeGptModelKey;
   }) => Promise<{ reply: string; lines: AldeGptTerraLine[] }>;
   /** Busy del job Terra de la OR actual (padre). */
   extractJobBusy?: boolean;
@@ -162,11 +174,50 @@ export function GeneralChatGptPanel({
     text: string;
     code?: number;
   } | null>(null);
+  /** Terra = base por defecto; Sol = documentos difíciles. */
+  const [modelKey, setModelKey] =
+    useState<AldeGptModelKey>(ALDEGPT_DEFAULT_MODEL);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   /** Tras elegir archivo(s), lanzar extracción solo refs+bultos. */
   const autoRefsBultosRef = useRef(false);
+
+  const activeDisplayName = aldeGptDisplayNameForModel(modelKey);
+  const activeModelOption = aldeGptModelOption(modelKey);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MODEL_STORAGE_KEY);
+      if (raw) setModelKey(resolveAldeGptModelKey(raw));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, modelKey);
+    } catch {
+      /* ignore */
+    }
+  }, [modelKey]);
+
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (
+        modelMenuRef.current &&
+        !modelMenuRef.current.contains(e.target as Node)
+      ) {
+        setModelMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [modelMenuOpen]);
 
   const scrollBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -283,19 +334,21 @@ export function GeneralChatGptPanel({
     message: string;
     historyPayload: ChatMessagePayload[];
     extractMode: "full" | "refsBultosOnly";
+    model: AldeGptModelKey;
     file: File | null;
   }): Promise<{
     reply: string;
     lines: AldeGptTerraLine[];
     extractMode?: string;
   }> => {
-    const { token, message, historyPayload, extractMode, file } = args;
+    const { token, message, historyPayload, extractMode, model, file } = args;
     let res: Response;
     if (file) {
       const fd = new FormData();
       fd.append("message", message);
       fd.append("history", JSON.stringify(historyPayload));
       fd.append("extractMode", extractMode);
+      fd.append("model", model);
       fd.append("file", file, normalizeUploadFilename(file.name || "documento"));
       res = await fetch("/api/chat", {
         method: "POST",
@@ -313,6 +366,7 @@ export function GeneralChatGptPanel({
           message,
           history: historyPayload,
           extractMode,
+          model,
         }),
       });
     }
@@ -427,6 +481,7 @@ export function GeneralChatGptPanel({
           text,
           files,
           extractMode,
+          model: modelKey,
         });
         extracted = one.lines;
         reply = one.reply;
@@ -437,6 +492,7 @@ export function GeneralChatGptPanel({
           message: text,
           historyPayload,
           extractMode,
+          model: modelKey,
           file: null,
         });
         extracted = one.lines;
@@ -475,6 +531,7 @@ export function GeneralChatGptPanel({
             message: orderedPrompt,
             historyPayload,
             extractMode,
+            model: modelKey,
             file,
           });
           if (one.extractMode === "refsBultosOnly") {
@@ -504,7 +561,7 @@ export function GeneralChatGptPanel({
 
       if (!reply && extracted.length === 0) {
         throw new Error(
-          `${ALDEGPT_TERRA_DISPLAY_NAME} no devolvió texto. Reintenta.`,
+          `${activeDisplayName} no devolvió texto. Reintenta.`,
         );
       }
 
@@ -551,7 +608,7 @@ export function GeneralChatGptPanel({
         text:
           e instanceof Error
             ? e.message
-            : `No se pudo obtener respuesta de ${ALDEGPT_TERRA_DISPLAY_NAME}.`,
+            : `No se pudo obtener respuesta de ${activeDisplayName}.`,
         code: Number.isFinite(code) ? code : undefined,
       });
     } finally {
@@ -599,7 +656,7 @@ export function GeneralChatGptPanel({
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={ALDEGPT_TERRA_DISPLAY_NAME}
+        aria-label={activeDisplayName}
       >
         <aside
           className={`${
@@ -610,7 +667,7 @@ export function GeneralChatGptPanel({
             <div className="flex min-w-0 items-center gap-2">
               <AldeGptTerraIcon size={20} />
               <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                {ALDEGPT_TERRA_DISPLAY_NAME}
+                {activeDisplayName}
               </span>
             </div>
             <button
@@ -691,7 +748,7 @@ export function GeneralChatGptPanel({
                 <PanelLeft className="h-5 w-5" />
               </button>
               <span className="ml-1 text-sm font-medium text-zinc-700 dark:text-zinc-200 md:hidden">
-                {ALDEGPT_TERRA_DISPLAY_NAME}
+                {activeDisplayName}
               </span>
             </div>
             <button
@@ -713,8 +770,15 @@ export function GeneralChatGptPanel({
                   ¿En qué te ayudo?
                 </h2>
                 <p className="mt-3 max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
-                  Adjunta un documento o usa «Solo referencias y bultos» para
-                  pedidos que solo necesitan código, cantidad y reempaque.
+                  Adjunta un documento o usa «Solo referencias y bultos». Usa{" "}
+                  <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                    Terra
+                  </span>{" "}
+                  por defecto; cambia a{" "}
+                  <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                    Sol
+                  </span>{" "}
+                  si el escaneo es difícil (fotos borrosas, códigos confusos).
                 </p>
               </div>
             ) : (
@@ -757,7 +821,11 @@ export function GeneralChatGptPanel({
                       <AldeGptTerraIcon size={18} />
                     </div>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    {extractJobBusy ? "Extrayendo a la orden…" : "Pensando…"}
+                    {extractJobBusy
+                      ? "Extrayendo a la orden…"
+                      : modelKey === "sol"
+                        ? "Sol pensando…"
+                        : "Pensando…"}
                   </div>
                 )}
               </div>
@@ -1027,6 +1095,79 @@ export function GeneralChatGptPanel({
                     placeholder="Pregunta lo que quieras o adjunta un documento"
                     className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-[15px] text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-50"
                   />
+                  <div ref={modelMenuRef} className="relative mb-1 shrink-0">
+                    <button
+                      type="button"
+                      disabled={panelBusy}
+                      onClick={() => setModelMenuOpen((v) => !v)}
+                      className={`flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition ${
+                        modelKey === "sol"
+                          ? "bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                          : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-white/10"
+                      } disabled:opacity-40`}
+                      aria-label="Elegir modelo"
+                      aria-expanded={modelMenuOpen}
+                      aria-haspopup="listbox"
+                      title={activeModelOption.hint}
+                    >
+                      {activeModelOption.shortLabel}
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 opacity-70 transition ${
+                          modelMenuOpen ? "rotate-180" : ""
+                        }`}
+                        aria-hidden
+                      />
+                    </button>
+                    {modelMenuOpen ? (
+                      <div
+                        role="listbox"
+                        aria-label="Modelos AldeGpt"
+                        className="absolute bottom-full right-0 z-20 mb-2 w-[min(100vw-2rem,17.5rem)] overflow-hidden rounded-2xl border border-black/10 bg-white py-1.5 shadow-xl dark:border-white/15 dark:bg-[#2a2a2a]"
+                      >
+                        {ALDEGPT_MODEL_OPTIONS.map((opt) => {
+                          const selected = opt.key === modelKey;
+                          return (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              onClick={() => {
+                                setModelKey(opt.key);
+                                setModelMenuOpen(false);
+                              }}
+                              className={`flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-white/10 ${
+                                selected ? "bg-zinc-50 dark:bg-white/5" : ""
+                              }`}
+                            >
+                              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                                {selected ? (
+                                  <Check
+                                    className="h-4 w-4 text-zinc-900 dark:text-zinc-50"
+                                    strokeWidth={2.5}
+                                    aria-hidden
+                                  />
+                                ) : null}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-[13px] font-semibold text-zinc-900 dark:text-zinc-50">
+                                  {opt.label}
+                                  {opt.key === "terra" ? (
+                                    <span className="ml-1.5 text-[11px] font-medium text-zinc-400">
+                                      base
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="mt-0.5 block text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+                                  {opt.hint}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     disabled={!canSend}
@@ -1048,7 +1189,8 @@ export function GeneralChatGptPanel({
                 </div>
               </div>
               <p className="mt-2 text-center text-[11px] text-zinc-400">
-                {ALDEGPT_TERRA_DISPLAY_NAME} puede cometer errores. Verifica la información importante.
+                {activeDisplayName} puede cometer errores. Verifica la información
+                importante.
               </p>
             </div>
           </div>

@@ -9,7 +9,11 @@ import {
   resolveFilterRangeBounds,
   type ReceptionReportFilter,
 } from "@/lib/receptionLogistics/receptionReportFilter";
-import { isCollectionOrderReceptionTruck } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import {
+  isCollectionOrderReceptionTruck,
+  isGroupedReceptionTruck,
+  receptionOrderIds,
+} from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 
 export type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
@@ -128,7 +132,10 @@ export function previewReceptionReport(
 ): { orCount: number; bultos: number } {
   const matched = trucks.filter((t) => truckMatchesFilter(t, filter));
   return {
-    orCount: matched.length,
+    orCount: matched.reduce(
+      (sum, t) => sum + Math.max(1, receptionOrderIds(t).length),
+      0,
+    ),
     bultos: matched.reduce((sum, t) => sum + t.expectedBultos, 0),
   };
 }
@@ -152,10 +159,14 @@ export function buildDailyReceptionReport(
     const minutosEnFila = diffMinutes(t.createdAt, t.rampAssignedAt);
     const minutosDescarga = diffMinutes(t.rampAssignedAt, completedAt);
     const minutosTotal = diffMinutes(t.createdAt, completedAt);
+    const orNumero =
+      isGroupedReceptionTruck(t) && t.orderNumeros?.length
+        ? t.orderNumeros.map((n) => `#${n}`).join(" · ")
+        : parseOrNumero(t.plate);
 
     return {
       queuePosition: i + 1,
-      orNumero: parseOrNumero(t.plate),
+      orNumero,
       cliente: t.client !== "—" ? t.client : "",
       proveedor: t.provider !== "—" ? t.provider : "",
       expedidor: t.notes?.trim() ?? "",
@@ -186,7 +197,10 @@ export function buildDailyReceptionReport(
     .filter((n): n is number => n != null);
 
   const summary: DailyReceptionReportSummary = {
-    totalOr: rows.length,
+    totalOr: filteredOr.reduce(
+      (sum, t) => sum + Math.max(1, receptionOrderIds(t).length),
+      0,
+    ),
     totalBultos: rows.reduce((a, r) => a + r.bultos, 0),
     completadas: rows.filter((r) => r.statusId === RECEPTION_STATUS.COMPLETADO).length,
     enProceso: rows.filter((r) => r.statusId !== RECEPTION_STATUS.COMPLETADO).length,

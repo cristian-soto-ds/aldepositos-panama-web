@@ -2,7 +2,13 @@ import OpenAI from "openai";
 import { toFile } from "openai/uploads";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-import { ALDEGPT_TERRA_DISPLAY_NAME } from "@/lib/aldeGptTerraBrand";
+import {
+  ALDEGPT_TERRA_DISPLAY_NAME,
+  aldeGptDisplayNameForModel,
+  aldeGptModelOption,
+  resolveAldeGptModelKey,
+  type AldeGptModelKey,
+} from "@/lib/aldeGptTerraBrand";
 import {
   ALDEGPT_TERRA_DOCUMENT_INSTRUCTIONS,
   ALDEGPT_TERRA_REFS_BULTOS_INSTRUCTIONS,
@@ -11,10 +17,9 @@ import {
 } from "@/lib/aldeGptTerraDocumentExtract";
 
 export const runtime = "nodejs";
-/** Pro + high puede tardar más en packing lists grandes. */
+/** Pro + high/max puede tardar más en packing lists grandes. */
 export const maxDuration = 300;
 
-const CHAT_MODEL = "gpt-5.6-terra";
 const MAX_HISTORY_TURNS = 24;
 const MAX_MESSAGE_CHARS = 8_000;
 /** Por archivo (OpenAI admite hasta 50 MB; dejamos margen). */
@@ -22,33 +27,55 @@ const MAX_FILE_BYTES = 40 * 1024 * 1024;
 const MAX_FILES = 8;
 const MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 
-const GENERAL_INSTRUCTIONS =
-  `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, asistente de ALDEPOSITOS (logística, depósito, inventario, órdenes de recolección y operaciones). ` +
-  "Razona con cuidado antes de responder: verifica coherencia, unidades y datos; no inventes números, códigos ni hechos. " +
-  "Si falta información o hay ambigüedad, dilo con claridad y ofrece la mejor interpretación posible. " +
-  "Responde en el mismo idioma en que te escriban (por defecto español). Sé preciso y útil: estructura con listas o pasos cuando ayude. " +
-  "En chat sin documento, prioriza respuestas completas y accionables (no solo una frase corta). " +
-  'Tu salida debe ser un único objeto JSON válido con la forma {"reply":"<tu respuesta en texto para el usuario>","lines":[]}. Sin documento adjunto, lines debe ser [].';
+function generalInstructions(modelKey: AldeGptModelKey): string {
+  const name = aldeGptDisplayNameForModel(modelKey);
+  return (
+    `Eres ${name}, asistente de ALDEPOSITOS (logística, depósito, inventario, órdenes de recolección y operaciones). ` +
+    "Razona con cuidado antes de responder: verifica coherencia, unidades y datos; no inventes números, códigos ni hechos. " +
+    "Si falta información o hay ambigüedad, dilo con claridad y ofrece la mejor interpretación posible. " +
+    "Responde en el mismo idioma en que te escriban (por defecto español). Sé preciso y útil: estructura con listas o pasos cuando ayude. " +
+    "En chat sin documento, prioriza respuestas completas y accionables (no solo una frase corta). " +
+    'Tu salida debe ser un único objeto JSON válido con la forma {"reply":"<tu respuesta en texto para el usuario>","lines":[]}. Sin documento adjunto, lines debe ser [].'
+  );
+}
 
 /**
- * Configuración fija de AldeGpt Terra (Responses API · gpt-5.6-terra):
- * JSON object · reasoning.mode pro · effort high · verbosity high · summary detailed · store on
+ * Terra (base): JSON · pro · high · verbosity high · summary detailed · store on
+ * Sol (difícil): JSON · pro · max · verbosity high · summary concise · store on
  */
-const ALDEGPT_TERRA_RESPONSE_OPTIONS = {
-  model: CHAT_MODEL,
-  store: true,
-  // Packing lists grandes (50–100+ filas) necesitan salida larga; sin esto el modelo corta ~línea 48.
-  max_output_tokens: 32_768,
-  reasoning: {
-    mode: "pro",
-    effort: "high",
-    summary: "detailed",
-  },
-  text: {
-    format: { type: "json_object" as const },
-    verbosity: "high" as const,
-  },
-};
+function responseOptionsForModel(modelKey: AldeGptModelKey) {
+  const apiModel = aldeGptModelOption(modelKey).apiModel;
+  if (modelKey === "sol") {
+    return {
+      model: apiModel,
+      store: true,
+      max_output_tokens: 32_768,
+      reasoning: {
+        mode: "pro",
+        effort: "max",
+        summary: "concise",
+      },
+      text: {
+        format: { type: "json_object" as const },
+        verbosity: "high" as const,
+      },
+    };
+  }
+  return {
+    model: apiModel,
+    store: true,
+    max_output_tokens: 32_768,
+    reasoning: {
+      mode: "pro",
+      effort: "high",
+      summary: "detailed",
+    },
+    text: {
+      format: { type: "json_object" as const },
+      verbosity: "high" as const,
+    },
+  };
+}
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -135,6 +162,7 @@ async function parseRequest(request: NextRequest): Promise<{
   history: ChatMessage[];
   files: File[];
   extractMode: "full" | "refsBultosOnly";
+  modelKey: AldeGptModelKey;
 }> {
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -142,6 +170,7 @@ async function parseRequest(request: NextRequest): Promise<{
     const form = await request.formData();
     const message = String(form.get("message") ?? "").trim();
     const extractMode = parseExtractMode(form.get("extractMode"));
+    const modelKey = resolveAldeGptModelKey(form.get("model"));
     let history: ChatMessage[] = [];
     const historyRaw = form.get("history");
     if (typeof historyRaw === "string" && historyRaw.trim()) {
@@ -156,19 +185,21 @@ async function parseRequest(request: NextRequest): Promise<{
       if (key !== "file" && key !== "files" && !key.startsWith("file")) continue;
       if (value instanceof File && value.size > 0) files.push(value);
     }
-    return { message, history, files, extractMode };
+    return { message, history, files, extractMode, modelKey };
   }
 
   const body = (await request.json()) as {
     message?: string;
     history?: ChatMessage[];
     extractMode?: string;
+    model?: string;
   };
   return {
     message: String(body.message ?? "").trim(),
     history: normalizeHistory(body.history),
     files: [],
     extractMode: parseExtractMode(body.extractMode),
+    modelKey: resolveAldeGptModelKey(body.model),
   };
 }
 
@@ -202,8 +233,10 @@ export async function POST(request: NextRequest) {
   let history: ChatMessage[];
   let files: File[];
   let extractMode: "full" | "refsBultosOnly";
+  let modelKey: AldeGptModelKey;
   try {
-    ({ message, history, files, extractMode } = await parseRequest(request));
+    ({ message, history, files, extractMode, modelKey } =
+      await parseRequest(request));
   } catch {
     return NextResponse.json(
       { error: "No se pudo leer la solicitud." },
@@ -285,7 +318,7 @@ export async function POST(request: NextRequest) {
 
     const instructions =
       files.length === 0
-        ? GENERAL_INSTRUCTIONS
+        ? generalInstructions(modelKey)
         : extractMode === "refsBultosOnly"
           ? ALDEGPT_TERRA_REFS_BULTOS_INSTRUCTIONS
           : ALDEGPT_TERRA_DOCUMENT_INSTRUCTIONS;
@@ -305,10 +338,10 @@ export async function POST(request: NextRequest) {
           ];
 
     const response = await client.responses.create({
-      ...ALDEGPT_TERRA_RESPONSE_OPTIONS,
+      ...responseOptionsForModel(modelKey),
       instructions,
       input,
-    // Cast: `reasoning.mode` (pro) está en GPT-5.6; el tipado del SDK aún no lo incluye.
+    // Cast: `reasoning.mode` (pro) / effort max están en GPT-5.6; el tipado del SDK aún no lo incluye.
     } as OpenAI.Responses.ResponseCreateParamsNonStreaming);
 
     const rawOut = String(response.output_text ?? "");
@@ -318,6 +351,7 @@ export async function POST(request: NextRequest) {
         ? toRefsBultosOnlyTerraLines(parsed.lines)
         : parsed.lines;
     const reply = parsed.reply;
+    const displayName = aldeGptDisplayNameForModel(modelKey);
     const finalReply =
       reply ||
       (lines.length > 0
@@ -329,7 +363,7 @@ export async function POST(request: NextRequest) {
     if (!finalReply && lines.length === 0) {
       return NextResponse.json(
         {
-          error: `${ALDEGPT_TERRA_DISPLAY_NAME} no devolvió texto. Reintenta en unos segundos.`,
+          error: `${displayName} no devolvió texto. Reintenta en unos segundos.`,
         },
         { status: 502 },
       );
@@ -339,6 +373,8 @@ export async function POST(request: NextRequest) {
       reply: finalReply,
       lines,
       extractMode,
+      model: modelKey,
+      modelId: aldeGptModelOption(modelKey).apiModel,
     });
   } catch (e) {
     const status =

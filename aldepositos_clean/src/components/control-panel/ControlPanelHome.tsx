@@ -11,6 +11,7 @@ import {
   Boxes,
   ClipboardList,
   PackageCheck,
+  Trophy,
 } from "lucide-react";
 
 import type { Task } from "@/lib/types/task";
@@ -34,6 +35,8 @@ import {
   peerPresenceVisibleName,
 } from "@/lib/viewerIdentity";
 import { isAllowedInventoryOperator } from "@/lib/inventoryOperatorsAllowlist";
+import { LivePanelClock } from "@/components/ui/LivePanelClock";
+import { publishShowTvRanking } from "@/lib/tvRankingBroadcast";
 
 type ControlPanelHomeProps = {
   tasks: Task[];
@@ -191,7 +194,14 @@ export function ControlPanelHome({
     "all",
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [rankingFlash, setRankingFlash] = useState(false);
   const [now, setNow] = useState(() => new Date());
+
+  const showRankingOnTv = () => {
+    publishShowTvRanking();
+    setRankingFlash(true);
+    window.setTimeout(() => setRankingFlash(false), 1800);
+  };
 
   useEffect(() => {
     return subscribeWorkPresence(setPresenceList);
@@ -199,10 +209,11 @@ export function ControlPanelHome({
 
   // Presencia “en panel” la publica panel/page.tsx (evitar track duplicado → rate limit).
 
+  // Tick lento solo para frescura de presencia (el reloj del header es hoja aislada).
   useEffect(() => {
     const tick = () => setNow(new Date());
     tick();
-    const ms = preferences?.showSeconds ? 1_000 : 60_000;
+    const ms = 30_000;
     let intervalId: number | undefined;
     const start = () => {
       if (intervalId != null) window.clearInterval(intervalId);
@@ -223,7 +234,7 @@ export function ControlPanelHome({
       document.removeEventListener("visibilitychange", onVisibility);
       if (intervalId != null) window.clearInterval(intervalId);
     };
-  }, [preferences?.showSeconds]);
+  }, []);
 
   const { trucks: receptionTrucks } = useReceptionQueue();
   const [collectionOrders, setCollectionOrders] = useState<CollectionOrder[]>([]);
@@ -424,12 +435,6 @@ export function ControlPanelHome({
     month: "long",
     day: "numeric",
   });
-  const currentTime = now.toLocaleTimeString("es-PA", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: preferences?.showSeconds ? "2-digit" : undefined,
-    hour12: preferences?.timeFormat === "12h",
-  });
 
   const greetingFromProfile = profileFullName?.trim() ?? "";
   const greetingName =
@@ -477,7 +482,11 @@ export function ControlPanelHome({
             </h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-semibold text-slate-500 dark:text-slate-400">
               <Clock3 className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-              <span className="tabular-nums">{currentTime}</span>
+              <LivePanelClock
+                showSeconds={preferences?.showSeconds === true}
+                hour12={preferences?.timeFormat === "12h"}
+                variant="inline"
+              />
               <span className="text-slate-300 dark:text-slate-600" aria-hidden>
                 ·
               </span>
@@ -487,21 +496,40 @@ export function ControlPanelHome({
         </div>
 
         <div className="flex w-full min-w-0 flex-col gap-2.5 sm:max-w-md lg:w-auto lg:min-w-[340px] lg:shrink-0">
-          <div
-            className={`flex items-center gap-2.5 rounded-2xl border px-4 py-3 transition focus-within:ring-2 focus-within:ring-[#16263F]/20 ${
-              isDark
-                ? "border-slate-600/80 bg-slate-800/70"
-                : "border-slate-200 bg-white shadow-sm"
-            }`}
-          >
-            <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar RA, cliente o proveedor"
-              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
-            />
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-2xl border px-4 py-3 transition focus-within:ring-2 focus-within:ring-[#16263F]/20 ${
+                isDark
+                  ? "border-slate-600/80 bg-slate-800/70"
+                  : "border-slate-200 bg-white shadow-sm"
+              }`}
+            >
+              <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar RA, cliente o proveedor"
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#16263F] outline-none placeholder:text-slate-400 dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={showRankingOnTv}
+              title="Mostrar ranking de inventariadores en la pantalla TV"
+              className={`inline-flex h-[46px] shrink-0 items-center gap-1.5 rounded-2xl border px-3 text-[10px] font-black uppercase tracking-wider transition ${
+                rankingFlash
+                  ? "border-[#16263F] bg-[#16263F] text-white"
+                  : isDark
+                    ? "border-slate-600 bg-slate-800 text-slate-200 hover:border-slate-500 hover:bg-slate-700"
+                    : "border-slate-200 bg-white text-[#16263F] shadow-sm hover:border-[#16263F]/30 hover:bg-slate-50"
+              }`}
+            >
+              <Trophy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="hidden sm:inline">
+                {rankingFlash ? "Enviado" : "Ranking TV"}
+              </span>
+            </button>
           </div>
           <div
             className={`grid grid-cols-3 gap-1 rounded-2xl p-1 ${

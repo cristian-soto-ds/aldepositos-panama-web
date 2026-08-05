@@ -73,6 +73,16 @@ export type CollectionOrder = {
   status: CollectionOrderStatus;
   /** Estado en recepción (fila / rampa / completado) — vista recepcionista. */
   receptionStatus?: ReceptionStatusId;
+  /**
+   * Id del camión/grupo de recepción cuando varias OR llegan juntas.
+   * Misma tarjeta en el kanban; se sincroniza el status con el grupo.
+   */
+  receptionGroupId?: string;
+  /**
+   * Momento en que entró a la cola de recepción (EN_FILA).
+   * No se actualiza al pasar a rampa; sirve para orden FIFO.
+   */
+  receptionQueuedAt?: string;
   /** RA(s) a los que ya se enviaron medidas */
   linkedRaNumbers?: string[];
   /**

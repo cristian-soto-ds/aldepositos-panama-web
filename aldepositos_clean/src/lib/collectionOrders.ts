@@ -1,6 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { normalizeCollectionOrderFields } from "@/lib/collectionOrderReconcile";
+import { normalizeOrNumero } from "@/lib/parseCollectionOrdersHtm";
+import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { DbPayloadRow } from "@/lib/realtimePatch";
 
@@ -37,6 +39,33 @@ export function sortCollectionOrdersByNumero(
   });
 }
 
+/** Otro OR con el mismo número Magaya (normalizado), excluyendo `excludeId`. */
+export function findOtherOrderWithNumero(
+  orders: CollectionOrder[],
+  numero: string | undefined,
+  excludeId?: string,
+): CollectionOrder | undefined {
+  const key = normalizeOrNumero(numero);
+  if (!key) return undefined;
+  return orders.find(
+    (o) => o.id !== excludeId && normalizeOrNumero(o.numero) === key,
+  );
+}
+
+/** Bodega = recepción completada. Requisito para transferir OR → RA. */
+export function isCollectionOrderInBodega(order: CollectionOrder): boolean {
+  return order.receptionStatus === RECEPTION_STATUS.COMPLETADO;
+}
+
+export function collectionOrderTransferBlockedReason(
+  order: CollectionOrder,
+): string | null {
+  if (!isCollectionOrderInBodega(order)) {
+    return "El OR debe estar en bodega (Completado) antes de transferirlo a un RA.";
+  }
+  return null;
+}
+
 export function upsertCollectionOrderInList(
   prev: CollectionOrder[],
   order: CollectionOrder,
@@ -48,19 +77,71 @@ export function upsertCollectionOrderInList(
 }
 
 export async function fetchCollectionOrders(): Promise<CollectionOrder[]> {
-  const { data, error } = await supabase
-    .from("collection_orders")
-    .select("id, payload, updated_at");
+  // PostgREST/Supabase trunca en 1000 filas por defecto; con >1000 OR el reload
+  // “borra” altas recientes de la UI aunque existan en BD.
+  const pageSize = 1000;
+  const allRows: { id?: string; payload: unknown; updated_at?: string }[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("collection_orders")
+      .select("id, payload, updated_at")
+      .order("updated_at", { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as {
+      id?: string;
+      payload: unknown;
+      updated_at?: string;
+    }[];
+    allRows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+    // Safety: avoid infinite loops if API misbehaves
+    if (from > 100_000) break;
+  }
 
-  if (error) throw error;
-
-  const rows = (data ?? []) as { payload: unknown }[];
   return sortCollectionOrdersByNumero(
-    rows
+    allRows
       .map((r) => r.payload)
       .filter(isCollectionOrder)
       .map((order) => normalizeCollectionOrderFields(order)),
   );
+}
+
+/**
+ * Solo OR que ya están en el tablero de recepción (tienen receptionStatus).
+ * Evita paginar toda la tabla de collection_orders en cada hydrate del kanban.
+ */
+export async function fetchCollectionOrdersForReception(): Promise<
+  CollectionOrder[]
+> {
+  const pageSize = 500;
+  const allRows: { id?: string; payload: unknown }[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("collection_orders")
+      .select("id, payload")
+      .not("payload->>receptionStatus", "is", null)
+      .neq("payload->>receptionStatus", "")
+      .order("updated_at", { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as { id?: string; payload: unknown }[];
+    allRows.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+    if (from > 20_000) break;
+  }
+
+  return allRows
+    .map((r) => r.payload)
+    .filter(isCollectionOrder)
+    .filter((o) => !!o.receptionStatus)
+    .map((order) => normalizeCollectionOrderFields(order));
 }
 
 export async function insertCollectionOrder(order: CollectionOrder): Promise<void> {
@@ -83,8 +164,21 @@ export async function updateCollectionOrder(order: CollectionOrder): Promise<voi
 }
 
 export async function deleteCollectionOrderById(id: string): Promise<void> {
-  const { error } = await supabase.from("collection_orders").delete().eq("id", id);
+  const { data, error } = await supabase
+    .from("collection_orders")
+    .delete()
+    .eq("id", id)
+    .select("id");
   if (error) throw error;
+  // RLS a veces “tiene éxito” sin borrar filas: verificar.
+  if (!data || data.length === 0) {
+    const still = await fetchCollectionOrderById(id);
+    if (still) {
+      throw new Error(
+        "No se pudo eliminar la orden (sin permiso o la fila sigue en la base).",
+      );
+    }
+  }
 }
 
 /** Una sola orden (evita cargar toda la tabla al sincronizar recepción). */

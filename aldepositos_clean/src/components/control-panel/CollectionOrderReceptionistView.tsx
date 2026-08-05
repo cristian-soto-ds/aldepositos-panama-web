@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
+import { parseCollectionOrderNumber } from "@/lib/collectionOrders";
 import {
   RECEPTION_STATUS,
   RECEPTION_STATUS_LABELS,
@@ -73,7 +74,17 @@ type CollectionOrderReceptionistViewProps = {
   onToggleRampOccupancy?: (rampId: RampOccupancyRampId) => void;
   onSetReceptionStatus: (orderId: string, status: ReceptionStatusId) => void;
   onClearReceptionStatus: (orderId: string) => void;
+  /** Agrupar ≥2 OR en un solo camión (En fila). */
+  onCreateTruckGroup?: (input: {
+    orderIds: string[];
+  }) => Promise<void>;
 };
+
+function canSelectForTruckGroup(order: CollectionOrder): boolean {
+  if (order.receptionGroupId) return false;
+  if (!order.receptionStatus) return true;
+  return order.receptionStatus === RECEPTION_STATUS.EN_FILA;
+}
 
 function listBultosTotal(lines: CollectionOrderLine[]): number {
   let sum = 0;
@@ -117,6 +128,72 @@ function receptionShortLabel(status: ReceptionStatusId): string {
   }
 }
 
+/**
+ * Prioridad en lista recepcionista (menor = más arriba):
+ * Rampa 1 → Rampa 2 → Extra → Carretillado → Fila → sin estado.
+ */
+function receptionistStatusPriority(
+  status: ReceptionStatusId | undefined,
+): number {
+  switch (status) {
+    case RECEPTION_STATUS.RAMPA_1:
+      return 0;
+    case RECEPTION_STATUS.RAMPA_2:
+      return 1;
+    case RECEPTION_STATUS.RAMPA_EXTRA:
+      return 2;
+    case RECEPTION_STATUS.CARRETILLADO:
+      return 3;
+    case RECEPTION_STATUS.EN_FILA:
+      return 4;
+    default:
+      return 5;
+  }
+}
+
+function receptionQueueTimeMs(order: CollectionOrder): number {
+  const queued = Date.parse(order.receptionQueuedAt || "");
+  if (Number.isFinite(queued) && queued > 0) return queued;
+  const updated = Date.parse(order.updatedAt || "");
+  if (Number.isFinite(updated) && updated > 0) return updated;
+  const created = Date.parse(order.createdAt || "");
+  return Number.isFinite(created) ? created : 0;
+}
+
+/** Ordena para recepción: rampas por prioridad; en fila FIFO; sin estado al final. */
+function sortOrdersForReceptionistList(
+  orders: CollectionOrder[],
+): CollectionOrder[] {
+  return [...orders].sort((a, b) => {
+    const pa = receptionistStatusPriority(a.receptionStatus);
+    const pb = receptionistStatusPriority(b.receptionStatus);
+    if (pa !== pb) return pa - pb;
+
+    // Misma prioridad: primero el que llegó antes a la fila (FIFO).
+    if (pa < 5) {
+      const ta = receptionQueueTimeMs(a);
+      const tb = receptionQueueTimeMs(b);
+      if (ta !== tb) return ta - tb;
+
+      // Mismo camión: mantener OR juntas.
+      const ga = a.receptionGroupId || "";
+      const gb = b.receptionGroupId || "";
+      if (ga && gb && ga === gb) {
+        const na = parseCollectionOrderNumber(a.numero);
+        const nb = parseCollectionOrderNumber(b.numero);
+        if (na !== nb) return na - nb;
+        return String(a.id).localeCompare(String(b.id));
+      }
+      if (ga !== gb) return ga.localeCompare(gb);
+    }
+
+    const na = parseCollectionOrderNumber(a.numero);
+    const nb = parseCollectionOrderNumber(b.numero);
+    if (na !== nb) return nb - na;
+    return String(b.id).localeCompare(String(a.id));
+  });
+}
+
 export function CollectionOrderReceptionistView({
   orders,
   loading,
@@ -128,11 +205,16 @@ export function CollectionOrderReceptionistView({
   onToggleRampOccupancy,
   onSetReceptionStatus,
   onClearReceptionStatus,
+  onCreateTruckGroup,
 }: CollectionOrderReceptionistViewProps) {
   const [activeTab, setActiveTab] = useState<CollectionOrderListTab>("general");
   const [expandedExtras, setExpandedExtras] = useState<Set<string>>(
     () => new Set(),
   );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [unifyMode, setUnifyMode] = useState(false);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupBusy, setGroupBusy] = useState(false);
 
   const toggleExtras = (orderId: string) => {
     setExpandedExtras((prev) => {
@@ -143,14 +225,70 @@ export function CollectionOrderReceptionistView({
     });
   };
 
+  const toggleSelected = (orderId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const setUnifyModeOn = (on: boolean) => {
+    setUnifyMode(on);
+    if (!on) {
+      setSelectedIds(new Set());
+      setGroupModalOpen(false);
+    }
+  };
+
   const generalCount = countOrdersForCollectionListTab(orders, "general");
   const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
   const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
   const noInventoryCount = countOrdersForCollectionListTab(orders, "noInventory");
-  const displayedOrders = useMemo(
-    () => ordersForCollectionListTab(orders, activeTab),
-    [orders, activeTab],
+  const displayedOrders = useMemo(() => {
+    const filtered = ordersForCollectionListTab(orders, activeTab);
+    // Solo en «En recepción»: fila/rampa arriba para no buscar hacia abajo.
+    if (activeTab === "general") {
+      return sortOrdersForReceptionistList(filtered);
+    }
+    return filtered;
+  }, [orders, activeTab]);
+
+  const selectedList = useMemo(
+    () => orders.filter((o) => selectedIds.has(o.id)),
+    [orders, selectedIds],
   );
+
+  const selectedProviderLabel = useMemo(() => {
+    const providers = Array.from(
+      new Set(
+        selectedList
+          .map((o) => o.proveedor?.trim())
+          .filter((p): p is string => !!p),
+      ),
+    );
+    if (providers.length === 0) return "Sin proveedor";
+    if (providers.length === 1) return providers[0]!;
+    return `${providers[0]} +${providers.length - 1}`;
+  }, [selectedList]);
+
+  const submitTruckGroup = async () => {
+    if (!onCreateTruckGroup || selectedList.length < 2) return;
+    setGroupBusy(true);
+    try {
+      await onCreateTruckGroup({
+        orderIds: selectedList.map((o) => o.id),
+      });
+      setSelectedIds(new Set());
+      setUnifyMode(false);
+      setGroupModalOpen(false);
+    } catch {
+      /* alert en el módulo */
+    } finally {
+      setGroupBusy(false);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full max-w-5xl mx-auto flex-1 flex-col px-2 py-2 sm:py-4 md:px-0 md:py-6">
@@ -174,7 +312,7 @@ export function CollectionOrderReceptionistView({
         </div>
         <p className="mt-1 hidden text-sm font-medium text-indigo-100/90 sm:block">
           {activeTab === "general"
-            ? "Asigná una ubicación a cada orden. «Quitar» la saca del tablero."
+            ? "Asigná ubicación a cada OR. Para varias en el mismo camión, activá «Unificar OR»."
             : activeTab === "warehouse"
               ? "Mercancía en bodega. El operador debe asignar un RA a cada orden."
               : activeTab === "linkedRa"
@@ -209,8 +347,33 @@ export function CollectionOrderReceptionistView({
         warehouseCount={warehouseCount}
         linkedRaCount={linkedRaCount}
         noInventoryCount={noInventoryCount}
-        onChange={setActiveTab}
+        onChange={(tab) => {
+          setActiveTab(tab);
+          if (tab !== "general") setUnifyModeOn(false);
+        }}
       />
+
+      {onCreateTruckGroup && activeTab === "general" ? (
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setUnifyModeOn(!unifyMode)}
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest ${
+              unifyMode
+                ? "bg-indigo-600 text-white"
+                : "border border-slate-200 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+            }`}
+          >
+            <Truck className="h-3.5 w-3.5" aria-hidden />
+            {unifyMode ? "Unificar OR (activo)" : "Unificar OR para un camión"}
+          </button>
+          {unifyMode ? (
+            <p className="text-[11px] font-semibold text-slate-500">
+              Marcá las OR del mismo camión y confirmá abajo.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="text-sm font-bold text-slate-500">Cargando…</p>
@@ -237,13 +400,27 @@ export function CollectionOrderReceptionistView({
           {displayedOrders.map((o) => {
             const bultosTot = orderDisplayBultos(o);
             const currentStatus = o.receptionStatus;
-            const isBusy = busyOrderId === o.id;
+            const isBusy =
+              busyOrderId === o.id ||
+              busyOrderId === "__group__" ||
+              (o.receptionGroupId != null &&
+                busyOrderId === o.receptionGroupId);
             const inWarehouse = activeTab === "warehouse";
             const hasRa = orderHasLinkedRa(o);
             const isExpanded =
               expandedExtras.has(o.id) ||
               (currentStatus != null &&
                 RECEPTION_SECONDARY_ACTIONS.includes(currentStatus));
+            const selectable =
+              !!onCreateTruckGroup &&
+              unifyMode &&
+              activeTab === "general" &&
+              canSelectForTruckGroup(o);
+            const isSelected = selectedIds.has(o.id);
+            const groupMateCount = o.receptionGroupId
+              ? orders.filter((x) => x.receptionGroupId === o.receptionGroupId)
+                  .length
+              : 0;
 
             const renderStatusButton = (status: ReceptionStatusId) => {
               const active = currentStatus === status;
@@ -287,9 +464,11 @@ export function CollectionOrderReceptionistView({
               <div
                 key={o.id}
                 className={`relative flex flex-col gap-1.5 overflow-hidden rounded-xl border py-1.5 pl-2.5 pr-2 text-left shadow-sm ring-1 ring-slate-900/[0.03] dark:ring-white/[0.04] sm:flex-row sm:items-center sm:gap-3 sm:py-2 sm:pl-3 sm:pr-2.5 ${
-                  currentStatus
-                    ? RECEPTION_COLUMN_THEME[currentStatus].card
-                    : "border-slate-200/90 bg-white dark:border-slate-600/80 dark:bg-slate-900"
+                  isSelected
+                    ? "border-indigo-400 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40"
+                    : currentStatus
+                      ? RECEPTION_COLUMN_THEME[currentStatus].card
+                      : "border-slate-200/90 bg-white dark:border-slate-600/80 dark:bg-slate-900"
                 }`}
               >
                 <span
@@ -299,6 +478,19 @@ export function CollectionOrderReceptionistView({
                       : "from-indigo-500 to-sky-500"
                   }`}
                 />
+
+                {selectable ? (
+                  <label className="flex shrink-0 items-center pl-1 sm:pl-0">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      disabled={isBusy}
+                      onChange={() => toggleSelected(o.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      aria-label={`Seleccionar OR ${o.numero ?? o.id}`}
+                    />
+                  </label>
+                ) : null}
 
                 <div className="min-w-0 flex-1 pl-1">
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:gap-x-2">
@@ -313,6 +505,11 @@ export function CollectionOrderReceptionistView({
                         {bultosTot}
                       </span>
                     </span>
+                    {groupMateCount > 1 ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:px-2 sm:text-[9px]">
+                        Camión · {groupMateCount} OR
+                      </span>
+                    ) : null}
                     {inWarehouse ? (
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300 sm:px-2 sm:text-[9px]">
                         ● En bodega
@@ -447,6 +644,102 @@ export function CollectionOrderReceptionistView({
           })}
         </div>
       )}
+
+      {onCreateTruckGroup &&
+      unifyMode &&
+      selectedIds.size > 0 &&
+      activeTab === "general" ? (
+        <div className="sticky bottom-2 z-20 mt-2 shrink-0 rounded-2xl border border-indigo-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-indigo-800 dark:bg-slate-900/95">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              {selectedIds.size} seleccionada{selectedIds.size === 1 ? "" : "s"}
+              {selectedIds.size >= 2
+                ? ` · ${selectedProviderLabel}`
+                : " · marcá al menos 2 OR"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300"
+              >
+                Limpiar
+              </button>
+              <button
+                type="button"
+                disabled={selectedIds.size < 2 || busyOrderId != null}
+                onClick={() => setGroupModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#16263F] px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-40"
+              >
+                <Truck className="h-3.5 w-3.5" aria-hidden />
+                Confirmar camión
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {groupModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-3 sm:items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="truck-group-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          >
+            <h3
+              id="truck-group-title"
+              className="text-base font-black text-[#16263F] dark:text-slate-100"
+            >
+              {selectedProviderLabel}
+            </h3>
+            <p className="mt-0.5 text-[10px] font-black uppercase tracking-wide text-slate-400">
+              1 camión · {selectedList.length} OR
+            </p>
+            <ul className="mt-3 max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+              {selectedList.map((o) => (
+                <li
+                  key={o.id}
+                  className="flex items-baseline justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  <span>
+                    OR{" "}
+                    <span className="font-black tabular-nums">
+                      #{o.numero ?? o.id.slice(0, 6)}
+                    </span>
+                  </span>
+                  <span className="tabular-nums font-black text-violet-700 dark:text-violet-300">
+                    {orderDisplayBultos(o)} bult
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-right text-xs font-black text-slate-600 dark:text-slate-300">
+              Total{" "}
+              {selectedList.reduce((s, o) => s + orderDisplayBultos(o), 0)}{" "}
+              bultos
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                disabled={groupBusy}
+                onClick={() => setGroupModalOpen(false)}
+                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-[10px] font-black uppercase dark:border-slate-600"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={groupBusy || selectedList.length < 2}
+                onClick={() => void submitTruckGroup()}
+                className="flex-1 rounded-xl bg-[#16263F] py-2.5 text-[10px] font-black uppercase text-white disabled:opacity-40"
+              >
+                {groupBusy ? "Guardando…" : "Enviar a fila"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

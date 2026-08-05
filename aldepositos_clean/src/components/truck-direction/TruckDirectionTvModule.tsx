@@ -27,6 +27,7 @@ import {
   RAMP_OCCUPANCY_COPY,
   type RampOccupancyState,
 } from "@/lib/receptionLogistics/rampOccupancy";
+import { TvInventariadorRankingSpotlight } from "@/components/truck-direction/TvInventariadorRankingSpotlight";
 
 function queueDensity(count: number): ReceptionCardDensity {
   if (count >= 5) return "dense";
@@ -41,104 +42,96 @@ function rampDensity(count: number): ReceptionCardDensity {
   return "normal";
 }
 
-const TV_QUEUE_SCROLL_SPEED_PX = 0.55;
-const TV_QUEUE_SCROLL_PAUSE_MS = 2800;
+const TV_QUEUE_SCROLL_PX_PER_SEC = 28;
+const TV_QUEUE_SCROLL_PAUSE_MS = 2600;
 
-/** Lista con scroll automático cuando el contenido no cabe (columna En Fila en TV). */
+/**
+ * Columna con scroll automático suave cuando hay más pedidos de los que caben.
+ * Usa flex + min-h-0 (no absolute) para que la altura del viewport sea real.
+ */
 function TvAutoScrollQueueList({
   children,
   className,
   itemCount,
+  autoScroll = true,
 }: {
   children: React.ReactNode;
   className?: string;
   itemCount: number;
+  autoScroll?: boolean;
 }) {
   const listRef = useRef<HTMLUListElement>(null);
-  const [overflows, setOverflows] = useState(false);
+  const userPausedUntil = useRef(0);
 
   useEffect(() => {
     const el = listRef.current;
-    if (!el) return;
+    if (!el || !autoScroll || itemCount < 2) return;
 
-    const measure = () => {
-      setOverflows(el.scrollHeight > el.clientHeight + 6);
-    };
-
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    for (const child of el.children) {
-      ro.observe(child);
-    }
-
-    return () => ro.disconnect();
-    // Solo re-medir cuando cambia la cantidad de ítems (no en cada tick del reloj).
-  }, [itemCount]);
-
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el || !overflows || itemCount === 0) {
-      if (el) el.scrollTop = 0;
-      return;
-    }
-
-    let dir = 1;
-    let pauseUntil = Date.now() + TV_QUEUE_SCROLL_PAUSE_MS;
+    let dir: 1 | -1 = 1;
+    let pauseUntil = performance.now() + TV_QUEUE_SCROLL_PAUSE_MS;
     let raf = 0;
+    let lastTs = 0;
+    let cancelled = false;
 
-    const tick = () => {
+    const onUserScrollIntent = () => {
+      userPausedUntil.current = performance.now() + 5000;
+    };
+    el.addEventListener("wheel", onUserScrollIntent, { passive: true });
+    el.addEventListener("touchstart", onUserScrollIntent, { passive: true });
+    el.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
+
+    const tick = (ts: number) => {
+      if (cancelled) return;
       const max = el.scrollHeight - el.clientHeight;
-      if (max <= 0) {
-        raf = requestAnimationFrame(tick);
-        return;
+
+      if (max > 6 && ts >= userPausedUntil.current) {
+        if (ts >= pauseUntil) {
+          const dt = lastTs ? Math.min(48, ts - lastTs) : 16;
+          const step = (TV_QUEUE_SCROLL_PX_PER_SEC * dt) / 1000;
+          el.scrollTop += dir * step;
+
+          if (dir === 1 && el.scrollTop >= max - 1) {
+            el.scrollTop = max;
+            dir = -1;
+            pauseUntil = ts + TV_QUEUE_SCROLL_PAUSE_MS;
+          } else if (dir === -1 && el.scrollTop <= 1) {
+            el.scrollTop = 0;
+            dir = 1;
+            pauseUntil = ts + TV_QUEUE_SCROLL_PAUSE_MS;
+          }
+        }
       }
 
-      const now = Date.now();
-      if (now < pauseUntil) {
-        raf = requestAnimationFrame(tick);
-        return;
-      }
-
-      el.scrollTop += dir * TV_QUEUE_SCROLL_SPEED_PX;
-
-      if (el.scrollTop >= max - 1) {
-        el.scrollTop = max;
-        dir = -1;
-        pauseUntil = now + TV_QUEUE_SCROLL_PAUSE_MS;
-      } else if (el.scrollTop <= 0 && dir < 0) {
-        el.scrollTop = 0;
-        dir = 1;
-        pauseUntil = now + TV_QUEUE_SCROLL_PAUSE_MS;
-      }
-
+      lastTs = ts;
       raf = requestAnimationFrame(tick);
     };
 
-    el.scrollTop = 0;
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [overflows, itemCount]);
+    // Esperar layout antes del primer movimiento.
+    const startId = window.setTimeout(() => {
+      if (cancelled) return;
+      el.scrollTop = 0;
+      raf = requestAnimationFrame(tick);
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(startId);
+      cancelAnimationFrame(raf);
+      el.removeEventListener("wheel", onUserScrollIntent);
+      el.removeEventListener("touchstart", onUserScrollIntent);
+      el.removeEventListener("pointerdown", onUserScrollIntent);
+    };
+  }, [autoScroll, itemCount]);
 
   return (
-    <div className="relative min-h-0 flex-1">
-      {overflows ? (
-        <>
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-white via-white/80 to-transparent"
-            aria-hidden
-          />
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-white via-white/80 to-transparent"
-            aria-hidden
-          />
-        </>
-      ) : null}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <ul
         ref={listRef}
-        className={`${className ?? ""} ${overflows ? "overflow-hidden hide-scrollbar" : "overflow-y-auto custom-scrollbar"}`}
+        className={`custom-scrollbar flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain ${className ?? ""}`}
       >
         {children}
+        {/* Espacio extra para que el último pedido no quede cortado al fondo. */}
+        <li className="pointer-events-none h-6 shrink-0 list-none" aria-hidden />
       </ul>
     </div>
   );
@@ -307,7 +300,7 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
 
   return (
     <section
-      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-sm ${ui.panelBorder} ${ui.panelBg}`}
+      className={`flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border shadow-sm ${ui.panelBorder} ${ui.panelBg}`}
     >
       <header
         className={`relative shrink-0 bg-gradient-to-r px-4 py-3 shadow-lg md:px-5 md:py-3.5 ${ui.headerGradient} ${ui.headerGlow}`}
@@ -338,9 +331,14 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
       {trucks.length > 0 ? (
         <TvAutoScrollQueueList
           itemCount={trucks.length + (rampRetiroOccupied && isRampColumn ? 1 : 0)}
-          className={`flex min-h-0 flex-1 flex-col p-2 md:p-3 ${
-            isDense ? "gap-1" : density === "compact" ? "gap-1.5" : "gap-2.5"
-          }`}
+          autoScroll={isQueueColumn}
+          className={
+            isDense
+              ? "gap-1 p-2 pb-1 md:p-2.5"
+              : density === "compact"
+                ? "gap-1.5 p-2 pb-1 md:p-3"
+                : "gap-2 p-2 pb-1 md:gap-2.5 md:p-3"
+          }
         >
           {rampRetiroOccupied && isRampColumn ? (
             <RampOccupancyTvCard rampId={statusId} stripeClass={ui.stripe} />
@@ -440,8 +438,8 @@ function TvLiveClock() {
   });
 
   return (
-    <div className="hidden text-right sm:block">
-      <p className="flex items-center justify-end gap-2 text-2xl font-black tabular-nums tracking-tight text-[#16263F] md:text-3xl">
+    <div className="hidden text-center sm:block">
+      <p className="flex items-center justify-center gap-2 text-2xl font-black tabular-nums tracking-tight text-[#16263F] md:text-3xl">
         <Clock3 className="h-6 w-6 shrink-0 text-amber-600" aria-hidden />
         <span suppressHydrationWarning>{timeStr}</span>
       </p>
@@ -464,6 +462,7 @@ export function TruckDirectionTvModule({
   const loading = embedded ? (loadingFromParent ?? false) : internalQueue.loading;
   const { occupancy: rampOccupancy } = useRampOccupancy();
   const [fullscreen, setFullscreen] = useState(false);
+  const [rankingVisible, setRankingVisible] = useState(false);
 
   useEffect(() => {
     const onFs = () => setFullscreen(!!document.fullscreenElement);
@@ -547,8 +546,8 @@ export function TruckDirectionTvModule({
 
   return (
     <div className="force-light relative flex h-dvh min-h-screen flex-col overflow-hidden bg-white text-slate-900">
-      <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 shadow-sm md:px-6 md:py-4">
-        <div className="min-w-0">
+      <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 shadow-sm md:gap-4 md:px-6 md:py-4">
+        <div className="relative z-[1] min-w-0 shrink-0 md:max-w-[14rem] lg:max-w-[16rem]">
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#16263F]/70">
             Aldepósitos
           </p>
@@ -569,9 +568,29 @@ export function TruckDirectionTvModule({
           </p>
         </div>
 
-        <TvLiveClock />
+        {/* Reloj al centro; con ranking se corre a la izquierda del grupo */}
+        <div
+          className={`pointer-events-none absolute inset-y-0 z-0 flex items-center transition-[left,right,transform] duration-500 ease-out ${
+            rankingVisible
+              ? "left-[16%] right-[11rem] justify-start gap-4 xl:left-[18%] xl:right-[13rem]"
+              : "inset-x-0 justify-center"
+          }`}
+        >
+          <div
+            className={`pointer-events-auto shrink-0 transition-transform duration-500 ease-out ${
+              rankingVisible ? "translate-x-0" : ""
+            }`}
+          >
+            <TvLiveClock />
+          </div>
+          <div className="pointer-events-auto hidden min-w-0 max-w-full lg:block">
+            <TvInventariadorRankingSpotlight
+              onVisibilityChange={setRankingVisible}
+            />
+          </div>
+        </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="relative z-[1] flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => void (fullscreen ? exitFullscreen() : enterFullscreen())}
@@ -606,7 +625,7 @@ export function TruckDirectionTvModule({
         </div>
       ) : (
         <div
-          className={`relative z-10 grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:gap-4 md:p-5 ${
+          className={`relative z-10 grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:gap-4 md:p-5 ${
             visibleColumns.length >= 5
               ? "md:grid-cols-5"
               : visibleColumns.length === 4

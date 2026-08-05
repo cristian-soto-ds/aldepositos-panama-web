@@ -22,13 +22,19 @@ import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
+  collectionOrderTransferBlockedReason,
   deleteCollectionOrderById,
+  fetchCollectionOrderById,
+  fetchCollectionOrders,
+  findOtherOrderWithNumero,
   insertCollectionOrder,
+  isCollectionOrderInBodega,
   parseCollectionOrderNumber,
   sortCollectionOrdersByNumero,
   updateCollectionOrder,
   upsertCollectionOrderInList,
 } from "@/lib/collectionOrders";
+import { classifyHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
 import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
 import {
   cubicajeM3FromDims,
@@ -83,7 +89,11 @@ import {
 } from "@/components/control-panel/CollectionOrderGeminiPanel";
 import { GeneralChatGptPanel } from "@/components/control-panel/GeneralChatGptPanel";
 import { AldeGptTerraIcon } from "@/components/ui/AldeGptTerraBrand";
-import { ALDEGPT_TERRA_DISPLAY_NAME } from "@/lib/aldeGptTerraBrand";
+import {
+  ALDEGPT_DEFAULT_MODEL,
+  ALDEGPT_TERRA_DISPLAY_NAME,
+  type AldeGptModelKey,
+} from "@/lib/aldeGptTerraBrand";
 import {
   aldeGptTerraLineToImportInput,
   collectionLineDedupeKey,
@@ -97,7 +107,6 @@ import {
   HtmImportResultModal,
   type HtmImportResultSummary,
 } from "@/components/modals/HtmImportResultModal";
-import { classifyHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
 import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   applyPesoTotalToLine,
@@ -127,7 +136,11 @@ import {
   recordGeminiRequestSuccess,
 } from "@/lib/geminiClientUsage";
 
-const generateId = () => Math.random().toString(36).slice(2, 11);
+const generateId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `or-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 /** Autosave más lento: 300 ms pisaba filas nuevas y saturaba Realtime. */
 const ORDER_AUTOSAVE_MS = 1500;
 
@@ -439,6 +452,20 @@ function withoutBlankCollectionLines(
   return lines.filter((l) => !isBlankCollectionOrderLine(l));
 }
 
+/** Hay algo que valga la pena persistir al salir a la lista. */
+function collectionOrderHasContent(order: CollectionOrder): boolean {
+  if (String(order.numero ?? "").trim()) return true;
+  if (String(order.cliente ?? "").trim()) return true;
+  if (String(order.proveedor ?? "").trim()) return true;
+  if (String(order.marca ?? "").trim()) return true;
+  if (String(order.expedidor ?? "").trim()) return true;
+  if (String(order.notes ?? "").trim()) return true;
+  if (order.expectedBultos != null && order.expectedBultos > 0) return true;
+  if (order.expectedPesoKg != null && order.expectedPesoKg > 0) return true;
+  if (order.expectedCbm != null && order.expectedCbm > 0) return true;
+  return (order.lines ?? []).some((l) => !isBlankCollectionOrderLine(l));
+}
+
 function newDraftOrder(): CollectionOrder {
   const now = new Date().toISOString();
   return {
@@ -501,7 +528,7 @@ export function CollectionOrderModule({
   userEmail,
   userDisplayName = null,
 }: CollectionOrderModuleProps) {
-  const { orders, setOrders, reloadOrders, ordersLoading } =
+  const { orders, setOrders, reloadOrders, ordersLoading, ordersReloadError } =
     useSupabaseCollectionOrders({ enabled: !!userEmail, userKey: userEmail });
 
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
@@ -568,6 +595,8 @@ export function CollectionOrderModule({
   const ordersRef = useRef<CollectionOrder[]>([]);
   const isOrderSavingRef = useRef(false);
   const saveGenerationRef = useRef(0);
+  /** OR con extracción Terra/Alde.IA en curso: no autosave ni ecos vacíos. */
+  const extractBusyOrderIdsRef = useRef<Set<string>>(new Set());
   const lastSavedOrderHashRef = useRef("");
   const lastRemoteOrderHashRef = useRef("");
   /** Evita rebroadcast del estado que acabamos de recibir/fusionar. */
@@ -577,6 +606,22 @@ export function CollectionOrderModule({
   /** Remoto encolado solo mientras hay un save en curso. */
   const pendingRemoteOrderRef = useRef<CollectionOrder | null>(null);
   const prevEditingIdRef = useRef<string | null>(null);
+  /** Evita que autosave / ecos realtime resuciten OR recién borradas. */
+  const deletedOrderIdsRef = useRef<Set<string>>(new Set());
+  const deletedTombstoneTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+
+  const markOrderDeleted = useCallback((id: string) => {
+    deletedOrderIdsRef.current.add(id);
+    const prevTimer = deletedTombstoneTimersRef.current.get(id);
+    if (prevTimer) clearTimeout(prevTimer);
+    const t = setTimeout(() => {
+      deletedOrderIdsRef.current.delete(id);
+      deletedTombstoneTimersRef.current.delete(id);
+    }, 120_000);
+    deletedTombstoneTimersRef.current.set(id, t);
+  }, []);
 
   editingRef.current = editing;
   ordersRef.current = orders;
@@ -584,6 +629,10 @@ export function CollectionOrderModule({
   const applyMergedRemote = useCallback((remote: CollectionOrder, fromLive: boolean) => {
     const current = editingRef.current;
     if (!current || current.id !== remote.id) return;
+    if (extractBusyOrderIdsRef.current.has(remote.id)) {
+      pendingRemoteOrderRef.current = remote;
+      return;
+    }
 
     const remoteLines = Array.isArray(remote.lines) ? remote.lines : [];
     const localLines = current.lines;
@@ -591,9 +640,9 @@ export function CollectionOrderModule({
     const isDirty = localHash !== lastSavedOrderHashRef.current;
     const remoteLinesHash = JSON.stringify(remoteLines);
 
-    // Ecos live incompletos (p. ej. tras extraer refs): no pisar el editor.
+    // Remoto incompleto (eco live / reload / post-save): no pisar el editor.
+    // Incluye el caso Terra: refs en pantalla y BD/lista aún vacías.
     if (
-      fromLive &&
       isIncompleteCollectionRemote(
         serverBaselineLinesRef.current,
         localLines,
@@ -784,7 +833,55 @@ export function CollectionOrderModule({
     // No borrar la selección: si vuelves a la lista con «Lista», se conserva.
   };
 
-  const backToList = () => {
+  const backToList = async () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    const current = editingRef.current;
+    if (
+      current &&
+      userEmail &&
+      !deletedOrderIdsRef.current.has(current.id)
+    ) {
+      const mergedLines = mergePendingTotalsIntoLines(
+        current.lines,
+        unitsMode,
+        weightMode,
+        pendingUndTot,
+        pendingPesoTot,
+      );
+      const mergedOrder: CollectionOrder = {
+        ...current,
+        lines: mergedLines,
+        updatedAt: new Date().toISOString(),
+      };
+      const isDirty =
+        JSON.stringify(mergedOrder) !== lastSavedOrderHashRef.current;
+      if (collectionOrderHasContent(mergedOrder) || isDirty) {
+        editingRef.current = mergedOrder;
+        setEditing(mergedOrder);
+        setPendingUndTot({});
+        setPendingPesoTot({});
+        setSaveBusy(true);
+        try {
+          const ok = await persistOrder({
+            order: mergedOrder,
+            showAlerts: false,
+          });
+          if (!ok) {
+            alert(
+              "No se pudo guardar la OR al volver a la lista. Revisá la conexión e intentá de nuevo con «Guardar borrador».",
+            );
+            return;
+          }
+        } finally {
+          setSaveBusy(false);
+        }
+      }
+    }
+
     setEditing(null);
     setUnresolvedRefByRow({});
     setPendingUndTot({});
@@ -806,6 +903,15 @@ export function CollectionOrderModule({
   };
 
   const patchGeminiJob = (orderId: string, patch: Partial<CollectionOrderGeminiJobState>) => {
+    if (patch.busy === true) {
+      extractBusyOrderIdsRef.current.add(orderId);
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    } else if (patch.busy === false) {
+      extractBusyOrderIdsRef.current.delete(orderId);
+    }
     setGeminiJobByOrderId((prev) => {
       const current = prev[orderId] ?? makeEmptyGeminiJob();
       return {
@@ -968,8 +1074,11 @@ export function CollectionOrderModule({
   };
 
   const persistOrder = useCallback(
-    async (params: { order: CollectionOrder; showAlerts: boolean }) => {
+    async (params: { order: CollectionOrder; showAlerts: boolean }): Promise<boolean> => {
       const { order, showAlerts } = params;
+      if (deletedOrderIdsRef.current.has(order.id)) {
+        return false;
+      }
       const saveGen = ++saveGenerationRef.current;
       const normalizedOrder = normalizeCollectionOrderFields(order);
 
@@ -990,6 +1099,19 @@ export function CollectionOrderModule({
       const suggested = String(maxExisting + 1);
       const numeroRaw = String(normalizedOrder.numero ?? "").trim();
       const numero = numeroRaw || suggested;
+      const dup = findOtherOrderWithNumero(
+        ordersRef.current,
+        numero,
+        normalizedOrder.id,
+      );
+      if (dup) {
+        if (showAlerts) {
+          alert(
+            `Ya existe una OR con el número ${numero}. Los números OR son únicos.`,
+          );
+        }
+        return false;
+      }
       const payload: CollectionOrder = {
         ...normalizedOrder,
         lines: linesForSave,
@@ -997,61 +1119,175 @@ export function CollectionOrderModule({
         updatedAt: new Date().toISOString(),
       };
       const snapshotHash = JSON.stringify(order);
-      const exists = ordersRef.current.some((o) => o.id === payload.id);
+      const inLocalList = ordersRef.current.some((o) => o.id === payload.id);
       if (showAlerts) setSaveBusy(true);
       isOrderSavingRef.current = true;
       let savedOk = false;
       try {
-        if (exists) await updateCollectionOrder(payload);
-        else await insertCollectionOrder(payload);
+        if (deletedOrderIdsRef.current.has(payload.id)) {
+          return false;
+        }
+        // Carrera Terra/autosave: no escribir un payload más vacío que el editor.
+        if (saveGen !== saveGenerationRef.current) {
+          return false;
+        }
+        const liveNow =
+          editingRef.current?.id === payload.id
+            ? editingRef.current
+            : ordersRef.current.find((o) => o.id === payload.id) ?? null;
+        if (
+          liveNow &&
+          isIncompleteCollectionRemote(
+            serverBaselineLinesRef.current,
+            liveNow.lines,
+            payload.lines,
+          )
+        ) {
+          return false;
+        }
+        // Nunca insertar a ciegas: si la OR ya no está en lista local, puede ser
+        // borrado en curso. Confirmar en BD; si no existe y está tombstone → no crear.
+        if (inLocalList) {
+          await updateCollectionOrder(payload);
+        } else {
+          const remote = await fetchCollectionOrderById(payload.id);
+          if (deletedOrderIdsRef.current.has(payload.id)) {
+            return false;
+          }
+          if (remote) await updateCollectionOrder(payload);
+          else await insertCollectionOrder(payload);
+        }
+        // Tras el await: otro extract pudo ganar. Si este save vacío ya escribió,
+        // restaurar el editor rico en BD y no tocar la UI.
+        if (saveGen !== saveGenerationRef.current) {
+          return false;
+        }
+        const liveAfter =
+          editingRef.current?.id === payload.id
+            ? editingRef.current
+            : ordersRef.current.find((o) => o.id === payload.id) ?? null;
+        if (
+          liveAfter &&
+          isIncompleteCollectionRemote(
+            serverBaselineLinesRef.current,
+            liveAfter.lines,
+            payload.lines,
+          )
+        ) {
+          try {
+            await updateCollectionOrder({
+              ...liveAfter,
+              updatedAt: new Date().toISOString(),
+            });
+            savedOk = true;
+          } catch {
+            /* ignore heal */
+          }
+          lastRemoteOrderHashRef.current = JSON.stringify(liveAfter.lines);
+          return savedOk;
+        }
+        // Carrera: se borró mientras guardábamos → deshacer resurrección.
+        if (deletedOrderIdsRef.current.has(payload.id)) {
+          try {
+            await deleteCollectionOrderById(payload.id);
+          } catch {
+            /* ignore */
+          }
+          return false;
+        }
         savedOk = true;
 
         // Guardado obsoleto: otra escritura más nueva ya arrancó — no pisar lista/UI.
         if (saveGen !== saveGenerationRef.current) {
-          return;
+          return savedOk;
+        }
+        if (deletedOrderIdsRef.current.has(payload.id)) {
+          return false;
         }
 
-        setOrders((prev) => upsertCollectionOrderInList(prev, payload));
-        setEditing((prev) => {
-          if (!prev || prev.id !== payload.id) return prev;
-          if (JSON.stringify(prev) === snapshotHash) {
-            editingRef.current = payload;
-            return payload;
+        setOrders((prev) => {
+          if (deletedOrderIdsRef.current.has(payload.id)) return prev;
+          // Save vacío/atrasado tras extracción: no devolver la lista a 0 filas.
+          if (
+            editingRef.current?.id === payload.id &&
+            isIncompleteCollectionRemote(
+              serverBaselineLinesRef.current,
+              editingRef.current.lines,
+              payload.lines,
+            )
+          ) {
+            return prev;
           }
-          // Conservar ediciones posteriores; integrar filas del payload (p. ej. altas remotas).
-          const mergedLines = mergeConcurrentCollectionLines(
+          return upsertCollectionOrderInList(prev, payload);
+        });
+        const payloadIncompleteVsEditor =
+          editingRef.current?.id === payload.id &&
+          isIncompleteCollectionRemote(
             serverBaselineLinesRef.current,
-            prev.lines,
+            editingRef.current.lines,
             payload.lines,
           );
-          const next = {
-            ...prev,
-            lines: mergedLines,
-            ...(!String(prev.numero ?? "").trim() && numero
-              ? { numero }
-              : {}),
-          };
-          editingRef.current = next;
-          return next;
-        });
-        serverBaselineLinesRef.current = JSON.parse(
-          JSON.stringify(payload.lines),
-        ) as CollectionOrderLine[];
-        lastSavedOrderHashRef.current = JSON.stringify(payload);
-        lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
-        lastLivePublishedHashRef.current = JSON.stringify(payload.lines);
+        if (payloadIncompleteVsEditor) {
+          // Save obsoleto (p. ej. OR vacía) tras Terra: no tocar UI ni baseline.
+          lastRemoteOrderHashRef.current = JSON.stringify(
+            editingRef.current!.lines,
+          );
+        } else {
+          setEditing((prev) => {
+            if (!prev || prev.id !== payload.id) return prev;
+            if (JSON.stringify(prev) === snapshotHash) {
+              editingRef.current = payload;
+              return payload;
+            }
+            // Conservar ediciones posteriores; integrar filas del payload (p. ej. altas remotas).
+            const mergedLines = mergeConcurrentCollectionLines(
+              serverBaselineLinesRef.current,
+              prev.lines,
+              payload.lines,
+            );
+            const next = {
+              ...prev,
+              lines: mergedLines,
+              ...(!String(prev.numero ?? "").trim() && numero
+                ? { numero }
+                : {}),
+            };
+            editingRef.current = next;
+            return next;
+          });
+          serverBaselineLinesRef.current = JSON.parse(
+            JSON.stringify(payload.lines),
+          ) as CollectionOrderLine[];
+          lastSavedOrderHashRef.current = JSON.stringify(payload);
+          lastRemoteOrderHashRef.current = JSON.stringify(payload.lines);
+          lastLivePublishedHashRef.current = JSON.stringify(payload.lines);
+        }
         if (showAlerts) alert(`Orden guardada. Número: ${numero}.`);
       } catch (e) {
         console.error(e);
         if (showAlerts) {
-          alert("No se pudo guardar. ¿Aplicaste la migración SQL `collection_orders` en Supabase?");
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/unique|duplicate|23505/i.test(msg)) {
+            alert(
+              `No se pudo guardar: el número OR ${numero} ya existe (los OR son únicos).`,
+            );
+          } else {
+            alert(
+              "No se pudo guardar. ¿Aplicaste las migraciones SQL de `collection_orders` en Supabase?",
+            );
+          }
         }
       } finally {
         if (saveGen === saveGenerationRef.current) {
           isOrderSavingRef.current = false;
           const pending = pendingRemoteOrderRef.current;
           pendingRemoteOrderRef.current = null;
-          if (savedOk && pending && editingRef.current) {
+          if (
+            savedOk &&
+            pending &&
+            editingRef.current &&
+            !deletedOrderIdsRef.current.has(payload.id)
+          ) {
             const pendingLines = Array.isArray(pending.lines) ? pending.lines : [];
             const savedLines = payload.lines;
             const pendingAt = Date.parse(String(pending.updatedAt ?? ""));
@@ -1069,12 +1305,18 @@ export function CollectionOrderModule({
             if (!pendingOlder && !pendingSubset) {
               applyMergedRemote(pending, true);
             }
-          } else if (!savedOk && pending && editingRef.current) {
+          } else if (
+            !savedOk &&
+            pending &&
+            editingRef.current &&
+            !deletedOrderIdsRef.current.has(payload.id)
+          ) {
             applyMergedRemote(pending, true);
           }
         }
         if (showAlerts) setSaveBusy(false);
       }
+      return savedOk;
     },
     [applyMergedRemote, setOrders],
   );
@@ -1097,19 +1339,31 @@ export function CollectionOrderModule({
 
   const scheduleAutoSave = useCallback(
     (order: CollectionOrder | null) => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
       if (!order || !userEmail) return;
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      if (deletedOrderIdsRef.current.has(order.id)) return;
+      if (extractBusyOrderIdsRef.current.has(order.id)) return;
       autoSaveTimerRef.current = setTimeout(() => {
         autoSaveTimerRef.current = null;
         const latest = editingRef.current;
         if (!latest) return;
+        if (deletedOrderIdsRef.current.has(latest.id)) return;
+        if (extractBusyOrderIdsRef.current.has(latest.id)) return;
         // Una sola escritura en vuelo: si hay save activo, reintenta al terminar.
         if (isOrderSavingRef.current) {
           saveGenerationRef.current += 1; // invalida el save viejo al completar
           autoSaveTimerRef.current = setTimeout(() => {
             autoSaveTimerRef.current = null;
             const again = editingRef.current;
-            if (again && !isOrderSavingRef.current) {
+            if (
+              again &&
+              !isOrderSavingRef.current &&
+              !deletedOrderIdsRef.current.has(again.id) &&
+              !extractBusyOrderIdsRef.current.has(again.id)
+            ) {
               void persistOrder({ order: again, showAlerts: false });
             }
           }, 400);
@@ -1128,14 +1382,44 @@ export function CollectionOrderModule({
     };
   }, [editing, scheduleAutoSave]);
 
-  const removeOrderFromState = async (o: CollectionOrder) => {
-    await deleteCollectionOrderById(o.id);
-    await syncCollectionOrderToReceptionQueue({
-      ...o,
-      receptionStatus: undefined,
+  /** Si un autosave / realtime resucitó una OR tombstone, sacarla de UI y de BD. */
+  useEffect(() => {
+    const zombies = orders.filter((o) => deletedOrderIdsRef.current.has(o.id));
+    if (zombies.length === 0) return;
+    setOrders((prev) => {
+      const next = prev.filter((o) => !deletedOrderIdsRef.current.has(o.id));
+      return next.length === prev.length ? prev : next;
     });
-    setOrders((prev) => prev.filter((x) => x.id !== o.id));
+    for (const z of zombies) {
+      void deleteCollectionOrderById(z.id).catch(() => {});
+    }
+  }, [orders, setOrders]);
+
+  const removeOrderFromState = async (o: CollectionOrder) => {
+    markOrderDeleted(o.id);
+    saveGenerationRef.current += 1;
+    isOrderSavingRef.current = false;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    editingRef.current = null;
     if (editing?.id === o.id) setEditing(null);
+    // Quitar de UI de inmediato para que un autosave en vuelo no vea la OR
+    // como “existe en lista” y la vuelva a upsert-ear.
+    setOrders((prev) => prev.filter((x) => x.id !== o.id));
+    ordersRef.current = ordersRef.current.filter((x) => x.id !== o.id);
+
+    try {
+      await deleteCollectionOrderById(o.id);
+      await syncCollectionOrderToReceptionQueue({
+        ...o,
+        receptionStatus: undefined,
+      });
+    } catch (e) {
+      deletedOrderIdsRef.current.delete(o.id);
+      throw e;
+    }
   };
 
   const requestDeleteOrder = (o: CollectionOrder) => {
@@ -1212,13 +1496,35 @@ export function CollectionOrderModule({
     setDeleteConfirmBusy(true);
     try {
       if (deleteConfirm.kind === "single") {
-        await removeOrderFromState(deleteConfirm.order);
-        setDeleteConfirm(null);
+        try {
+          await removeOrderFromState(deleteConfirm.order);
+          setDeleteConfirm(null);
+        } catch (e) {
+          console.error(e);
+          alert("No se pudo eliminar en Supabase.");
+          void reloadOrders();
+        }
         return;
       }
 
       let failed = 0;
       const deletedIds: string[] = [];
+      for (const o of deleteConfirm.orders) {
+        markOrderDeleted(o.id);
+      }
+      saveGenerationRef.current += 1;
+      isOrderSavingRef.current = false;
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      if (editing && deleteConfirm.orders.some((o) => o.id === editing.id)) {
+        editingRef.current = null;
+        setEditing(null);
+      }
+      const bulkIds = new Set(deleteConfirm.orders.map((o) => o.id));
+      setOrders((prev) => prev.filter((x) => !bulkIds.has(x.id)));
+      ordersRef.current = ordersRef.current.filter((x) => !bulkIds.has(x.id));
       for (const o of deleteConfirm.orders) {
         try {
           await deleteCollectionOrderById(o.id);
@@ -1230,6 +1536,7 @@ export function CollectionOrderModule({
         } catch (e) {
           console.error(e);
           failed += 1;
+          deletedOrderIdsRef.current.delete(o.id);
         }
       }
       const deletedSet = new Set(deletedIds);
@@ -1279,33 +1586,55 @@ export function CollectionOrderModule({
   }, [orders, selectedOrderIds]);
 
   const confirmHtmImport = async (imported: CollectionOrder[]) => {
-    const { toCreate, toUpdate, unchangedNumeros } = classifyHtmCollectionOrders(
-      imported,
-      orders,
-    );
-    if (toCreate.length === 0 && toUpdate.length === 0) {
-      setHtmImportOpen(false);
-      setHtmImportResult({
-        created: 0,
-        updated: 0,
-        unchanged: unchangedNumeros.length,
-        failed: 0,
-        emptyReason:
-          unchangedNumeros.length > 0 ? "all-up-to-date" : "nothing-to-import",
-      });
-      return;
-    }
     setHtmImportBusy(true);
     let created = 0;
     let updated = 0;
     let fail = 0;
     try {
+      // Clasificar contra lista fresca de BD (evita duplicar por lista stale).
+      let existing = orders;
+      try {
+        existing = await fetchCollectionOrders();
+        setOrders(existing);
+      } catch (e) {
+        console.error(e);
+      }
+      const { toCreate, toUpdate, unchangedNumeros } = classifyHtmCollectionOrders(
+        imported,
+        existing,
+      );
+      if (toCreate.length === 0 && toUpdate.length === 0) {
+        setHtmImportOpen(false);
+        setHtmImportResult({
+          created: 0,
+          updated: 0,
+          unchanged: unchangedNumeros.length,
+          failed: 0,
+          emptyReason:
+            unchangedNumeros.length > 0 ? "all-up-to-date" : "nothing-to-import",
+        });
+        return;
+      }
       for (const order of toCreate) {
         try {
           await insertCollectionOrder(order);
           created += 1;
         } catch (e) {
           console.error(e);
+          const msg = e instanceof Error ? e.message : String(e);
+          // Choque unique numero: intentar update del existente.
+          if (/unique|duplicate|23505/i.test(msg)) {
+            const match = findOtherOrderWithNumero(existing, order.numero);
+            if (match) {
+              try {
+                await updateCollectionOrder({ ...order, id: match.id });
+                updated += 1;
+                continue;
+              } catch (e2) {
+                console.error(e2);
+              }
+            }
+          }
           fail += 1;
         }
       }
@@ -1492,6 +1821,11 @@ export function CollectionOrderModule({
 
   const confirmTransfer = async (taskId: string, merge: "append" | "replace") => {
     if (!editing) return;
+    const bodegaBlock = collectionOrderTransferBlockedReason(editing);
+    if (bodegaBlock) {
+      alert(bodegaBlock);
+      return;
+    }
     const mergedLines = mergePendingTotalsIntoLines(
       editing.lines,
       unitsMode,
@@ -1618,6 +1952,15 @@ export function CollectionOrderModule({
       progress: { current: number; total: number } | null;
     }>,
   ) => {
+    if (patch.busy === true) {
+      extractBusyOrderIdsRef.current.add(oid);
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    } else if (patch.busy === false) {
+      extractBusyOrderIdsRef.current.delete(oid);
+    }
     setTerraJobByOrderId((prev) => {
       const cur = prev[oid] ?? {
         busy: false,
@@ -1825,7 +2168,24 @@ export function CollectionOrderModule({
       const nextOrder: CollectionOrder = {
         ...baseOrder,
         lines: cleanedLines.length > 0 ? cleanedLines : [],
+        updatedAt: new Date().toISOString(),
       };
+
+      // Invalidar autosaves/saves vacíos en vuelo y fijar el editor YA
+      // (si no, un persist viejo reaparece y borra las refs en pantalla).
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      saveGenerationRef.current += 1;
+      editingRef.current = nextOrder;
+      ordersRef.current = upsertCollectionOrderInList(
+        ordersRef.current,
+        nextOrder,
+      );
+      lastRemoteOrderHashRef.current = JSON.stringify(nextOrder.lines);
+      lastLivePublishedHashRef.current = JSON.stringify(nextOrder.lines);
+
       setEditing((prev) =>
         prev && prev.id === targetOrderId ? nextOrder : prev,
       );
@@ -1845,15 +2205,22 @@ export function CollectionOrderModule({
     [persistOrder, runCatalogLookup],
   );
 
-  /** Extracción documental Terra ligada a una OR (sobrevive al salir de la orden). */
+  /** Extracción documental Terra/Sol ligada a una OR (sobrevive al salir de la orden). */
   const runTerraDocumentExtract = useCallback(
     async (args: {
       targetOrderId: string;
       text: string;
       files: File[];
       extractMode: "full" | "refsBultosOnly";
+      model?: AldeGptModelKey;
     }): Promise<{ reply: string; lines: AldeGptTerraLine[] }> => {
-      const { targetOrderId, text, files, extractMode } = args;
+      const {
+        targetOrderId,
+        text,
+        files,
+        extractMode,
+        model = ALDEGPT_DEFAULT_MODEL,
+      } = args;
       const fileNames = files.map((f) => f.name);
       patchTerraJob(targetOrderId, {
         busy: true,
@@ -1888,6 +2255,7 @@ export function CollectionOrderModule({
             fd.append("message", message);
             fd.append("history", JSON.stringify([]));
             fd.append("extractMode", extractMode);
+            fd.append("model", model);
             fd.append(
               "file",
               file,
@@ -1909,6 +2277,7 @@ export function CollectionOrderModule({
                 message,
                 history: [],
                 extractMode,
+                model,
               }),
             });
           }
@@ -2159,6 +2528,13 @@ export function CollectionOrderModule({
           noInventoryCount={noInventoryCount}
           onChange={setListTab}
         />
+
+        {ordersReloadError ? (
+          <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            No se pudo refrescar la lista (se mantuvo la última carga).{" "}
+            {ordersReloadError}
+          </p>
+        ) : null}
 
         {ordersLoading ? (
           <p className="text-sm font-bold text-slate-500">Cargando…</p>
@@ -2736,6 +3112,7 @@ export function CollectionOrderModule({
     const nextOrder: CollectionOrder = {
       ...baseOrder,
       lines: cleanedLines.length > 0 ? cleanedLines : [],
+      updatedAt: new Date().toISOString(),
       ...(cartones != null &&
       cartones > 0 &&
       (baseOrder.expectedBultos == null || baseOrder.expectedBultos === 0)
@@ -2743,9 +3120,20 @@ export function CollectionOrderModule({
         : {}),
     };
     patchGeminiJob(orderId, { lastLines: [] });
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    saveGenerationRef.current += 1;
+    editingRef.current = nextOrder;
+    ordersRef.current = upsertCollectionOrderInList(
+      ordersRef.current,
+      nextOrder,
+    );
+    lastRemoteOrderHashRef.current = JSON.stringify(nextOrder.lines);
+    lastLivePublishedHashRef.current = JSON.stringify(nextOrder.lines);
     setEditing((prev) => {
       if (prev && prev.id === orderId) {
-        editingRef.current = nextOrder;
         return nextOrder;
       }
       return prev;
@@ -2763,10 +3151,17 @@ export function CollectionOrderModule({
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2 rounded-2xl border border-[#1f3467]/20 bg-gradient-to-r from-white via-slate-50 to-white p-2 shadow-lg shadow-indigo-100/60 backdrop-blur-sm dark:border-indigo-900/40 dark:bg-slate-900/90 dark:shadow-black/20">
           <button
             type="button"
-            onClick={backToList}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
+            disabled={saveBusy}
+            title="Guarda la OR (si hay datos) y vuelve a la lista"
+            onClick={() => void backToList()}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 shadow-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
           >
-            <ArrowLeft className="h-4 w-4" /> Lista
+            {saveBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <ArrowLeft className="h-4 w-4" />
+            )}
+            Lista
           </button>
           <button
             type="button"
@@ -2842,13 +3237,36 @@ export function CollectionOrderModule({
           </button>
           <button
             type="button"
-            disabled={transferLinesCount === 0}
-            onClick={() => setTransferOpen(true)}
+            disabled={
+              transferLinesCount === 0 ||
+              !editing ||
+              !isCollectionOrderInBodega(editing)
+            }
+            title={
+              editing && !isCollectionOrderInBodega(editing)
+                ? "El OR debe estar en bodega (Completado) para pasarlo a un RA"
+                : transferLinesCount === 0
+                  ? "Agregá al menos una referencia con datos"
+                  : "Transferir referencias al RA"
+            }
+            onClick={() => {
+              if (!editing) return;
+              const reason = collectionOrderTransferBlockedReason(editing);
+              if (reason) {
+                alert(reason);
+                return;
+              }
+              setTransferOpen(true);
+            }}
             className="ml-auto flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:brightness-110 disabled:opacity-50"
           >
             <Send className="h-4 w-4" /> Pasar al RA
           </button>
         </div>
+        <p className="mb-2 text-[10px] text-slate-500 dark:text-slate-400">
+          Podés digitar referencias en cualquier etapa de recepción. «Pasar al
+          RA» solo se habilita cuando el OR está en bodega (Completado).
+        </p>
 
         {geminiJob.busy && (
           <div
@@ -3708,13 +4126,14 @@ export function CollectionOrderModule({
         onClose={() => setChatGptOpen(false)}
         extractJobBusy={terraJob.busy}
         onApplyLines={applyTerraLinesToOrder}
-        onSendExtract={async ({ text, files, extractMode }) => {
+        onSendExtract={async ({ text, files, extractMode, model }) => {
           // Captura el id de ESTA orden: puedes salir a la lista u otra OR.
           return runTerraDocumentExtract({
             targetOrderId: orderId,
             text,
             files,
             extractMode,
+            model,
           });
         }}
       />

@@ -26,15 +26,18 @@ type Options = {
 export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
   const [orders, setOrders] = useState<CollectionOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reloadError, setReloadError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!enabled) {
       setOrders([]);
+      setReloadError(null);
       setLoading(false);
       return;
     }
     try {
       const list = await fetchCollectionOrders();
+      setReloadError(null);
       setOrders((prev) => {
         const prevJson = JSON.stringify(prev);
         const nextJson = JSON.stringify(list);
@@ -42,7 +45,12 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
       });
     } catch (e) {
       console.error(e);
-      setOrders([]);
+      // No vaciar la lista: un fallo de red no debe “borrar” las OR de la UI.
+      setReloadError(
+        e instanceof Error
+          ? e.message
+          : "No se pudieron recargar las órdenes de recolección.",
+      );
     } finally {
       setLoading(false);
     }
@@ -113,5 +121,11 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
     };
   }, [enabled, reload]);
 
-  return { orders, setOrders, reloadOrders: reload, ordersLoading: loading };
+  return {
+    orders,
+    setOrders,
+    reloadOrders: reload,
+    ordersLoading: loading,
+    ordersReloadError: reloadError,
+  };
 }

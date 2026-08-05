@@ -20,6 +20,12 @@ export type ReceptionTruck = {
   completedAt?: string;
   /** Vinculada a una orden de recolección (vista recepcionista). */
   collectionOrderId?: string;
+  /** Varias OR en el mismo camión físico. */
+  collectionOrderIds?: string[];
+  /** Números OR visibles en la tarjeta (grupo). */
+  orderNumeros?: string[];
+  /** Desglose por OR: número + bultos (tarjeta camión). */
+  orderLines?: Array<{ numero: string; bultos: number }>;
   source?: "collection_order" | "import";
   createdAt: string;
   updatedAt: string;

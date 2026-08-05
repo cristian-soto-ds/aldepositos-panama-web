@@ -511,7 +511,11 @@ export function parseCollectionOrdersFromHtm(html: string): ParseCollectionOrder
   return { orders };
 }
 
-const generateId = () => Math.random().toString(36).slice(2, 11);
+const generateId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `or-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
 
 function emptyLine(): CollectionOrderLine {
   return {

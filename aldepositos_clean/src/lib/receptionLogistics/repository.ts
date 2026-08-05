@@ -9,13 +9,17 @@ import {
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import {
+  buildGroupReceptionTruck,
   collectionOrderToReceptionTruck,
+  isReceptionGroupTruckId,
   mergeCollectionOrdersIntoTrucks,
+  newReceptionGroupId,
+  receptionOrderIds,
   receptionTruckIdForCollectionOrder,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import { RAMP_OCCUPANCY_META_ID } from "@/lib/receptionLogistics/rampOccupancy";
 import {
-  fetchCollectionOrders,
+  fetchCollectionOrdersForReception,
   fetchCollectionOrderById,
   updateCollectionOrder,
 } from "@/lib/collectionOrders";
@@ -25,6 +29,9 @@ import {
   publishReceptionTruckLive,
   subscribeReceptionLive,
 } from "@/lib/receptionLogistics/receptionLiveSync";
+
+/** Completados más viejos que esto no se bajan en el hydrate del tablero. */
+const RECEPTION_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isTruck(value: unknown): value is ReceptionTruck {
   return (
@@ -51,6 +58,54 @@ function readLocalSnapshot(): ReceptionQueueSnapshot {
   } catch {
     return { trucks: [], updatedAt: new Date().toISOString() };
   }
+}
+
+/** Snapshot local para paint inmediato (sin red). */
+export function peekReceptionTrucksLocal(): ReceptionTruck[] {
+  return readLocalSnapshot().trucks;
+}
+
+/** Firma liviana para evitar re-renders cuando el refetch no cambió nada. */
+export function receptionTrucksFingerprint(list: ReceptionTruck[]): string {
+  if (list.length === 0) return "";
+  return list
+    .map(
+      (t) =>
+        `${t.id}:${t.updatedAt}:${t.status}:${t.sortOrder ?? ""}:${t.warehouseReceiptNumber ?? ""}`,
+    )
+    .join("|");
+}
+
+function keepReceptionTruckForBoard(
+  truck: ReceptionTruck,
+  nowMs: number,
+): boolean {
+  if (truck.status !== RECEPTION_STATUS.COMPLETADO) return true;
+  const stamp = Date.parse(
+    truck.completedAt || truck.updatedAt || truck.createdAt || "",
+  );
+  if (!Number.isFinite(stamp)) return true;
+  return nowMs - stamp <= RECEPTION_COMPLETED_RETENTION_MS;
+}
+
+async function fetchReceptionTrucksRaw(): Promise<ReceptionTruck[]> {
+  const { data, error } = await supabase
+    .from(RECEPTION_TABLE)
+    .select("id, payload, updated_at")
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+  const rows = (data ?? []) as {
+    id?: string;
+    payload: unknown;
+    updated_at?: string;
+  }[];
+  const nowMs = Date.now();
+  return rows
+    .filter((r) => r.id !== RAMP_OCCUPANCY_META_ID)
+    .map((r) => r.payload)
+    .filter(isTruck)
+    .filter((t) => keepReceptionTruckForBoard(t, nowMs));
 }
 
 function writeLocalSnapshot(trucks: ReceptionTruck[]) {
@@ -82,28 +137,20 @@ export function generateWarehouseReceiptNumber(plate: string): string {
 }
 
 export async function fetchReceptionTrucks(): Promise<ReceptionTruck[]> {
-  let trucks: ReceptionTruck[] = [];
-  try {
-    const { data, error } = await supabase
-      .from(RECEPTION_TABLE)
-      .select("payload")
-      .order("updated_at", { ascending: false });
+  const localFallback = readLocalSnapshot().trucks;
 
-    if (error) throw error;
-    const rows = (data ?? []) as { id?: string; payload: unknown }[];
-    trucks = rows
-      .filter((r) => r.id !== RAMP_OCCUPANCY_META_ID)
-      .map((r) => r.payload)
-      .filter(isTruck);
-  } catch {
-    trucks = readLocalSnapshot().trucks;
-  }
+  const [trucksResult, ordersResult] = await Promise.allSettled([
+    fetchReceptionTrucksRaw(),
+    fetchCollectionOrdersForReception(),
+  ]);
 
-  try {
-    const orders = await fetchCollectionOrders();
-    trucks = mergeCollectionOrdersIntoTrucks(trucks, orders);
-  } catch {
-    /* Sin órdenes de recolección */
+  let trucks: ReceptionTruck[] =
+    trucksResult.status === "fulfilled" ? trucksResult.value : localFallback;
+
+  if (ordersResult.status === "fulfilled") {
+    trucks = mergeCollectionOrdersIntoTrucks(trucks, ordersResult.value);
+    const nowMs = Date.now();
+    trucks = trucks.filter((t) => keepReceptionTruckForBoard(t, nowMs));
   }
 
   writeLocalSnapshot(trucks);
@@ -114,22 +161,185 @@ async function syncReceptionStatusToCollectionOrder(
   truck: ReceptionTruck,
   status: ReceptionStatusId,
 ): Promise<void> {
-  const orderId =
-    truck.collectionOrderId ??
-    (truck.id.startsWith("or-co-") ? truck.id.slice(6) : "");
-  if (!orderId) return;
+  const orderIds = receptionOrderIds(truck);
+  if (orderIds.length === 0) return;
 
-  try {
-    const order = await fetchCollectionOrderById(orderId);
-    if (!order || order.receptionStatus === status) return;
-    await updateCollectionOrder({
-      ...order,
-      receptionStatus: status,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.error("[Reception] No se pudo sincronizar OR:", e);
+  const groupId = isReceptionGroupTruckId(truck.id) ? truck.id : undefined;
+
+  await Promise.all(
+    orderIds.map(async (orderId) => {
+      try {
+        const order = await fetchCollectionOrderById(orderId);
+        if (!order) return;
+        if (
+          order.receptionStatus === status &&
+          (groupId ? order.receptionGroupId === groupId : true)
+        ) {
+          return;
+        }
+        const now = new Date().toISOString();
+        const next: CollectionOrder = {
+          ...order,
+          receptionStatus: status,
+          receptionQueuedAt: order.receptionQueuedAt || now,
+          updatedAt: now,
+        };
+        if (groupId) next.receptionGroupId = groupId;
+        await updateCollectionOrder(next);
+      } catch (e) {
+        console.error("[Reception] No se pudo sincronizar OR:", orderId, e);
+      }
+    }),
+  );
+}
+
+/**
+ * Agrupa ≥2 OR en un solo camión y las pone en fila.
+ * Placa / chofer son opcionales.
+ */
+export async function createReceptionTruckGroup(input: {
+  orderIds: string[];
+  plate?: string | null;
+  driverName?: string | null;
+}): Promise<ReceptionTruck> {
+  const uniqueIds = Array.from(
+    new Set(input.orderIds.map((id) => String(id).trim()).filter(Boolean)),
+  );
+  if (uniqueIds.length < 2) {
+    throw new Error("Seleccioná al menos 2 órdenes para un camión.");
   }
+
+  const loaded: CollectionOrder[] = [];
+  for (const id of uniqueIds) {
+    const order = await fetchCollectionOrderById(id);
+    if (!order) throw new Error(`No se encontró la OR ${id}`);
+    if (
+      order.receptionStatus &&
+      order.receptionStatus !== RECEPTION_STATUS.EN_FILA
+    ) {
+      throw new Error(
+        `La OR #${order.numero ?? id.slice(0, 8)} ya está en rampa o completada.`,
+      );
+    }
+    if (
+      order.receptionGroupId &&
+      order.receptionStatus === RECEPTION_STATUS.EN_FILA
+    ) {
+      throw new Error(
+        `La OR #${order.numero ?? id.slice(0, 8)} ya pertenece a otro camión.`,
+      );
+    }
+    loaded.push(order);
+  }
+
+  const groupId = newReceptionGroupId();
+  const now = new Date().toISOString();
+  const earliestQueued = loaded.reduce((min, o) => {
+    const t = Date.parse(o.receptionQueuedAt || "");
+    if (!Number.isFinite(t) || t <= 0) return min;
+    return min == null || t < min ? t : min;
+  }, null as number | null);
+  const receptionQueuedAt =
+    earliestQueued != null ? new Date(earliestQueued).toISOString() : now;
+  const updatedOrders: CollectionOrder[] = [];
+
+  for (const order of loaded) {
+    // Quitar tarjeta individual si existía.
+    const soloId = receptionTruckIdForCollectionOrder(order.id);
+    await removeReceptionTruckById(soloId);
+
+    const payload: CollectionOrder = {
+      ...order,
+      receptionStatus: RECEPTION_STATUS.EN_FILA,
+      receptionGroupId: groupId,
+      receptionQueuedAt: order.receptionQueuedAt || receptionQueuedAt,
+      updatedAt: now,
+    };
+    await updateCollectionOrder(payload);
+    updatedOrders.push(payload);
+  }
+
+  const truck = buildGroupReceptionTruck(updatedOrders, null, {
+    groupId,
+  });
+  if (!truck) throw new Error("No se pudo armar el camión.");
+
+  await upsertReceptionTruck(truck);
+  return truck;
+}
+
+/**
+ * Quita una OR del grupo (solo si el grupo sigue en fila).
+ * Si queda 1 OR, disuelve el grupo a tarjeta suelta.
+ * Si queda 0, elimina el camión.
+ */
+export async function removeOrderFromReceptionGroup(
+  orderId: string,
+): Promise<void> {
+  const order = await fetchCollectionOrderById(orderId);
+  if (!order?.receptionGroupId) {
+    // Sin grupo: clear normal
+    if (!order?.receptionStatus) return;
+    const {
+      receptionStatus: _s,
+      receptionGroupId: _g,
+      receptionQueuedAt: _q,
+      ...rest
+    } = order;
+    const payload: CollectionOrder = {
+      ...rest,
+      updatedAt: new Date().toISOString(),
+    };
+    await updateCollectionOrder(payload);
+    await syncCollectionOrderToReceptionQueue(payload);
+    return;
+  }
+
+  const groupId = order.receptionGroupId;
+  const trucks = await fetchReceptionTrucks();
+  const groupTruck = trucks.find((t) => t.id === groupId) ?? null;
+
+  const {
+    receptionStatus: _s,
+    receptionGroupId: _g,
+    receptionQueuedAt: _q,
+    ...rest
+  } = order;
+  const cleared: CollectionOrder = {
+    ...rest,
+    updatedAt: new Date().toISOString(),
+  };
+  await updateCollectionOrder(cleared);
+
+  const allReception = await fetchCollectionOrdersForReception();
+  const siblings = allReception.filter(
+    (o) => o.receptionGroupId === groupId && o.id !== orderId,
+  );
+
+  if (siblings.length === 0) {
+    await removeReceptionTruckById(groupId);
+    return;
+  }
+
+  if (siblings.length === 1) {
+    const only = siblings[0]!;
+    const { receptionGroupId: _rg, ...onlyRest } = only;
+    const solo: CollectionOrder = {
+      ...onlyRest,
+      receptionStatus: only.receptionStatus ?? RECEPTION_STATUS.EN_FILA,
+      updatedAt: new Date().toISOString(),
+    };
+    await updateCollectionOrder(solo);
+    await removeReceptionTruckById(groupId);
+    const soloTruck = collectionOrderToReceptionTruck(solo, null);
+    if (soloTruck) await upsertReceptionTruck(soloTruck);
+    return;
+  }
+
+  const rebuilt = buildGroupReceptionTruck(siblings, groupTruck, {
+    groupId,
+  });
+  if (rebuilt) await upsertReceptionTruck(rebuilt);
 }
 
 export async function saveReceptionTrucks(trucks: ReceptionTruck[]): Promise<void> {
@@ -185,13 +395,41 @@ export async function removeReceptionTruckById(id: string): Promise<void> {
 export async function syncCollectionOrderToReceptionQueue(
   order: CollectionOrder,
 ): Promise<void> {
+  // OR dentro de un grupo: reconstruir tarjeta de grupo.
+  if (order.receptionGroupId) {
+    const groupId = order.receptionGroupId;
+    const all = await fetchCollectionOrdersForReception();
+    const siblings = all.filter((o) => o.receptionGroupId === groupId);
+
+    if (!order.receptionStatus) {
+      // Ya no debería llegar con groupId y sin status; limpiar huérfanos.
+      if (siblings.length === 0) {
+        await removeReceptionTruckById(groupId);
+      }
+      return;
+    }
+
+    const trucks = readLocalSnapshot().trucks;
+    const existing = trucks.find((t) => t.id === groupId) ?? null;
+    const truck = buildGroupReceptionTruck(siblings.length ? siblings : [order], existing, {
+      groupId,
+    });
+    if (truck) await upsertReceptionTruck(truck);
+    // Eliminar posibles tarjetas individuales de esas OR.
+    for (const o of siblings.length ? siblings : [order]) {
+      await removeReceptionTruckById(receptionTruckIdForCollectionOrder(o.id));
+    }
+    return;
+  }
+
   const truckId = receptionTruckIdForCollectionOrder(order.id);
   const trucks = await fetchReceptionTrucks();
   const existing =
     trucks.find((t) => t.id === truckId) ??
-    trucks.find((t) => t.collectionOrderId === order.id) ??
+    trucks.find((t) => receptionOrderIds(t).includes(order.id) && !isReceptionGroupTruckId(t.id)) ??
     null;
 
+  // Si estaba en un grupo y se limpió el groupId, no tocar grupos aquí.
   if (!order.receptionStatus) {
     if (existing) await removeReceptionTruckById(existing.id);
     return;
@@ -222,6 +460,19 @@ export async function updateReceptionTruckStatus(
     trucks = await fetchReceptionTrucks();
     idx = trucks.findIndex((t) => t.id === truckId);
   }
+
+  // Grupo huérfano: reconstruir desde las OR y seguir.
+  if (idx < 0 && isReceptionGroupTruckId(truckId)) {
+    const all = await fetchCollectionOrdersForReception();
+    const siblings = all.filter((o) => o.receptionGroupId === truckId);
+    if (siblings.length === 0) return null;
+    const rebuilt = buildGroupReceptionTruck(siblings, null, { groupId: truckId });
+    if (!rebuilt) return null;
+    await upsertReceptionTruck(rebuilt);
+    trucks = readLocalSnapshot().trucks;
+    idx = trucks.findIndex((t) => t.id === truckId);
+  }
+
   if (idx < 0) return null;
 
   const now = new Date().toISOString();
@@ -249,14 +500,198 @@ export async function updateReceptionTruckStatus(
   // Persistencia + broadcast inmediato (los demás ven el movimiento al instante).
   await upsertReceptionTruck(next);
 
-  // Sincronizar OR en segundo plano (no bloquea la UI ni el broadcast).
-  if (next.collectionOrderId || next.id.startsWith("or-co-")) {
-    void syncReceptionStatusToCollectionOrder(next, status);
+  // Sincronizar OR (una o varias del grupo) — await para no perder el cambio.
+  if (receptionOrderIds(next).length > 0) {
+    await syncReceptionStatusToCollectionOrder(next, status);
   }
   return next;
 }
 
-const RECEPTION_POLL_MS = 4_000;
+/**
+ * Cambia el estado de recepción de una OR (y de su camión agrupado si aplica).
+ * Persiste siempre en collection_orders; si falta la tarjeta del grupo, la reconstruye.
+ * Sirve para devolver a FILA desde rampa / carretillado / extra.
+ *
+ * Excepción LISTO (COMPLETADO): solo completa esa OR y la saca del camión;
+ * las demás del grupo siguen en fila/rampa.
+ */
+export async function setCollectionOrderReceptionStatus(
+  orderId: string,
+  status: ReceptionStatusId,
+  options?: { issueReceipt?: boolean },
+): Promise<CollectionOrder[]> {
+  const order = await fetchCollectionOrderById(orderId);
+  if (!order) {
+    throw new Error("No se encontró la orden de recolección.");
+  }
+  if (order.receptionStatus === status) {
+    return [order];
+  }
+
+  const now = new Date().toISOString();
+  const issueReceipt = options?.issueReceipt === true;
+
+  // LISTO: una sola OR, aunque venga en camión agrupado.
+  if (
+    order.receptionGroupId &&
+    status === RECEPTION_STATUS.COMPLETADO
+  ) {
+    return completeSingleOrderFromReceptionGroup(order, {
+      issueReceipt,
+      now,
+    });
+  }
+
+  // Camión agrupado: mover todas las OR del grupo juntas (fila / rampas / carret.).
+  if (order.receptionGroupId) {
+    const groupId = order.receptionGroupId;
+    const all = await fetchCollectionOrdersForReception();
+    const byId = new Map<string, CollectionOrder>();
+    for (const o of all) {
+      if (o.receptionGroupId === groupId) byId.set(o.id, o);
+    }
+    byId.set(order.id, order);
+
+    const updated: CollectionOrder[] = [];
+    for (const o of byId.values()) {
+      const next: CollectionOrder = {
+        ...o,
+        receptionStatus: status,
+        receptionGroupId: groupId,
+        receptionQueuedAt: o.receptionQueuedAt || now,
+        updatedAt: now,
+      };
+      await updateCollectionOrder(next);
+      updated.push(next);
+    }
+
+    const trucks = await fetchReceptionTrucks();
+    const existing = trucks.find((t) => t.id === groupId) ?? null;
+    const base = buildGroupReceptionTruck(updated, existing, { groupId });
+    if (base) {
+      const isRamp = isRampReceptionStatus(status);
+      const truck: ReceptionTruck = {
+        ...base,
+        rampAssignedAt: isRamp
+          ? (existing?.rampAssignedAt ?? now)
+          : existing?.rampAssignedAt,
+        rampUsed: isRamp ? status : existing?.rampUsed,
+        completedAt: existing?.completedAt,
+        warehouseReceiptNumber:
+          issueReceipt && !existing?.warehouseReceiptNumber
+            ? generateWarehouseReceiptNumber(base.plate)
+            : existing?.warehouseReceiptNumber,
+      };
+      await upsertReceptionTruck(truck);
+      for (const o of updated) {
+        await removeReceptionTruckById(
+          receptionTruckIdForCollectionOrder(o.id),
+        );
+      }
+    }
+    return updated;
+  }
+
+  // OR suelta
+  const payload: CollectionOrder = {
+    ...order,
+    receptionStatus: status,
+    receptionQueuedAt: order.receptionQueuedAt || now,
+    updatedAt: now,
+  };
+  await updateCollectionOrder(payload);
+  await syncCollectionOrderToReceptionQueue(payload);
+
+  if (issueReceipt) {
+    const truckId = receptionTruckIdForCollectionOrder(order.id);
+    const updatedTruck = await updateReceptionTruckStatus(truckId, status, {
+      issueReceipt: true,
+    });
+    // Si no existía tarjeta, sync ya la creó; volver a aplicar recibo.
+    if (!updatedTruck) {
+      await syncCollectionOrderToReceptionQueue(payload);
+      await updateReceptionTruckStatus(truckId, status, { issueReceipt: true });
+    }
+  }
+
+  return [payload];
+}
+
+/**
+ * Marca LISTO solo esa OR y la separa del camión.
+ * El resto del grupo permanece en su estado (fila/rampa).
+ */
+async function completeSingleOrderFromReceptionGroup(
+  order: CollectionOrder,
+  opts: { issueReceipt: boolean; now: string },
+): Promise<CollectionOrder[]> {
+  const groupId = order.receptionGroupId!;
+  const { issueReceipt, now } = opts;
+
+  const {
+    receptionGroupId: _g,
+    ...withoutGroup
+  } = order;
+  const completed: CollectionOrder = {
+    ...withoutGroup,
+    receptionStatus: RECEPTION_STATUS.COMPLETADO,
+    receptionQueuedAt: order.receptionQueuedAt || now,
+    updatedAt: now,
+  };
+  await updateCollectionOrder(completed);
+
+  const allReception = await fetchCollectionOrdersForReception();
+  const siblings = allReception.filter(
+    (o) => o.receptionGroupId === groupId && o.id !== order.id,
+  );
+
+  const trucks = await fetchReceptionTrucks();
+  const existingGroup = trucks.find((t) => t.id === groupId) ?? null;
+  const result: CollectionOrder[] = [completed];
+
+  if (siblings.length === 0) {
+    await removeReceptionTruckById(groupId);
+  } else if (siblings.length === 1) {
+    const only = siblings[0]!;
+    const { receptionGroupId: _rg, ...onlyRest } = only;
+    const solo: CollectionOrder = {
+      ...onlyRest,
+      receptionStatus: only.receptionStatus ?? RECEPTION_STATUS.EN_FILA,
+      receptionQueuedAt: only.receptionQueuedAt || now,
+      updatedAt: now,
+    };
+    await updateCollectionOrder(solo);
+    result.push(solo);
+    await removeReceptionTruckById(groupId);
+    await syncCollectionOrderToReceptionQueue(solo);
+  } else {
+    const rebuilt = buildGroupReceptionTruck(siblings, existingGroup, {
+      groupId,
+    });
+    if (rebuilt) {
+      await upsertReceptionTruck({
+        ...rebuilt,
+        rampAssignedAt: existingGroup?.rampAssignedAt ?? rebuilt.rampAssignedAt,
+        rampUsed: existingGroup?.rampUsed ?? rebuilt.rampUsed,
+        warehouseReceiptNumber: existingGroup?.warehouseReceiptNumber,
+      });
+    }
+  }
+
+  await syncCollectionOrderToReceptionQueue(completed);
+
+  if (issueReceipt) {
+    const truckId = receptionTruckIdForCollectionOrder(completed.id);
+    await updateReceptionTruckStatus(truckId, RECEPTION_STATUS.COMPLETADO, {
+      issueReceipt: true,
+    });
+  }
+
+  return result;
+}
+
+/** Consistencia de respaldo; los movimientos van por Realtime/broadcast. */
+const RECEPTION_POLL_MS = 15_000;
 
 let receptionQueueListeners = new Set<() => void>();
 let receptionQueueIntervalId: number | null = null;

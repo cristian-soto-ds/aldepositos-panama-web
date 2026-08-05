@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 import {
   fetchReceptionTrucks,
+  peekReceptionTrucksLocal,
+  receptionTrucksFingerprint,
   subscribeReceptionQueue,
 } from "@/lib/receptionLogistics/repository";
 import { subscribeCollectionOrdersRealtime } from "@/lib/collectionOrders";
@@ -24,8 +26,14 @@ type UseReceptionQueueOptions = {
 /** Hook compartido por Operador y Pantalla TV. */
 export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
   const enabled = options.enabled !== false;
-  const [trucks, setTrucks] = useState<ReceptionTruck[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [trucks, setTrucks] = useState<ReceptionTruck[]>(() =>
+    enabled ? peekReceptionTrucksLocal() : [],
+  );
+  const [loading, setLoading] = useState(() => {
+    if (!enabled) return false;
+    return peekReceptionTrucksLocal().length === 0;
+  });
+  const [loadError, setLoadError] = useState<string | null>(null);
   const reloadBusyRef = useRef(false);
   const pendingReloadRef = useRef(false);
 
@@ -41,13 +49,22 @@ export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
         pendingReloadRef.current = false;
         try {
           const list = await fetchReceptionTrucks();
-          setTrucks((prev) => {
-            const prevJson = JSON.stringify(prev);
-            const nextJson = JSON.stringify(list);
-            return prevJson === nextJson ? prev : list;
-          });
+          setTrucks((prev) =>
+            receptionTrucksFingerprint(prev) ===
+            receptionTrucksFingerprint(list)
+              ? prev
+              : list,
+          );
+          setLoadError(null);
         } catch (e) {
           console.error(e);
+          if (peekReceptionTrucksLocal().length === 0) {
+            setLoadError(
+              e instanceof Error
+                ? e.message
+                : "No se pudo cargar el tablero de recepción",
+            );
+          }
         }
       } while (pendingReloadRef.current);
     } finally {
@@ -60,6 +77,12 @@ export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
     if (!enabled) {
       setLoading(false);
       return;
+    }
+    // Cache ya pintó el tablero; hidratar en segundo plano.
+    const local = peekReceptionTrucksLocal();
+    if (local.length > 0) {
+      setTrucks(local);
+      setLoading(false);
     }
     void reload();
   }, [enabled, reload]);
@@ -95,5 +118,5 @@ export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
     };
   }, [enabled, reload]);
 
-  return { trucks, setTrucks, loading, reload };
+  return { trucks, setTrucks, loading, loadError, reload };
 }

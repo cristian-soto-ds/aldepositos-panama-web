@@ -5,10 +5,20 @@ import { useSupabaseCollectionOrders } from "@/hooks/useSupabaseCollectionOrders
 import {
   sortCollectionOrdersByNumero,
   updateCollectionOrder,
+  fetchCollectionOrderById,
 } from "@/lib/collectionOrders";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
-import type { ReceptionStatusId } from "@/lib/receptionLogistics/config";
-import { syncCollectionOrderToReceptionQueue } from "@/lib/receptionLogistics/repository";
+import {
+  RECEPTION_RECEIPT_ON_STATUS,
+  RECEPTION_STATUS,
+  type ReceptionStatusId,
+} from "@/lib/receptionLogistics/config";
+import {
+  createReceptionTruckGroup,
+  removeOrderFromReceptionGroup,
+  setCollectionOrderReceptionStatus,
+  syncCollectionOrderToReceptionQueue,
+} from "@/lib/receptionLogistics/repository";
 import { CollectionOrderReceptionistView } from "@/components/control-panel/CollectionOrderReceptionistView";
 import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 
@@ -28,23 +38,26 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
     async (orderId: string, status: ReceptionStatusId) => {
       const order = orders.find((o) => o.id === orderId);
       if (!order || order.receptionStatus === status) return;
-      setReceptionBusyId(orderId);
+
+      const busyKey = order.receptionGroupId || orderId;
+      setReceptionBusyId(busyKey);
       try {
-        const payload: CollectionOrder = {
-          ...order,
-          receptionStatus: status,
-          updatedAt: new Date().toISOString(),
-        };
-        await updateCollectionOrder(payload);
+        const updated = await setCollectionOrderReceptionStatus(orderId, status, {
+          issueReceipt: RECEPTION_RECEIPT_ON_STATUS.includes(status),
+        });
+        const byId = new Map(updated.map((o) => [o.id, o]));
         setOrders((prev) =>
           sortCollectionOrdersByNumero(
-            prev.map((o) => (o.id === orderId ? payload : o)),
+            prev.map((o) => byId.get(o.id) ?? o),
           ),
         );
-        await syncCollectionOrderToReceptionQueue(payload);
       } catch (e) {
         console.error(e);
-        alert("No se pudo actualizar el estado de recepción.");
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo actualizar el estado de recepción.",
+        );
       } finally {
         setReceptionBusyId(null);
       }
@@ -56,9 +69,49 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
     async (orderId: string) => {
       const order = orders.find((o) => o.id === orderId);
       if (!order?.receptionStatus) return;
-      setReceptionBusyId(orderId);
+      const groupId = order.receptionGroupId;
+      const mateIds = groupId
+        ? orders
+            .filter((o) => o.receptionGroupId === groupId && o.id !== orderId)
+            .map((o) => o.id)
+        : [];
+      setReceptionBusyId(groupId || orderId);
       try {
-        const { receptionStatus: _removed, ...rest } = order;
+        if (groupId) {
+          await removeOrderFromReceptionGroup(orderId);
+          const refreshedMates = await Promise.all(
+            mateIds.map((id) => fetchCollectionOrderById(id)),
+          );
+          const mateById = new Map(
+            refreshedMates
+              .filter((o): o is CollectionOrder => !!o)
+              .map((o) => [o.id, o]),
+          );
+          setOrders((prev) =>
+            sortCollectionOrdersByNumero(
+              prev.map((o) => {
+                if (o.id === orderId) {
+                  const {
+                    receptionStatus: _s,
+                    receptionGroupId: _g,
+                    receptionQueuedAt: _q,
+                    ...rest
+                  } = o;
+                  return { ...rest, updatedAt: new Date().toISOString() };
+                }
+                return mateById.get(o.id) ?? o;
+              }),
+            ),
+          );
+          return;
+        }
+
+        const {
+          receptionStatus: _removed,
+          receptionGroupId: _g,
+          receptionQueuedAt: _q,
+          ...rest
+        } = order;
         const payload: CollectionOrder = {
           ...rest,
           updatedAt: new Date().toISOString(),
@@ -72,12 +125,53 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
         await syncCollectionOrderToReceptionQueue(payload);
       } catch (e) {
         console.error(e);
-        alert("No se pudo quitar la orden de recepción.");
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo quitar la orden de recepción.",
+        );
       } finally {
         setReceptionBusyId(null);
       }
     },
     [orders, setOrders],
+  );
+
+  const handleCreateTruckGroup = useCallback(
+    async (input: { orderIds: string[] }) => {
+      setReceptionBusyId("__group__");
+      try {
+        const truck = await createReceptionTruckGroup(input);
+        const now = new Date().toISOString();
+        const idSet = new Set(input.orderIds);
+        setOrders((prev) =>
+          sortCollectionOrdersByNumero(
+            prev.map((o) =>
+              idSet.has(o.id)
+                ? {
+                    ...o,
+                    receptionStatus: RECEPTION_STATUS.EN_FILA,
+                    receptionGroupId: truck.id,
+                    receptionQueuedAt: o.receptionQueuedAt || now,
+                    updatedAt: now,
+                  }
+                : o,
+            ),
+          ),
+        );
+      } catch (e) {
+        console.error(e);
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo crear el camión con esas OR.",
+        );
+        throw e;
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [setOrders],
   );
 
   return (
@@ -95,6 +189,7 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
       onClearReceptionStatus={(orderId) =>
         void handleClearReceptionStatus(orderId)
       }
+      onCreateTruckGroup={handleCreateTruckGroup}
     />
   );
 }

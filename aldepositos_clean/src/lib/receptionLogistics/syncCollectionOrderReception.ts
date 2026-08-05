@@ -35,33 +35,33 @@ export function orderBultos(order: CollectionOrder): number {
 /** sortOrder en ms; valores bajos son legado (número OR usado por error). */
 const RECEPTION_SORT_EPOCH_MIN = 1_000_000_000_000;
 
-/** Posición en fila: primero en llegar = primero en cola (no por número OR). */
+/**
+ * Posición en fila (FIFO del recepcionista).
+ * Prioridad: receptionQueuedAt de la OR → sortOrder ya sellado en la tarjeta → ahora.
+ * Nunca usar updatedAt/createdAt: se refrescan y rompen el orden de la cola.
+ */
 function resolveReceptionSortOrder(
   existing: ReceptionTruck | null | undefined,
-  queueHint?: string,
+  queueHint?: string | null,
 ): number {
-  const so = existing?.sortOrder;
-  if (so != null && so >= RECEPTION_SORT_EPOCH_MIN) return so;
   if (queueHint) {
     const t = Date.parse(queueHint);
-    if (Number.isFinite(t)) return t;
+    if (Number.isFinite(t) && t >= RECEPTION_SORT_EPOCH_MIN) return t;
   }
-  if (existing?.createdAt) {
-    const t = Date.parse(existing.createdAt);
-    if (Number.isFinite(t)) return t;
-  }
+  const so = existing?.sortOrder;
+  if (so != null && so >= RECEPTION_SORT_EPOCH_MIN) return so;
   return Date.now();
 }
 
-function earliestReceptionQueueHint(orders: CollectionOrder[]): string | undefined {
+/** Solo el momento real de entrada a fila (no updatedAt/createdAt). */
+function earliestReceptionQueuedAt(
+  orders: CollectionOrder[],
+): string | undefined {
   let best: number | null = null;
   for (const o of orders) {
-    for (const raw of [o.receptionQueuedAt, o.updatedAt, o.createdAt]) {
-      const t = Date.parse(raw || "");
-      if (!Number.isFinite(t) || t <= 0) continue;
-      if (best == null || t < best) best = t;
-      break;
-    }
+    const t = Date.parse(o.receptionQueuedAt || "");
+    if (!Number.isFinite(t) || t < RECEPTION_SORT_EPOCH_MIN) continue;
+    if (best == null || t < best) best = t;
   }
   return best != null ? new Date(best).toISOString() : undefined;
 }
@@ -110,7 +110,7 @@ export function collectionOrderToReceptionTruck(
     status,
     sortOrder: resolveReceptionSortOrder(
       existing,
-      order.receptionQueuedAt || order.updatedAt,
+      order.receptionQueuedAt,
     ),
     collectionOrderId: order.id,
     collectionOrderIds: [order.id],
@@ -218,7 +218,7 @@ export function buildGroupReceptionTruck(
     status,
     sortOrder: resolveReceptionSortOrder(
       existing,
-      earliestReceptionQueueHint(withStatus),
+      earliestReceptionQueuedAt(withStatus),
     ),
     collectionOrderId: ids[0],
     collectionOrderIds: ids,

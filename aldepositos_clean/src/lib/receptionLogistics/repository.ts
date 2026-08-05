@@ -264,6 +264,13 @@ export async function createReceptionTruckGroup(input: {
   });
   if (!truck) throw new Error("No se pudo armar el camión.");
 
+  // FIFO: sellar posición con el instante de entrada a fila (no updatedAt).
+  const queuedMs = Date.parse(receptionQueuedAt);
+  truck.sortOrder =
+    Number.isFinite(queuedMs) && queuedMs >= 1_000_000_000_000
+      ? queuedMs
+      : Date.now();
+
   await upsertReceptionTruck(truck);
   return truck;
 }

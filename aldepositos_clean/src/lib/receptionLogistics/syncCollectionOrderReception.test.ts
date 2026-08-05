@@ -94,6 +94,48 @@ describe("reception OR truck grouping", () => {
     ]);
   });
 
+  it("FIFO: camión unificado antes que OR suelta posterior", () => {
+    const groupId = "or-grp-fifo";
+    const tGroup = "2026-08-05T10:00:00.000Z";
+    const tSolo = "2026-08-05T10:05:00.000Z";
+    const orders = [
+      makeOrder({
+        id: "solo3",
+        numero: "3",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionQueuedAt: tSolo,
+        // updatedAt más viejo a propósito — no debe ganar al orden de fila
+        updatedAt: "2026-08-01T08:00:00.000Z",
+        createdAt: "2026-08-01T08:00:00.000Z",
+      }),
+      makeOrder({
+        id: "a",
+        numero: "1",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: groupId,
+        receptionQueuedAt: tGroup,
+        updatedAt: "2026-08-05T12:00:00.000Z",
+        createdAt: "2026-08-01T09:00:00.000Z",
+      }),
+      makeOrder({
+        id: "b",
+        numero: "2",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: groupId,
+        receptionQueuedAt: tGroup,
+        updatedAt: "2026-08-05T12:00:00.000Z",
+        createdAt: "2026-08-01T09:00:00.000Z",
+      }),
+    ];
+    const merged = mergeCollectionOrdersIntoTrucks([], orders);
+    const sorted = [...merged].sort((a, b) => a.sortOrder - b.sortOrder);
+    expect(sorted).toHaveLength(2);
+    expect(sorted[0]!.id).toBe(groupId);
+    expect(sorted[1]!.id).toBe("or-co-solo3");
+    expect(sorted[0]!.sortOrder).toBe(Date.parse(tGroup));
+    expect(sorted[1]!.sortOrder).toBe(Date.parse(tSolo));
+  });
+
   it("merge preserves manual import trucks", () => {
     const manual: ReceptionTruck = {
       id: "manual-1",

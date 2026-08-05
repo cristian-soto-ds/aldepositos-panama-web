@@ -142,7 +142,7 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
       setReceptionBusyId("__group__");
       try {
         const truck = await createReceptionTruckGroup(input);
-        const now = new Date().toISOString();
+        const queuedAt = new Date(truck.sortOrder).toISOString();
         const idSet = new Set(input.orderIds);
         setOrders((prev) =>
           sortCollectionOrdersByNumero(
@@ -152,8 +152,8 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
                     ...o,
                     receptionStatus: RECEPTION_STATUS.EN_FILA,
                     receptionGroupId: truck.id,
-                    receptionQueuedAt: o.receptionQueuedAt || now,
-                    updatedAt: now,
+                    receptionQueuedAt: o.receptionQueuedAt || queuedAt,
+                    updatedAt: queuedAt,
                   }
                 : o,
             ),

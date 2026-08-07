@@ -18,6 +18,7 @@ import {
 type MergeRemoteOptions = {
   fromLive?: boolean;
   allowEmptyRemoteWipe?: boolean;
+  remoteRowCount?: number;
 };
 
 type InventoryRealtimeSyncOptions<TRow> = {
@@ -167,6 +168,10 @@ export function useInventoryRealtimeSync<TRow>({
           ? mergeRowsWithRemote(localRows, remoteRows, {
               fromLive,
               allowEmptyRemoteWipe: intentionalRemoteWipe,
+              remoteRowCount:
+                typeof remote.rowCount === "number"
+                  ? remote.rowCount
+                  : undefined,
             })
           : intentionalLocalClear
             ? localRows
@@ -253,7 +258,13 @@ export function useInventoryRealtimeSync<TRow>({
           prev.length > 0;
         const next =
           shouldRemerge && mergeRowsWithRemote
-            ? mergeRowsWithRemote(prev, remoteRows, { fromLive })
+            ? mergeRowsWithRemote(prev, remoteRows, {
+                fromLive,
+                remoteRowCount:
+                  typeof remote.rowCount === "number"
+                    ? remote.rowCount
+                    : undefined,
+              })
             : newRows;
         appliedRows = next;
         latestRowsRef.current = next;

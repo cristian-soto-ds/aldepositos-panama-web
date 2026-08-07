@@ -29,8 +29,6 @@ export const RAMP_OCCUPANCY_META_ID = "meta-ramp-occupancy";
 
 export const RAMP_OCCUPANCY_COPY = {
   sectionTitle: "Estado de rampas",
-  sectionHint:
-    "Indicá si hay retiro de mercancía en una rampa. El cambio se ve al instante en la pantalla TV.",
   ramp1Label: "Rampa 1",
   ramp2Label: "Rampa 2",
   free: "Libre",

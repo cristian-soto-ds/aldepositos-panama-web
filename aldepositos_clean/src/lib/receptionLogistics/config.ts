@@ -190,15 +190,9 @@ export const RECEPTION_TV_THEME = {
 export const RECEPTION_COPY = {
   operatorTitle: "Recepción de camiones",
   operatorSubtitle:
-    "Tablero Kanban, reporte diario de OR y pantalla TV para bodega.",
+    "Tablero Kanban y pantalla TV para bodega.",
   tvTitle: "Recepción de camiones — Pantalla",
   tvSubtitle: "Actualización en vivo para proveedores y supervisión",
-  reportLabel: "Generar reporte",
-  reportHint:
-    "Excel filtrado por período: OR recibidas, tiempos de espera/descarga y resumen con Alde.IA.",
-  reportModalTitle: "Descargar reporte de recepción",
-  reportModalSubtitle:
-    "Elegí el período y criterio antes de exportar el Excel.",
   searchPlaceholder: "Buscar por placa, RA, proveedor o cliente…",
   emptyColumn: "Sin camiones",
   receiptTitle: "Recibo de Almacén",

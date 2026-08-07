@@ -4,21 +4,17 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Barcode,
   CheckSquare,
   Copy,
   FileSpreadsheet,
   Loader2,
-  Merge,
   Package,
   RefreshCw,
-  UserRound,
   XSquare,
 } from "lucide-react";
 import type { Task } from "@/lib/types/task";
 import type { AppRole } from "@/lib/userRole";
 import {
-  createShipper,
   ensureRaBarcode,
   ensureShipperByName,
   fetchWarehouseClients,
@@ -27,14 +23,7 @@ import {
   matchShipperByName,
   syncShippersFromRaNames,
   syncOrderBarcodesFromRas,
-  unifyShippers,
-  unlinkShipperAlias,
 } from "@/lib/warehouse/api";
-import {
-  clientDisplayName,
-  normalizeWarehouseClientText,
-  shipperAliasesList,
-} from "@/lib/warehouse/client-resolver";
 import {
   buildPackageBarcodeList,
   DEFAULT_PACKAGE_BARCODE_FORMAT,
@@ -56,7 +45,6 @@ import {
   type WarehouseShipper,
 } from "@/lib/warehouse/types";
 import {
-  buildXellentCsv,
   buildXellentPackageCsv,
   buildXellentRaCsv,
   copyToClipboard,
@@ -76,14 +64,14 @@ type ControlCargaModuleProps = {
 };
 
 type TabId = "Todos" | CanonicalWarehouseClient;
-type SectionId = "ras" | "expedidores" | "etiquetas" | "carga" | "descarga";
+type SectionId = "ras" | "carga" | "descarga";
 
 export function ControlCargaModule({
   userDisplayName,
 }: ControlCargaModuleProps) {
   const [tab, setTab] = useState<TabId>("AAA");
   const [section, setSection] = useState<SectionId>("ras");
-  const [clients, setClients] = useState<WarehouseClientRow[]>([]);
+  const [, setClients] = useState<WarehouseClientRow[]>([]);
   const [shippers, setShippers] = useState<WarehouseShipper[]>([]);
   const [, setRaCodes] = useState<WarehouseRaCode[]>([]);
   const [ras, setRas] = useState<WarehouseRAView[]>([]);
@@ -101,12 +89,6 @@ export function ControlCargaModule({
   const [raSelectMode, setRaSelectMode] = useState(false);
   /** Pedidos/Contar (o Descarga): ocupa toda la vista sin cabecera. */
   const [loadImmersive, setLoadImmersive] = useState(false);
-
-  // Crear / unificar expedidor
-  const [newShipperName, setNewShipperName] = useState("");
-  const [unifyTargetId, setUnifyTargetId] = useState("");
-  const [unifyMergeIds, setUnifyMergeIds] = useState<string[]>([]);
-  const [unifyExtraNames, setUnifyExtraNames] = useState("");
 
   useEffect(() => {
     setPackageFormat(loadPackageBarcodeFormat());
@@ -298,31 +280,11 @@ export function ControlCargaModule({
     return shippers.filter((s) => s.client_code === tab);
   }, [shippers, tab]);
 
-  const orphanShipperNames = useMemo(() => {
-    const known = new Set<string>();
-    for (const s of shippers) {
-      known.add(normalizeWarehouseClientText(s.official_name));
-      known.add(normalizeWarehouseClientText(s.normalized_name));
-      for (const a of shipperAliasesList(s.aliases)) {
-        known.add(normalizeWarehouseClientText(a));
-      }
-    }
-    const orphans = new Set<string>();
-    for (const r of filteredRas) {
-      if (r.shipper === PENDING_SHIPPER_LABEL) continue;
-      const key = normalizeWarehouseClientText(r.shipper);
-      if (key && !known.has(key)) {
-        orphans.add(r.shipper);
-      }
-    }
-    return Array.from(orphans).sort((a, b) => a.localeCompare(b));
-  }, [filteredRas, shippers]);
-
   const generateRaCode = async (view: WarehouseRAView) => {
     if (!view.clientCode) return;
     if (!view.shipper || view.shipper === PENDING_SHIPPER_LABEL) {
       setMessage(
-        "Esta RA no tiene expedidor. Asignalo en inventario o crealo en Expedidores antes de generar el código del pedido.",
+        "Esta RA no tiene expedidor. Asignalo en inventario antes de generar el código del pedido.",
       );
       return;
     }
@@ -392,95 +354,6 @@ export function ControlCargaModule({
             ? String((e as { message: unknown }).message)
             : "Error generando código de pedido";
       setMessage(msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addShipper = async () => {
-    const name = newShipperName.trim();
-    if (!name) return;
-    const clientCode = tab === "Todos" ? "AAA" : tab;
-    setBusy(true);
-    try {
-      const s = await createShipper({
-        client_code: clientCode,
-        official_name: name,
-      });
-      setShippers((prev) =>
-        [...prev, s].sort((a, b) =>
-          a.official_name.localeCompare(b.official_name),
-        ),
-      );
-      setNewShipperName("");
-      setMessage(`Expedidor creado: ${s.barcode_code}`);
-      setPrintLabels([
-        {
-          kind: "EXPEDIDOR",
-          barcode: s.barcode_code,
-          clientDisplay: clientDisplayName(clientCode, clients),
-          title: s.official_name,
-          shipperName: s.official_name,
-        },
-      ]);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Error creando expedidor");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doUnify = async () => {
-    if (!unifyTargetId) {
-      setMessage("Elegí el expedidor canónico (código que se conserva)");
-      return;
-    }
-    setBusy(true);
-    try {
-      const extras = unifyExtraNames
-        .split(/[,;\n]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const updated = await unifyShippers({
-        targetShipperId: unifyTargetId,
-        mergeShipperIds: unifyMergeIds,
-        extraAliasNames: extras,
-      });
-      setShippers(await fetchWarehouseShippers());
-      setUnifyMergeIds([]);
-      setUnifyExtraNames("");
-      setMessage(
-        `Unificados bajo ${updated.barcode_code} (${updated.official_name})`,
-      );
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Error al unificar");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const doUnlinkAlias = async (shipperId: string, aliasName: string) => {
-    if (
-      !window.confirm(
-        `¿Desvincular «${aliasName}»?\n\nVolverá a tener su propio código EXP (o se reactiva el que tenía).`,
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    try {
-      const { restored } = await unlinkShipperAlias({
-        shipperId,
-        aliasName,
-      });
-      setShippers(await fetchWarehouseShippers());
-      setMessage(
-        restored
-          ? `Desvinculado: ${restored.official_name} → ${restored.barcode_code}`
-          : `Alias «${aliasName}» quitado`,
-      );
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Error al desvincular");
     } finally {
       setBusy(false);
     }
@@ -645,33 +518,9 @@ export function ControlCargaModule({
     );
   };
 
-  const exportXellentCsv = (kind: "pedidos" | "expedidores") => {
+  const exportXellentCsv = () => {
     const stamp = new Date().toISOString().slice(0, 10);
     const rows: XellentCodeRow[] = [];
-
-    if (kind === "expedidores") {
-      for (const s of filteredShippers) {
-        rows.push({
-          tipo: "EXPEDIDOR",
-          codigo: s.barcode_code,
-          cliente: clientDisplayName(s.client_code, clients),
-          nombre: s.official_name,
-          expedidor: s.official_name,
-        });
-      }
-      if (!rows.length) {
-        setMessage("No hay códigos de expedidor para exportar.");
-        return;
-      }
-      downloadTextFile(
-        buildXellentCsv(rows),
-        `xellent-expedidores-${tab}-${stamp}.csv`,
-      );
-      setMessage(
-        `CSV de expedidores (${rows.length}) listo para Xellent X-1000VL.`,
-      );
-      return;
-    }
 
     for (const r of filteredRas) {
       if (!r.raBarcode) continue;
@@ -731,20 +580,11 @@ export function ControlCargaModule({
           <button
             type="button"
             disabled={busy}
-            onClick={() => exportXellentCsv("pedidos")}
+            onClick={() => exportXellentCsv()}
             className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
             title="Solo códigos de pedido (EXP+RA)"
           >
             <FileSpreadsheet className="h-3.5 w-3.5" /> CSV Pedidos / RA
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => exportXellentCsv("expedidores")}
-            className="inline-flex items-center gap-1 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100"
-            title="Solo códigos de expedidor (EXP-…)"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5" /> CSV Expedidores
           </button>
         </div>
       </header>
@@ -802,15 +642,14 @@ export function ControlCargaModule({
         </div>
       </div>
 
-      <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3">
         {[
           ["RA completas", filteredRas.length],
           [
             "Con código RA",
             filteredRas.filter((r) => r.raBarcode).length,
           ],
-          ["Expedidores", filteredShippers.length],
-          ["Sin mapear", orphanShipperNames.length],
+          ["Expedidores sync", filteredShippers.length],
         ].map(([k, v]) => (
           <div
             key={String(k)}
@@ -830,9 +669,7 @@ export function ControlCargaModule({
         {(
           [
             ["ras", "RA completas", Package],
-            ["expedidores", "Expedidores", UserRound],
-            ["etiquetas", "Etiquetas / Xellent", Barcode],
-            ["carga", "Carga", ArrowUpFromLine],
+            ["carga", "Cargue", ArrowUpFromLine],
             ["descarga", "Descarga", ArrowDownToLine],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -1058,305 +895,6 @@ export function ControlCargaModule({
                   COLOMBIA LTDA.
                 </p>
               ) : null}
-            </div>
-          </div>
-        )}
-
-        {section === "expedidores" && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="text-xs">
-                <span className="font-bold uppercase text-slate-500">
-                  Agregar expedidor manual
-                </span>
-                <input
-                  value={newShipperName}
-                  onChange={(e) => setNewShipperName(e.target.value)}
-                  className="mt-1 block min-w-[14rem] rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  placeholder=""
-                />
-              </label>
-              <button
-                type="button"
-                disabled={busy || !newShipperName.trim()}
-                onClick={() => void addShipper()}
-                className="rounded-xl bg-[#16263F] px-4 py-2 text-[10px] font-black uppercase text-white disabled:opacity-50"
-              >
-                Crear código EXP
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-xs">
-                <thead>
-                  <tr className="border-b text-[10px] uppercase text-slate-400">
-                    <th className="py-2">Código</th>
-                    <th>Nombre</th>
-                    <th>Cliente</th>
-                    <th>Aliases (unificados)</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredShippers.map((s) => (
-                    <tr
-                      key={s.id}
-                      className="border-b border-slate-100 dark:border-slate-800"
-                    >
-                      <td className="py-2 font-mono font-bold">
-                        {s.barcode_code}
-                      </td>
-                      <td className="font-semibold">{s.official_name}</td>
-                      <td>{clientDisplayName(s.client_code, clients)}</td>
-                      <td className="max-w-[18rem] text-[10px] text-slate-500">
-                        {(() => {
-                          const extras = shipperAliasesList(s.aliases).filter(
-                            (a) =>
-                              normalizeWarehouseClientText(a) !==
-                              normalizeWarehouseClientText(s.official_name),
-                          );
-                          if (!extras.length) return "—";
-                          return (
-                            <div className="flex flex-wrap gap-1">
-                              {extras.map((a) => (
-                                <span
-                                  key={a}
-                                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 dark:border-slate-600 dark:bg-slate-800"
-                                >
-                                  <span className="max-w-[8rem] truncate">
-                                    {a}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    title="Desvincular"
-                                    className="font-black text-rose-600 disabled:opacity-50"
-                                    onClick={() =>
-                                      void doUnlinkAlias(s.id, a)
-                                    }
-                                  >
-                                    ×
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="whitespace-nowrap space-x-2">
-                        <button
-                          type="button"
-                          className="text-[10px] font-bold text-blue-600"
-                          onClick={() =>
-                            setPrintLabels([
-                              {
-                                kind: "EXPEDIDOR",
-                                barcode: s.barcode_code,
-                                clientDisplay: clientDisplayName(
-                                  s.client_code,
-                                  clients,
-                                ),
-                                title: s.official_name,
-                                shipperName: s.official_name,
-                                extraLines: shipperAliasesList(s.aliases)
-                                  .filter(
-                                    (a) =>
-                                      normalizeWarehouseClientText(a) !==
-                                      normalizeWarehouseClientText(
-                                        s.official_name,
-                                      ),
-                                  ).length
-                                  ? [
-                                      `También: ${shipperAliasesList(s.aliases)
-                                        .filter(
-                                          (a) =>
-                                            normalizeWarehouseClientText(a) !==
-                                            normalizeWarehouseClientText(
-                                              s.official_name,
-                                            ),
-                                        )
-                                        .join(", ")}`,
-                                    ]
-                                  : undefined,
-                              },
-                            ])
-                          }
-                        >
-                          Etiqueta
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-0.5 text-[10px] font-bold text-slate-600"
-                          onClick={() =>
-                            void copyToClipboard(s.barcode_code).then((ok) =>
-                              setMessage(
-                                ok
-                                  ? `Copiado: ${s.barcode_code}`
-                                  : "No se pudo copiar",
-                              ),
-                            )
-                          }
-                        >
-                          <Copy className="h-3 w-3" /> Copiar
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredShippers.length === 0 ? (
-                <p className="py-6 text-center text-slate-400">
-                  Sin expedidores aún. Actualizá para crearlos desde las RA, o
-                  agregá uno manual.
-                </p>
-              ) : null}
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
-              <h2 className="mb-2 flex items-center gap-2 text-sm font-black text-[#16263F] dark:text-slate-100">
-                <Merge className="h-4 w-4" /> Unificar / agrupar expedidores
-              </h2>
-              <p className="mb-3 text-[11px] text-slate-500">
-                Si varios nombres son la misma persona, unificalos bajo un solo
-                código EXP. Los demás quedan como aliases. Si te equivocás, en
-                la tabla tocá <strong>×</strong> en el alias para desvincularlo
-                (recupera su propio código).
-              </p>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-xs">
-                  <span className="font-bold uppercase text-slate-500">
-                    Conservar este código
-                  </span>
-                  <select
-                    value={unifyTargetId}
-                    onChange={(e) => setUnifyTargetId(e.target.value)}
-                    className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    <option value="">Seleccioná…</option>
-                    {filteredShippers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.official_name} ({s.barcode_code})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs">
-                  <span className="font-bold uppercase text-slate-500">
-                    Nombres extra a unificar (coma)
-                  </span>
-                  <input
-                    value={unifyExtraNames}
-                    onChange={(e) => setUnifyExtraNames(e.target.value)}
-                    placeholder=""
-                    className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-              </div>
-              <div className="mt-3">
-                <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">
-                  Fusionar expedidores existentes (se desactivan)
-                </p>
-                <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-                  {filteredShippers
-                    .filter((s) => s.id !== unifyTargetId)
-                    .map((s) => {
-                      const on = unifyMergeIds.includes(s.id);
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() =>
-                            setUnifyMergeIds((prev) =>
-                              on
-                                ? prev.filter((id) => id !== s.id)
-                                : [...prev, s.id],
-                            )
-                          }
-                          className={`rounded-full px-3 py-1 text-[10px] font-bold ${
-                            on
-                              ? "bg-blue-600 text-white"
-                              : "bg-slate-100 text-slate-600 dark:bg-slate-800"
-                          }`}
-                        >
-                          {s.official_name}
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy || !unifyTargetId}
-                onClick={() => void doUnify()}
-                className="mt-4 rounded-xl border border-slate-300 px-4 py-2 text-[10px] font-black uppercase dark:border-slate-600 disabled:opacity-50"
-              >
-                Unificar bajo un código
-              </button>
-            </div>
-          </div>
-        )}
-
-        {section === "etiquetas" && (
-          <div className="space-y-4 text-sm">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={selectedRas.length === 0}
-                onClick={() => printPackageLabelsForRas(selectedRas)}
-                className="rounded-xl bg-[#16263F] px-4 py-2 text-[10px] font-black uppercase text-white disabled:opacity-50"
-              >
-                Imprimir bultos ({selectedRas.length || "—"})
-              </button>
-              <button
-                type="button"
-                disabled={selectedRas.length === 0}
-                onClick={() => {
-                  if (selectedRas.length === 0) {
-                    setMessage(
-                      "En «RA completas» habilitá la selección, marcá los RA y volvé a exportar.",
-                    );
-                    return;
-                  }
-                  exportPackageCsv(selectedRas);
-                }}
-                className="rounded-xl border border-emerald-600 px-4 py-2 text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-300 disabled:opacity-50"
-              >
-                CSV bultos ({selectedRas.length || "—"})
-              </button>
-              <button
-                type="button"
-                onClick={() => exportXellentCsv("pedidos")}
-                className="rounded-xl bg-emerald-700 px-4 py-2 text-[10px] font-black uppercase text-white"
-              >
-                CSV Pedidos / RA
-              </button>
-              <button
-                type="button"
-                onClick={() => exportXellentCsv("expedidores")}
-                className="rounded-xl bg-sky-700 px-4 py-2 text-[10px] font-black uppercase text-white"
-              >
-                CSV Expedidores
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const labels: LabelPrintData[] = filteredShippers.map((s) => ({
-                    kind: "EXPEDIDOR" as const,
-                    barcode: s.barcode_code,
-                    clientDisplay: clientDisplayName(s.client_code, clients),
-                    title: s.official_name,
-                    shipperName: s.official_name,
-                  }));
-                  if (!labels.length) {
-                    setMessage("No hay códigos de expedidor para imprimir.");
-                    return;
-                  }
-                  setPrintLabels(labels);
-                }}
-                className="rounded-xl border border-slate-300 px-4 py-2 text-[10px] font-black uppercase dark:border-slate-600"
-              >
-                Imprimir expedidores
-              </button>
             </div>
           </div>
         )}

@@ -9,7 +9,6 @@ import {
   previewReceptionReport,
   type ReceptionReportFilter,
 } from "@/lib/receptionLogistics/buildDailyReceptionReport";
-import { RECEPTION_COPY } from "@/lib/receptionLogistics/config";
 import type { ReceptionReportPreset } from "@/lib/receptionLogistics/receptionReportFilter";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 
@@ -132,10 +131,10 @@ export function ReceptionReportExportModal({
                 id="reception-report-title"
                 className="text-base font-black uppercase tracking-wide text-[#16263F] dark:text-slate-100"
               >
-                {RECEPTION_COPY.reportModalTitle}
+                Descargar reporte de recepción
               </h2>
               <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
-                {RECEPTION_COPY.reportModalSubtitle}
+                Camiones / OR por día · Excel + resumen AldeGpt Terra
               </p>
             </div>
           </div>
@@ -282,7 +281,8 @@ export function ReceptionReportExportModal({
           <p className="rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm text-slate-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-slate-300">
             Se exportarán{" "}
             <strong>{preview.orCount}</strong> OR (
-            <strong>{preview.bultos}</strong> bultos) con los filtros seleccionados.
+            <strong>{preview.bultos}</strong> bultos). AldeGpt Terra organiza un
+            resumen ejecutivo en una hoja aparte del Excel.
           </p>
         </div>
 

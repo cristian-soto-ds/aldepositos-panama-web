@@ -171,6 +171,17 @@ async function syncReceptionStatusToCollectionOrder(
       try {
         const order = await fetchCollectionOrderById(orderId);
         if (!order) return;
+
+        // Listo individual: no devolver a rampa/fila ni re-enganchar al camión.
+        if (order.receptionStatus === RECEPTION_STATUS.COMPLETADO) {
+          return;
+        }
+        // Ya salió del grupo (p. ej. Listo): el camión viejo no debe reclamarla.
+        if (groupId) {
+          const oidGroup = order.receptionGroupId?.trim();
+          if (!oidGroup || oidGroup !== groupId) return;
+        }
+
         if (
           order.receptionStatus === status &&
           (groupId ? order.receptionGroupId === groupId : true)
@@ -273,6 +284,99 @@ export async function createReceptionTruckGroup(input: {
 
   await upsertReceptionTruck(truck);
   return truck;
+}
+
+/**
+ * Suma una o más OR sueltas a un camión ya unificado (p. ej. se olvidó una).
+ * Las OR nuevas adoptan el mismo estado del grupo (fila / rampa).
+ */
+export async function addOrdersToReceptionGroup(input: {
+  groupId: string;
+  orderIds: string[];
+}): Promise<ReceptionTruck> {
+  const groupId = String(input.groupId ?? "").trim();
+  const uniqueIds = Array.from(
+    new Set(input.orderIds.map((id) => String(id).trim()).filter(Boolean)),
+  );
+  if (!groupId) {
+    throw new Error("Indicá el camión al que querés agregar la OR.");
+  }
+  if (uniqueIds.length < 1) {
+    throw new Error("Seleccioná al menos 1 OR para agregar al camión.");
+  }
+
+  const allReception = await fetchCollectionOrdersForReception();
+  const siblings = allReception.filter((o) => o.receptionGroupId === groupId);
+  if (siblings.length === 0) {
+    throw new Error("No se encontró el camión unificado (puede haberse disuelto).");
+  }
+
+  const groupStatus =
+    siblings.find((s) => s.receptionStatus)?.receptionStatus ??
+    RECEPTION_STATUS.EN_FILA;
+  if (groupStatus === RECEPTION_STATUS.COMPLETADO) {
+    throw new Error("Ese camión ya está completado; no se pueden sumar más OR.");
+  }
+
+  const loaded: CollectionOrder[] = [];
+  for (const id of uniqueIds) {
+    if (siblings.some((s) => s.id === id)) {
+      throw new Error("Esa OR ya forma parte del camión seleccionado.");
+    }
+    const order = await fetchCollectionOrderById(id);
+    if (!order) throw new Error(`No se encontró la OR ${id}`);
+    if (order.receptionGroupId) {
+      throw new Error(
+        `La OR #${order.numero ?? id.slice(0, 8)} ya pertenece a otro camión.`,
+      );
+    }
+    if (
+      order.receptionStatus &&
+      order.receptionStatus !== RECEPTION_STATUS.EN_FILA
+    ) {
+      throw new Error(
+        `La OR #${order.numero ?? id.slice(0, 8)} ya está en rampa o completada.`,
+      );
+    }
+    loaded.push(order);
+  }
+
+  const trucks = await fetchReceptionTrucks();
+  const groupTruck = trucks.find((t) => t.id === groupId) ?? null;
+  const now = new Date().toISOString();
+  const groupQueuedAt =
+    siblings
+      .map((o) => o.receptionQueuedAt)
+      .find((t) => !!t?.trim()) ?? now;
+
+  const updatedNew: CollectionOrder[] = [];
+  for (const order of loaded) {
+    const soloId = receptionTruckIdForCollectionOrder(order.id);
+    await removeReceptionTruckById(soloId);
+
+    const payload: CollectionOrder = {
+      ...order,
+      receptionStatus: groupStatus,
+      receptionGroupId: groupId,
+      receptionQueuedAt: order.receptionQueuedAt || groupQueuedAt,
+      updatedAt: now,
+    };
+    await updateCollectionOrder(payload);
+    updatedNew.push(payload);
+  }
+
+  const allMembers = [...siblings, ...updatedNew];
+  const rebuilt = buildGroupReceptionTruck(allMembers, groupTruck, {
+    groupId,
+  });
+  if (!rebuilt) throw new Error("No se pudo actualizar el camión.");
+
+  if (groupTruck?.sortOrder != null) {
+    rebuilt.sortOrder = groupTruck.sortOrder;
+  }
+
+  await upsertReceptionTruck(rebuilt);
+  return rebuilt;
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   recordPackageScan,
   removeRaFromSession,
   buildSessionProgress,
+  updateLoadSessionContainerInfo,
 } from "@/lib/warehouse/api";
 import { downloadLoadSessionExcel } from "@/lib/warehouse/exportLoadSessionExcel";
 import {
@@ -35,6 +36,7 @@ import {
   parsePackageBarcode,
 } from "@/lib/warehouse/task-adapter";
 import type {
+  LoadSessionContainerInfo,
   LoadSessionKind,
   LoadSessionRaProgress,
   PackageScanResult,
@@ -109,7 +111,93 @@ function isMissingLoadTablesError(err: unknown): boolean {
 }
 
 const MISSING_TABLES_HINT =
-  "Falta aplicar en Supabase (SQL Editor) las migraciones 019_warehouse_load_sessions.sql y 020_warehouse_carga_ready_descarga.sql. Sin esas tablas no se puede cargar ni descargar.";
+  "Falta aplicar en Supabase (SQL Editor) las migraciones 019_warehouse_load_sessions.sql, 020_warehouse_carga_ready_descarga.sql y (recomendado) 021_warehouse_load_container_info.sql. Sin esas tablas no se puede cargar ni descargar.";
+
+/** Capacidades tipo equipo — mismas opciones que Entrega de carga. */
+const CAPACITY_MAP: Record<
+  string,
+  { name: string; maxCbm: number; tare: number }
+> = {
+  "20": { name: "Contenedor 20'", maxCbm: 28, tare: 2300 },
+  "40": { name: "Contenedor 40'", maxCbm: 56, tare: 3900 },
+  furgon: { name: "Contenedor 40' HQ", maxCbm: 70, tare: 0 },
+};
+
+const CONTAINER_DRAFT_KEY = "cargue_container_info_draft";
+
+function todayIsoDate(): string {
+  return new Date().toISOString().split("T")[0]!;
+}
+
+function emptyContainerInfo(
+  responsible = "",
+): LoadSessionContainerInfo {
+  return {
+    type: "40",
+    consignment: "",
+    number: "",
+    bl: "",
+    seal1: "",
+    seal2: "",
+    responsible,
+    date: todayIsoDate(),
+    tare: CAPACITY_MAP["40"].tare,
+  };
+}
+
+function parseContainerInfo(
+  raw: unknown,
+  fallbackNumber = "",
+): LoadSessionContainerInfo | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const number = String(o.number ?? fallbackNumber ?? "").trim();
+  if (!number && !String(o.type ?? "").trim()) return null;
+  const type = String(o.type ?? "40").trim() || "40";
+  return {
+    type,
+    consignment: String(o.consignment ?? "").trim(),
+    number: number || fallbackNumber,
+    bl: String(o.bl ?? "").trim(),
+    seal1: String(o.seal1 ?? "").trim(),
+    seal2: String(o.seal2 ?? "").trim(),
+    responsible: String(o.responsible ?? "").trim(),
+    date: String(o.date ?? todayIsoDate()).trim() || todayIsoDate(),
+    tare:
+      typeof o.tare === "number"
+        ? o.tare
+        : Number(o.tare) || CAPACITY_MAP[type]?.tare || 0,
+  };
+}
+
+function loadDraftContainerInfo(
+  responsibleHint: string,
+): LoadSessionContainerInfo {
+  const base = emptyContainerInfo(responsibleHint);
+  if (typeof window === "undefined") return base;
+  try {
+    const raw = window.localStorage.getItem(CONTAINER_DRAFT_KEY);
+    if (!raw) return base;
+    const saved = JSON.parse(raw) as Partial<LoadSessionContainerInfo>;
+    const type = String(saved.type ?? base.type).trim() || "40";
+    return {
+      ...base,
+      ...saved,
+      type,
+      responsible:
+        String(saved.responsible ?? "").trim() ||
+        responsibleHint ||
+        base.responsible,
+      tare:
+        typeof saved.tare === "number"
+          ? saved.tare
+          : CAPACITY_MAP[type]?.tare ?? base.tare,
+      date: String(saved.date ?? base.date).trim() || base.date,
+    };
+  } catch {
+    return base;
+  }
+}
 
 export function LoadScanPanel({
   kind,
@@ -118,8 +206,8 @@ export function LoadScanPanel({
   onMessage,
   onImmersiveChange,
 }: LoadScanPanelProps) {
-  const title = kind === "carga" ? "Carga" : "Descarga";
-  /** null = menú principal (solo carga). */
+  const title = kind === "carga" ? "Cargue" : "Descarga";
+  /** null = menú principal (solo cargue). */
   const [workRole, setWorkRole] = useState<WorkRole | null>(
     kind === "descarga" ? "escanear" : null,
   );
@@ -135,8 +223,11 @@ export function LoadScanPanel({
     tone: null,
     text: "",
   });
-  const [containerDraft, setContainerDraft] = useState("");
+  const [containerInfo, setContainerInfo] = useState<LoadSessionContainerInfo>(
+    () => emptyContainerInfo(userLabel?.trim() || ""),
+  );
   const [notesDraft, setNotesDraft] = useState("");
+  const [showContainerEditor, setShowContainerEditor] = useState(false);
   const [expandedRa, setExpandedRa] = useState<string | null>(null);
   const [mountOk, setMountOk] = useState<string | null>(null);
   const [tablesMissing, setTablesMissing] = useState(false);
@@ -150,6 +241,7 @@ export function LoadScanPanel({
   >([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const raAddRef = useRef<HTMLInputElement>(null);
+  const draftHydrated = useRef(false);
 
   const reportError = useCallback(
     (e: unknown, fallback: string) => {
@@ -162,6 +254,32 @@ export function LoadScanPanel({
     },
     [onMessage],
   );
+
+  // Borrador local del formulario (como Entrega de carga).
+  useEffect(() => {
+    if (kind !== "carga" || draftHydrated.current) return;
+    draftHydrated.current = true;
+    setContainerInfo(loadDraftContainerInfo(userLabel?.trim() || ""));
+  }, [kind, userLabel]);
+
+  useEffect(() => {
+    if (kind !== "carga" || typeof window === "undefined") return;
+    if (!draftHydrated.current) return;
+    window.localStorage.setItem(
+      CONTAINER_DRAFT_KEY,
+      JSON.stringify(containerInfo),
+    );
+  }, [containerInfo, kind]);
+
+  const sessionContainerInfo = useMemo(() => {
+    if (!session) return null;
+    return (
+      parseContainerInfo(session.container_info, session.container_number) ?? {
+        ...emptyContainerInfo(session.created_by || userLabel?.trim() || ""),
+        number: session.container_number,
+      }
+    );
+  }, [session, userLabel]);
 
   const refreshSessions = useCallback(async () => {
     const list = await listLoadSessions({ kind, status: "all" });
@@ -225,9 +343,21 @@ export function LoadScanPanel({
     }
   }, [session?.id, session?.status, workRole]);
 
+  useEffect(() => {
+    if (!session) return;
+    const parsed =
+      parseContainerInfo(session.container_info, session.container_number) ?? {
+        ...emptyContainerInfo(session.created_by || userLabel?.trim() || ""),
+        number: session.container_number,
+      };
+    setContainerInfo(parsed);
+    setShowContainerEditor(false);
+  }, [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- solo al cambiar de sesión
+
   const goHub = () => {
     if (kind !== "carga") return;
     setWorkRole(null);
+    setShowContainerEditor(false);
   };
 
   const openPedidos = () => setWorkRole("montar");
@@ -291,26 +421,71 @@ export function LoadScanPanel({
   const createSession = async () => {
     if (kind === "descarga") {
       onMessage?.(
-        "En Descarga elegí un contenedor ya cargado (señalado desde Carga).",
+        "En Descarga elegí un contenedor ya cargado (señalado desde Cargue).",
       );
+      return;
+    }
+    const number = containerInfo.number.trim();
+    if (!number) {
+      onMessage?.("Indicá el número de contenedor.");
       return;
     }
     setBusy(true);
     try {
+      const info: LoadSessionContainerInfo = {
+        ...containerInfo,
+        number,
+        responsible:
+          containerInfo.responsible.trim() || userLabel?.trim() || "",
+        tare:
+          typeof containerInfo.tare === "number"
+            ? containerInfo.tare
+            : CAPACITY_MAP[containerInfo.type]?.tare ?? 0,
+      };
       const s = await createLoadSession({
         kind,
-        container_number: containerDraft,
+        container_number: number,
         notes: notesDraft,
         created_by: userLabel ?? null,
+        container_info: info,
       });
-      setContainerDraft("");
       setNotesDraft("");
       setActiveId(s.id);
       setWorkRole("montar");
+      setShowContainerEditor(false);
       await refreshSessions();
-      onMessage?.(`Sesión de carga creada. Ahora montá los RA.`);
+      onMessage?.(
+        `Cargue creado (${number}). Ahora asigná los RA al contenedor.`,
+      );
     } catch (e) {
       reportError(e, "No se pudo crear");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveContainerEdits = async () => {
+    if (!activeId || !session) return;
+    const number = containerInfo.number.trim();
+    if (!number) {
+      onMessage?.("Indicá el número de contenedor.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const info: LoadSessionContainerInfo = {
+        ...containerInfo,
+        number,
+        responsible:
+          containerInfo.responsible.trim() || userLabel?.trim() || "",
+      };
+      const updated = await updateLoadSessionContainerInfo(activeId, info);
+      setSession(updated);
+      setShowContainerEditor(false);
+      await refreshSessions();
+      onMessage?.("Datos del contenedor actualizados.");
+    } catch (e) {
+      reportError(e, "No se pudo actualizar el contenedor");
     } finally {
       setBusy(false);
     }
@@ -432,7 +607,7 @@ export function LoadScanPanel({
     if (kind === "carga") {
       if (
         !window.confirm(
-          `¿Cerrar la carga del contenedor ${session.container_number} y enviarla a Descarga?\n\nEl operario de descarga podrá seleccionarla.`,
+          `¿Cerrar el cargue del contenedor ${session.container_number} y enviarlo a Descarga?\n\nEl operario de descarga podrá seleccionarlo.`,
         )
       ) {
         return;
@@ -443,7 +618,7 @@ export function LoadScanPanel({
         await refreshSessions();
         await refreshActive(activeId);
         onMessage?.(
-          `Carga cerrada. Contenedor ${session.container_number} listo en Descarga.`,
+          `Cargue cerrado. Contenedor ${session.container_number} listo en Descarga.`,
         );
       } catch (e) {
         reportError(e, "No se pudo cerrar");
@@ -643,7 +818,7 @@ export function LoadScanPanel({
         </div>
       ) : null}
 
-      {/* ─── Menú principal Carga ─── */}
+      {/* ─── Menú principal Cargue ─── */}
       {kind === "carga" && workRole === null ? (
         <div className="space-y-4">
           <p className="text-base font-black text-[#16263F] dark:text-slate-100">
@@ -659,7 +834,7 @@ export function LoadScanPanel({
             <span className="min-w-0">
               <span className="block text-lg font-black">Pedidos</span>
               <span className="mt-0.5 block text-sm font-medium text-white/80">
-                Crear contenedor y agregar los RA
+                Datos del contenedor y asignar RAs
               </span>
             </span>
           </button>
@@ -747,58 +922,213 @@ export function LoadScanPanel({
               </p>
               <p className="text-[11px] font-semibold text-slate-500">
                 {kind === "descarga"
-                  ? "Contenedores listos desde Carga"
+                  ? "Contenedores listos desde Cargue"
                   : workRole === "montar"
-                    ? "Agregar RA al contenedor"
+                    ? "Datos del contenedor y asignar RAs"
                     : "Escanear etiquetas de bulto"}
               </p>
             </div>
           </div>
 
-      {/* Carga: nueva sesión | Descarga: contenedores listos */}
+      {/* Cargue: nueva sesión con datos de contenedor (estilo Entrega de carga) */}
       {kind === "carga" && workRole === "montar" && !session ? (
         <div className="rounded-2xl border-2 border-[#16263F]/15 bg-white p-4 shadow-sm dark:border-slate-600 dark:bg-slate-900">
           <p className="mb-1 text-base font-black text-[#16263F] dark:text-slate-100">
-            Empezar carga
+            Iniciar / cargar contenedor
           </p>
           <p className="mb-3 text-xs text-slate-500">
-            Escribí el número del contenedor y tocá Crear.
+            Completá los datos del contenedor (igual que en Entrega de carga) y
+            creá el cargue. Después asignás los RAs.
           </p>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <label className="min-w-0 flex-1 text-xs">
-              <span className="font-bold text-slate-500">Contenedor</span>
-              <input
-                value={containerDraft}
-                onChange={(e) => setContainerDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && containerDraft.trim()) {
-                    e.preventDefault();
-                    void createSession();
-                  }
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Tipo equipo
+              </span>
+              <select
+                value={containerInfo.type}
+                onChange={(e) => {
+                  const type = e.target.value;
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    type,
+                    tare: CAPACITY_MAP[type]?.tare ?? prev.tare ?? 0,
+                  }));
                 }}
-                className="mt-1 block w-full rounded-2xl border-2 border-slate-200 px-4 py-3 text-lg font-black outline-none focus:border-[#16263F] dark:border-slate-700 dark:bg-slate-950"
-                placeholder="Ej. MSCU1234567"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+              >
+                {Object.keys(CAPACITY_MAP).map((k) => (
+                  <option key={k} value={k}>
+                    {CAPACITY_MAP[k]!.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                N° consignación
+              </span>
+              <input
+                type="text"
+                value={containerInfo.consignment}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    consignment: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold uppercase text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder="Consignación"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Contenedor
+              </span>
+              <input
+                type="text"
+                value={containerInfo.number}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    number: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold uppercase text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder="Ej: HLXU1234567"
                 autoFocus
               />
             </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Seguimiento / BL
+              </span>
+              <input
+                type="text"
+                value={containerInfo.bl}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    bl: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold uppercase text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder="N° o referencia"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Sello 1
+              </span>
+              <input
+                type="text"
+                value={containerInfo.seal1}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    seal1: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder="Sello principal"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Sello 2
+              </span>
+              <input
+                type="text"
+                value={containerInfo.seal2}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    seal2: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder="Opcional"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Tara (kg)
+              </span>
+              <input
+                type="number"
+                step="1"
+                value={containerInfo.tare ?? ""}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    tare: Number(e.target.value) || 0,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Fecha llegada
+              </span>
+              <input
+                type="date"
+                value={containerInfo.date}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    date: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+              />
+            </label>
+            <label className="col-span-2 space-y-1 text-xs md:col-span-2">
+              <span className="font-black uppercase tracking-wide text-slate-500">
+                Responsable de cargue
+              </span>
+              <input
+                type="text"
+                value={containerInfo.responsible}
+                onChange={(e) =>
+                  setContainerInfo((prev) => ({
+                    ...prev,
+                    responsible: e.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2.5 text-xs font-bold text-[#16263F] outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-100"
+                placeholder={userLabel?.trim() || "Nombre del responsable"}
+              />
+            </label>
+            <label className="col-span-2 space-y-1 text-xs md:col-span-2">
+              <span className="font-black uppercase tracking-wide text-slate-400">
+                Nota (opcional)
+              </span>
+              <input
+                value={notesDraft}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-2.5 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-950"
+                placeholder=""
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={busy || !containerDraft.trim() || tablesMissing}
+              disabled={
+                busy || !containerInfo.number.trim() || tablesMissing
+              }
               onClick={() => void createSession()}
-              className="inline-flex h-14 items-center justify-center gap-2 rounded-2xl bg-[#16263F] px-6 text-sm font-black uppercase text-white disabled:opacity-50"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-[#16263F] px-6 text-sm font-black uppercase text-white disabled:opacity-50"
             >
-              <Plus className="h-5 w-5" /> Crear
+              <Plus className="h-5 w-5" /> Crear cargue
             </button>
+            <p className="text-[11px] text-slate-500">
+              Capacidad ref.:{" "}
+              {CAPACITY_MAP[containerInfo.type]?.maxCbm ?? "—"} m³ · Tara{" "}
+              {containerInfo.tare ?? 0} kg
+            </p>
           </div>
-          <label className="mt-2 block text-xs">
-            <span className="font-bold text-slate-400">Nota (opcional)</span>
-            <input
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-              className="mt-1 block w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-              placeholder=""
-            />
-          </label>
         </div>
       ) : null}
 
@@ -811,11 +1141,11 @@ export function LoadScanPanel({
       {kind === "descarga" ? (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
           <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-blue-800 dark:text-blue-200">
-            Contenedores listos (desde Carga)
+            Contenedores listos (desde Cargue)
           </p>
           {readyCargas.length === 0 && !tablesMissing ? (
             <p className="text-xs text-blue-900/80 dark:text-blue-100/80">
-              Todavía no hay contenedores señalados. En Carga, cuando terminen,
+              Todavía no hay contenedores señalados. En Cargue, cuando terminen,
               usá «Cerrar y enviar a descarga».
             </p>
           ) : null}
@@ -905,6 +1235,22 @@ export function LoadScanPanel({
                 {session.status === "abierta" ? "Abierta" : "Cerrada"} ·{" "}
                 {progress.length} RA · {totals.sc}/{totals.exp || "—"} bultos
               </p>
+              {sessionContainerInfo ? (
+                <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+                  {CAPACITY_MAP[sessionContainerInfo.type]?.name ||
+                    sessionContainerInfo.type ||
+                    "Equipo"}
+                  {sessionContainerInfo.seal1
+                    ? ` · Sello ${sessionContainerInfo.seal1}`
+                    : ""}
+                  {sessionContainerInfo.bl
+                    ? ` · Seg. ${sessionContainerInfo.bl}`
+                    : ""}
+                  {sessionContainerInfo.responsible
+                    ? ` · ${sessionContainerInfo.responsible}`
+                    : ""}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               {kind === "carga" && workRole === "montar" ? (
@@ -914,11 +1260,25 @@ export function LoadScanPanel({
                     setActiveId(null);
                     setSession(null);
                     setProgress([]);
-                    setContainerDraft("");
+                    setShowContainerEditor(false);
+                    setContainerInfo(
+                      loadDraftContainerInfo(userLabel?.trim() || ""),
+                    );
                   }}
                   className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300"
                 >
-                  Nueva carga
+                  Nuevo cargue
+                </button>
+              ) : null}
+              {kind === "carga" &&
+              workRole === "montar" &&
+              session.status === "abierta" ? (
+                <button
+                  type="button"
+                  onClick={() => setShowContainerEditor((v) => !v)}
+                  className="rounded-xl border border-blue-200 px-3 py-2 text-[10px] font-black uppercase text-blue-800 dark:border-blue-800 dark:text-blue-200"
+                >
+                  {showContainerEditor ? "Ocultar datos" : "Editar contenedor"}
                 </button>
               ) : null}
               <button
@@ -944,6 +1304,154 @@ export function LoadScanPanel({
               ) : null}
             </div>
           </div>
+
+          {kind === "carga" &&
+          workRole === "montar" &&
+          showContainerEditor &&
+          session.status === "abierta" ? (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 dark:border-blue-900 dark:bg-blue-950/30">
+              <p className="mb-2 text-[10px] font-black uppercase tracking-wide text-blue-800 dark:text-blue-200">
+                Datos del contenedor
+              </p>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Tipo</span>
+                  <select
+                    value={containerInfo.type}
+                    onChange={(e) => {
+                      const type = e.target.value;
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        type,
+                        tare: CAPACITY_MAP[type]?.tare ?? prev.tare ?? 0,
+                      }));
+                    }}
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  >
+                    {Object.keys(CAPACITY_MAP).map((k) => (
+                      <option key={k} value={k}>
+                        {CAPACITY_MAP[k]!.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Contenedor</span>
+                  <input
+                    value={containerInfo.number}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        number: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold uppercase dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Consignación</span>
+                  <input
+                    value={containerInfo.consignment}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        consignment: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold uppercase dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Seguimiento</span>
+                  <input
+                    value={containerInfo.bl}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        bl: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold uppercase dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Sello 1</span>
+                  <input
+                    value={containerInfo.seal1}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        seal1: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Sello 2</span>
+                  <input
+                    value={containerInfo.seal2}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        seal2: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Tara</span>
+                  <input
+                    type="number"
+                    value={containerInfo.tare ?? ""}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        tare: Number(e.target.value) || 0,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="text-[10px]">
+                  <span className="font-bold text-slate-500">Fecha</span>
+                  <input
+                    type="date"
+                    value={containerInfo.date}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        date: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <label className="col-span-2 text-[10px]">
+                  <span className="font-bold text-slate-500">Responsable</span>
+                  <input
+                    value={containerInfo.responsible}
+                    onChange={(e) =>
+                      setContainerInfo((prev) => ({
+                        ...prev,
+                        responsible: e.target.value,
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border px-2 py-1.5 text-xs font-bold dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={busy || !containerInfo.number.trim()}
+                onClick={() => void saveContainerEdits()}
+                className="mt-3 rounded-xl bg-[#16263F] px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-50"
+              >
+                Guardar datos
+              </button>
+            </div>
+          ) : null}
 
           {/* ─── Rol: Montar (simple) ─── */}
           {workRole === "montar" && session.status === "abierta" ? (
@@ -1167,7 +1675,7 @@ export function LoadScanPanel({
                           value={scanValue}
                           onChange={(e) => setScanValue(e.target.value)}
                           className="w-full rounded-2xl border-2 border-blue-300 bg-white py-3 pl-11 pr-3 text-lg font-bold tracking-wide outline-none focus:border-blue-600 dark:border-blue-800 dark:bg-slate-950"
-                          placeholder="64368-001 · EXP-…-001 · EXP-…-001/018"
+                          placeholder="424/AAA64353-1 · 64368-001"
                           autoComplete="off"
                           inputMode="text"
                         />

@@ -74,13 +74,28 @@ describe("task-adapter", () => {
     expect(isCompletedInventoryStatus("completed")).toBe(true);
   });
 
-  it("mezcla código expedidor + RA", () => {
-    expect(buildOrderBarcode("EXP-AAA-0003", "64368")).toBe(
-      "EXP-AAA-0003-64368",
-    );
+  it("mezcla marca + RA", () => {
+    expect(buildOrderBarcode("424/AAA", "64353")).toBe("424/AAA64353");
   });
 
-  it("arma y parsea los 3 formatos de bulto", () => {
+  it("arma y parsea Marca+RA-bulto y formatos legados", () => {
+    expect(
+      buildPackageBarcode(
+        { ra: "64353", seq: 1, orderRef: "424/AAA" },
+        "marca_ra_bulto",
+      ),
+    ).toBe("424/AAA64353-1");
+    expect(
+      buildPackageBarcode(
+        {
+          ra: "64353",
+          seq: 12,
+          orderBarcode: "424/AAA64353",
+        },
+        "marca_ra_bulto",
+      ),
+    ).toBe("424/AAA64353-12");
+
     expect(buildPackageBarcode({ ra: "64368", seq: 1 }, "corto")).toBe(
       "64368-001",
     );
@@ -103,12 +118,17 @@ describe("task-adapter", () => {
         {
           ra: "64368",
           seq: 1,
-          shipperBarcode: "EXP-AAA-0003",
+          orderBarcode: "EXP-AAA-0003-64368",
         },
         "expedidor_ra_bulto",
       ),
     ).toBe("EXP-AAA-0003-64368-001");
 
+    expect(parsePackageBarcode("424/AAA64353-1")).toMatchObject({
+      ra: "64353",
+      seq: 1,
+      format: "marca_ra_bulto",
+    });
     expect(parsePackageBarcode("64368-001")).toMatchObject({
       ra: "64368",
       seq: 1,
@@ -127,10 +147,12 @@ describe("task-adapter", () => {
     });
     expect(parsePackageBarcode("EXP-IMPOMEX-0001-64368")).toBeNull();
     expect(parsePackageBarcode("basura")).toBeNull();
-    expect(buildPackageBarcodeList("64368", 3, "corto")).toEqual([
-      "64368-001",
-      "64368-002",
-      "64368-003",
-    ]);
+    expect(
+      buildPackageBarcodeList(
+        { ra: "64353", orderRef: "424/AAA" },
+        3,
+        "marca_ra_bulto",
+      ),
+    ).toEqual(["424/AAA64353-1", "424/AAA64353-2", "424/AAA64353-3"]);
   });
 });

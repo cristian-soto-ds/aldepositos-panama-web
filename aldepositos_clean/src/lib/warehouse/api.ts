@@ -14,6 +14,7 @@ import {
   parsePackageBarcode,
 } from "@/lib/warehouse/task-adapter";
 import type {
+  LoadSessionContainerInfo,
   LoadSessionKind,
   LoadSessionRaProgress,
   PackageScanResult,
@@ -450,7 +451,7 @@ export async function unlinkShipperAlias(input: {
   };
 }
 
-/** Genera (o reutiliza) código de pedido = código expedidor + RA. */
+/** Genera (o reutiliza) código de pedido = marca (REF) + RA. */
 export async function ensureRaBarcode(input: {
   task_id: string;
   ra: string;
@@ -461,7 +462,7 @@ export async function ensureRaBarcode(input: {
   order_ref?: string | null;
   shipper_label?: string | null;
 }): Promise<WarehouseRaCode> {
-  const desired = buildOrderBarcode(input.shipper_barcode, input.ra);
+  const desired = buildOrderBarcode(input.order_ref ?? "", input.ra);
 
   const { data: existing, error: exErr } = await supabase
     .from("warehouse_ra_codes")
@@ -560,11 +561,28 @@ export async function syncOrderBarcodesFromRas(
 
   for (const view of raViews) {
     if (!view.clientCode) continue;
-    if (byTask.has(view.taskId)) continue;
     if (!view.shipper || view.shipper === PENDING_SHIPPER_LABEL) {
-      skippedPending += 1;
+      if (!byTask.has(view.taskId)) skippedPending += 1;
       continue;
     }
+    if (!String(view.orderRef ?? "").trim()) {
+      if (!byTask.has(view.taskId)) {
+        errors.push(`${view.ra}: falta marca (REF)`);
+      }
+      continue;
+    }
+
+    let desired: string;
+    try {
+      desired = buildOrderBarcode(view.orderRef, view.ra);
+    } catch (e) {
+      errors.push(`${view.ra}: ${errMessage(e, "error")}`);
+      continue;
+    }
+
+    const prev = byTask.get(view.taskId);
+    if (prev && prev.barcode_code === desired) continue;
+
     try {
       let matched = matchShipperByName(list, view.shipper, view.clientCode);
       if (!matched) {
@@ -663,21 +681,116 @@ export async function createLoadSession(input: {
   container_number: string;
   notes?: string;
   created_by?: string | null;
+  container_info?: LoadSessionContainerInfo | null;
 }): Promise<WarehouseLoadSession> {
   const container_number = String(input.container_number ?? "").trim();
   if (!container_number) throw new Error("Indicá el número de contenedor");
+  const container_info = input.container_info
+    ? {
+        type: String(input.container_info.type ?? "").trim(),
+        consignment: String(input.container_info.consignment ?? "").trim(),
+        number: String(input.container_info.number ?? container_number).trim(),
+        bl: String(input.container_info.bl ?? "").trim(),
+        seal1: String(input.container_info.seal1 ?? "").trim(),
+        seal2: String(input.container_info.seal2 ?? "").trim(),
+        responsible: String(input.container_info.responsible ?? "").trim(),
+        date: String(input.container_info.date ?? "").trim(),
+        tare:
+          typeof input.container_info.tare === "number"
+            ? input.container_info.tare
+            : Number(input.container_info.tare) || 0,
+      }
+    : null;
+  const row: Record<string, unknown> = {
+    kind: input.kind,
+    container_number,
+    notes: String(input.notes ?? "").trim(),
+    status: "abierta",
+    created_by: input.created_by?.trim() || null,
+  };
+  if (container_info) row.container_info = container_info;
   const { data, error } = await supabase
     .from("warehouse_load_sessions")
-    .insert({
-      kind: input.kind,
-      container_number,
-      notes: String(input.notes ?? "").trim(),
-      status: "abierta",
-      created_by: input.created_by?.trim() || null,
-    })
+    .insert(row)
     .select("*")
     .single();
-  if (error) throw new Error(errMessage(error, "No se pudo crear la sesión"));
+  if (error) {
+    // Sin migración 021: reintentar sin container_info.
+    if (
+      container_info &&
+      (/container_info/i.test(error.message) || /PGRST204/i.test(error.message))
+    ) {
+      const { data: fallback, error: fbErr } = await supabase
+        .from("warehouse_load_sessions")
+        .insert({
+          kind: input.kind,
+          container_number,
+          notes: String(input.notes ?? "").trim(),
+          status: "abierta",
+          created_by: input.created_by?.trim() || null,
+        })
+        .select("*")
+        .single();
+      if (fbErr) {
+        throw new Error(errMessage(fbErr, "No se pudo crear la sesión"));
+      }
+      return fallback as WarehouseLoadSession;
+    }
+    throw new Error(errMessage(error, "No se pudo crear la sesión"));
+  }
+  return data as WarehouseLoadSession;
+}
+
+export async function updateLoadSessionContainerInfo(
+  sessionId: string,
+  container_info: LoadSessionContainerInfo,
+): Promise<WarehouseLoadSession> {
+  const number = String(container_info.number ?? "").trim();
+  if (!number) throw new Error("Indicá el número de contenedor");
+  const payload = {
+    type: String(container_info.type ?? "").trim(),
+    consignment: String(container_info.consignment ?? "").trim(),
+    number,
+    bl: String(container_info.bl ?? "").trim(),
+    seal1: String(container_info.seal1 ?? "").trim(),
+    seal2: String(container_info.seal2 ?? "").trim(),
+    responsible: String(container_info.responsible ?? "").trim(),
+    date: String(container_info.date ?? "").trim(),
+    tare:
+      typeof container_info.tare === "number"
+        ? container_info.tare
+        : Number(container_info.tare) || 0,
+  };
+  const { data, error } = await supabase
+    .from("warehouse_load_sessions")
+    .update({
+      container_number: number,
+      container_info: payload,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", sessionId)
+    .select("*")
+    .single();
+  if (error) {
+    if (/container_info/i.test(error.message) || /PGRST204/i.test(error.message)) {
+      const { data: fallback, error: fbErr } = await supabase
+        .from("warehouse_load_sessions")
+        .update({
+          container_number: number,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", sessionId)
+        .select("*")
+        .single();
+      if (fbErr) {
+        throw new Error(
+          errMessage(fbErr, "No se pudo actualizar el contenedor"),
+        );
+      }
+      return fallback as WarehouseLoadSession;
+    }
+    throw new Error(errMessage(error, "No se pudo actualizar el contenedor"));
+  }
   return data as WarehouseLoadSession;
 }
 
@@ -820,7 +933,7 @@ export async function recordPackageScan(input: {
     return {
       code: "invalid",
       message:
-        "Código inválido. Usá etiqueta de bulto (64368-001, EXP-…-64368-001 o EXP-…-64368-001/018).",
+        "Código inválido. Usá etiqueta de bulto (424/AAA64353-1, 64368-001 o formatos EXP legados).",
     };
   }
 
@@ -989,7 +1102,7 @@ export async function openDescargaFromCarga(input: {
   if (carga.kind !== "carga") throw new Error("La sesión origen no es de carga");
   if (!carga.ready_for_descarga) {
     throw new Error(
-      "Esa carga aún no fue señalada como lista. En Carga usá «Cerrar y enviar a descarga».",
+      "Esa carga aún no fue señalada como lista. En Cargue usá «Cerrar y enviar a descarga».",
     );
   }
 
@@ -1008,21 +1121,45 @@ export async function openDescargaFromCarga(input: {
     // Si ya había una cerrada, abrir una nueva para re-pistolear.
   }
 
-  const { data: created, error: cErr } = await supabase
-    .from("warehouse_load_sessions")
-    .insert({
-      kind: "descarga",
-      container_number: carga.container_number,
-      notes: carga.notes
-        ? `Desde carga ${carga.container_number}. ${carga.notes}`
-        : `Desde carga ${carga.container_number}`,
-      status: "abierta",
-      created_by: input.created_by?.trim() || null,
-      source_carga_session_id: carga.id,
-      ready_for_descarga: false,
-    })
-    .select("*")
-    .single();
+  const descargaInsert: Record<string, unknown> = {
+    kind: "descarga",
+    container_number: carga.container_number,
+    notes: carga.notes
+      ? `Desde carga ${carga.container_number}. ${carga.notes}`
+      : `Desde carga ${carga.container_number}`,
+    status: "abierta",
+    created_by: input.created_by?.trim() || null,
+    source_carga_session_id: carga.id,
+    ready_for_descarga: false,
+  };
+  if (carga.container_info) {
+    descargaInsert.container_info = carga.container_info;
+  }
+  let created: unknown = null;
+  let cErr: { message: string } | null = null;
+  {
+    const res = await supabase
+      .from("warehouse_load_sessions")
+      .insert(descargaInsert)
+      .select("*")
+      .single();
+    created = res.data;
+    cErr = res.error;
+    if (
+      cErr &&
+      descargaInsert.container_info &&
+      (/container_info/i.test(cErr.message) || /PGRST204/i.test(cErr.message))
+    ) {
+      delete descargaInsert.container_info;
+      const retry = await supabase
+        .from("warehouse_load_sessions")
+        .insert(descargaInsert)
+        .select("*")
+        .single();
+      created = retry.data;
+      cErr = retry.error;
+    }
+  }
   if (cErr) {
     throw new Error(
       errMessage(cErr, "No se pudo abrir la descarga (¿migración 020?)"),

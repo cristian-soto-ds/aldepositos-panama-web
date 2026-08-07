@@ -78,6 +78,11 @@ type CollectionOrderReceptionistViewProps = {
   onCreateTruckGroup?: (input: {
     orderIds: string[];
   }) => Promise<void>;
+  /** Sumar OR olvidadas a un camión ya unificado. */
+  onAddOrdersToTruckGroup?: (input: {
+    groupId: string;
+    orderIds: string[];
+  }) => Promise<void>;
 };
 
 function canSelectForTruckGroup(order: CollectionOrder): boolean {
@@ -206,12 +211,14 @@ export function CollectionOrderReceptionistView({
   onSetReceptionStatus,
   onClearReceptionStatus,
   onCreateTruckGroup,
+  onAddOrdersToTruckGroup,
 }: CollectionOrderReceptionistViewProps) {
   const [activeTab, setActiveTab] = useState<CollectionOrderListTab>("general");
   const [expandedExtras, setExpandedExtras] = useState<Set<string>>(
     () => new Set(),
   );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
   const [unifyMode, setUnifyMode] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -234,10 +241,15 @@ export function CollectionOrderReceptionistView({
     });
   };
 
+  const selectTargetGroup = (groupId: string) => {
+    setTargetGroupId((prev) => (prev === groupId ? null : groupId));
+  };
+
   const setUnifyModeOn = (on: boolean) => {
     setUnifyMode(on);
     if (!on) {
       setSelectedIds(new Set());
+      setTargetGroupId(null);
       setGroupModalOpen(false);
     }
   };
@@ -260,10 +272,60 @@ export function CollectionOrderReceptionistView({
     [orders, selectedIds],
   );
 
+  const targetGroupOrders = useMemo(
+    () =>
+      targetGroupId
+        ? orders.filter((o) => o.receptionGroupId === targetGroupId)
+        : [],
+    [orders, targetGroupId],
+  );
+
+  /** Camiones ya unificados (≥2 OR) para sumar una OR olvidada. */
+  const existingTruckGroups = useMemo(() => {
+    const map = new Map<string, CollectionOrder[]>();
+    for (const o of orders) {
+      const gid = o.receptionGroupId?.trim();
+      if (!gid) continue;
+      const list = map.get(gid) ?? [];
+      list.push(o);
+      map.set(gid, list);
+    }
+    return Array.from(map.entries())
+      .filter(([, list]) => list.length > 1)
+      .map(([groupId, list]) => {
+        const numeros = list
+          .map((o) => `#${o.numero ?? o.id.slice(0, 6)}`)
+          .join(" · ");
+        const providers = Array.from(
+          new Set(
+            list
+              .map((o) => o.proveedor?.trim())
+              .filter((p): p is string => !!p),
+          ),
+        );
+        return {
+          groupId,
+          count: list.length,
+          numeros,
+          provider:
+            providers.length === 0
+              ? "Sin proveedor"
+              : providers.length === 1
+                ? providers[0]!
+                : `${providers[0]} +${providers.length - 1}`,
+        };
+      });
+  }, [orders]);
+
+  const isAddingToExisting = !!targetGroupId && !!onAddOrdersToTruckGroup;
+
   const selectedProviderLabel = useMemo(() => {
+    const source = isAddingToExisting
+      ? [...targetGroupOrders, ...selectedList]
+      : selectedList;
     const providers = Array.from(
       new Set(
-        selectedList
+        source
           .map((o) => o.proveedor?.trim())
           .filter((p): p is string => !!p),
       ),
@@ -271,9 +333,35 @@ export function CollectionOrderReceptionistView({
     if (providers.length === 0) return "Sin proveedor";
     if (providers.length === 1) return providers[0]!;
     return `${providers[0]} +${providers.length - 1}`;
-  }, [selectedList]);
+  }, [isAddingToExisting, selectedList, targetGroupOrders]);
+
+  const canConfirmAction = isAddingToExisting
+    ? selectedList.length >= 1
+    : selectedList.length >= 2;
 
   const submitTruckGroup = async () => {
+    if (isAddingToExisting) {
+      if (!onAddOrdersToTruckGroup || !targetGroupId || selectedList.length < 1) {
+        return;
+      }
+      setGroupBusy(true);
+      try {
+        await onAddOrdersToTruckGroup({
+          groupId: targetGroupId,
+          orderIds: selectedList.map((o) => o.id),
+        });
+        setSelectedIds(new Set());
+        setTargetGroupId(null);
+        setUnifyMode(false);
+        setGroupModalOpen(false);
+      } catch {
+        /* alert en el módulo */
+      } finally {
+        setGroupBusy(false);
+      }
+      return;
+    }
+
     if (!onCreateTruckGroup || selectedList.length < 2) return;
     setGroupBusy(true);
     try {
@@ -281,6 +369,7 @@ export function CollectionOrderReceptionistView({
         orderIds: selectedList.map((o) => o.id),
       });
       setSelectedIds(new Set());
+      setTargetGroupId(null);
       setUnifyMode(false);
       setGroupModalOpen(false);
     } catch {
@@ -312,7 +401,7 @@ export function CollectionOrderReceptionistView({
         </div>
         <p className="mt-1 hidden text-sm font-medium text-indigo-100/90 sm:block">
           {activeTab === "general"
-            ? "Asigná ubicación a cada OR. Para varias en el mismo camión, activá «Unificar OR»."
+            ? "Asigná ubicación a cada OR. Para varias en el mismo camión, activá «Unificar OR». Si olvidaste una, tocá el camión y sumala."
             : activeTab === "warehouse"
               ? "Mercancía en bodega. El operador debe asignar un RA a cada orden."
               : activeTab === "linkedRa"
@@ -353,7 +442,8 @@ export function CollectionOrderReceptionistView({
         }}
       />
 
-      {onCreateTruckGroup && activeTab === "general" ? (
+      {(onCreateTruckGroup || onAddOrdersToTruckGroup) &&
+      activeTab === "general" ? (
         <div className="mb-2 flex shrink-0 flex-wrap items-center gap-2">
           <button
             type="button"
@@ -367,11 +457,6 @@ export function CollectionOrderReceptionistView({
             <Truck className="h-3.5 w-3.5" aria-hidden />
             {unifyMode ? "Unificar OR (activo)" : "Unificar OR para un camión"}
           </button>
-          {unifyMode ? (
-            <p className="text-[11px] font-semibold text-slate-500">
-              Marcá las OR del mismo camión y confirmá abajo.
-            </p>
-          ) : null}
         </div>
       ) : null}
 
@@ -421,6 +506,16 @@ export function CollectionOrderReceptionistView({
               ? orders.filter((x) => x.receptionGroupId === o.receptionGroupId)
                   .length
               : 0;
+            const isTargetGroup =
+              !!targetGroupId &&
+              o.receptionGroupId != null &&
+              o.receptionGroupId === targetGroupId;
+            const canPickAsTarget =
+              !!onAddOrdersToTruckGroup &&
+              unifyMode &&
+              activeTab === "general" &&
+              groupMateCount > 1 &&
+              !!o.receptionGroupId;
 
             const renderStatusButton = (status: ReceptionStatusId) => {
               const active = currentStatus === status;
@@ -466,7 +561,9 @@ export function CollectionOrderReceptionistView({
                 className={`relative flex flex-col gap-1.5 overflow-hidden rounded-xl border py-1.5 pl-2.5 pr-2 text-left shadow-sm ring-1 ring-slate-900/[0.03] dark:ring-white/[0.04] sm:flex-row sm:items-center sm:gap-3 sm:py-2 sm:pl-3 sm:pr-2.5 ${
                   isSelected
                     ? "border-indigo-400 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/40"
-                    : currentStatus
+                    : isTargetGroup
+                      ? "border-sky-400 bg-sky-50/90 ring-sky-200 dark:border-sky-500 dark:bg-sky-950/40 dark:ring-sky-800"
+                      : currentStatus
                       ? RECEPTION_COLUMN_THEME[currentStatus].card
                       : "border-slate-200/90 bg-white dark:border-slate-600/80 dark:bg-slate-900"
                 }`}
@@ -506,9 +603,29 @@ export function CollectionOrderReceptionistView({
                       </span>
                     </span>
                     {groupMateCount > 1 ? (
-                      <span className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:px-2 sm:text-[9px]">
-                        Camión · {groupMateCount} OR
-                      </span>
+                      canPickAsTarget ? (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() =>
+                            selectTargetGroup(o.receptionGroupId!)
+                          }
+                          className={`rounded-full border px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide sm:px-2 sm:text-[9px] ${
+                            isTargetGroup
+                              ? "border-sky-600 bg-sky-600 text-white"
+                              : "border-sky-200 bg-sky-50 text-sky-800 hover:border-sky-400 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200"
+                          }`}
+                          title="Elegir este camión para sumar OR"
+                        >
+                          {isTargetGroup
+                            ? `✓ Camión elegido · ${groupMateCount} OR`
+                            : `Camión · ${groupMateCount} OR`}
+                        </button>
+                      ) : (
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:px-2 sm:text-[9px]">
+                          Camión · {groupMateCount} OR
+                        </span>
+                      )
                     ) : null}
                     {inWarehouse ? (
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300 sm:px-2 sm:text-[9px]">
@@ -645,37 +762,120 @@ export function CollectionOrderReceptionistView({
         </div>
       )}
 
-      {onCreateTruckGroup &&
+      {(onCreateTruckGroup || onAddOrdersToTruckGroup) &&
       unifyMode &&
-      selectedIds.size > 0 &&
       activeTab === "general" ? (
-        <div className="sticky bottom-2 z-20 mt-2 shrink-0 rounded-2xl border border-indigo-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-indigo-800 dark:bg-slate-900/95">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
-              {selectedIds.size} seleccionada{selectedIds.size === 1 ? "" : "s"}
-              {selectedIds.size >= 2
-                ? ` · ${selectedProviderLabel}`
-                : " · marcá al menos 2 OR"}
+        <div className="sticky bottom-2 z-20 mt-2 shrink-0 space-y-2 rounded-2xl border border-indigo-200 bg-white/95 p-3 shadow-lg backdrop-blur dark:border-indigo-800 dark:bg-slate-900/95">
+          {selectedIds.size === 0 && !targetGroupId ? (
+            <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+              Marcá con ✓ la OR que querés unificar o sumar a un camión.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedIds(new Set())}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300"
-              >
-                Limpiar
-              </button>
-              <button
-                type="button"
-                disabled={selectedIds.size < 2 || busyOrderId != null}
-                onClick={() => setGroupModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-[#16263F] px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-40"
-              >
-                <Truck className="h-3.5 w-3.5" aria-hidden />
-                Confirmar camión
-              </button>
+          ) : null}
+
+          {selectedIds.size > 0 &&
+          !isAddingToExisting &&
+          onAddOrdersToTruckGroup &&
+          existingTruckGroups.length > 0 ? (
+            <div>
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                Sumar {selectedIds.size === 1 ? "esta OR" : `estas ${selectedIds.size} OR`} a un
+                camión que ya existe:
+              </p>
+              <div className="flex flex-col gap-1.5">
+                {existingTruckGroups.map((g) => (
+                  <button
+                    key={g.groupId}
+                    type="button"
+                    disabled={busyOrderId != null}
+                    onClick={() => {
+                      setTargetGroupId(g.groupId);
+                      setGroupModalOpen(true);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border-2 border-sky-300 bg-sky-50 px-3 py-2.5 text-left transition hover:border-sky-500 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/50 dark:hover:bg-sky-900/60"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-black text-sky-900 dark:text-sky-100">
+                        {g.provider}
+                      </span>
+                      <span className="block truncate text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                        {g.numeros} · {g.count} OR
+                      </span>
+                    </span>
+                    <span className="shrink-0 rounded-lg bg-sky-600 px-2.5 py-1 text-[10px] font-black uppercase text-white">
+                      Sumar aquí
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
+
+          {isAddingToExisting ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                Camión elegido ({targetGroupOrders.length} OR)
+                {selectedIds.size > 0
+                  ? ` · +${selectedIds.size} para sumar`
+                  : " · marcá la OR olvidada"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setTargetGroupId(null);
+                  }}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                >
+                  Limpiar
+                </button>
+                <button
+                  type="button"
+                  disabled={!canConfirmAction || busyOrderId != null}
+                  onClick={() => setGroupModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#16263F] px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-40"
+                >
+                  <Truck className="h-3.5 w-3.5" aria-hidden />
+                  Confirmar suma
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {!isAddingToExisting && selectedIds.size > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 dark:border-slate-700">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                {selectedIds.size >= 2
+                  ? `O crear camión nuevo · ${selectedIds.size} OR · ${selectedProviderLabel}`
+                  : existingTruckGroups.length > 0
+                    ? "O marcá otra OR suelta para crear un camión nuevo"
+                    : `${selectedIds.size} seleccionada · marcá al menos 2 OR`}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setTargetGroupId(null);
+                  }}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-[10px] font-black uppercase text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                >
+                  Limpiar
+                </button>
+                {onCreateTruckGroup ? (
+                  <button
+                    type="button"
+                    disabled={selectedIds.size < 2 || busyOrderId != null}
+                    onClick={() => setGroupModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#16263F] px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-40"
+                  >
+                    <Truck className="h-3.5 w-3.5" aria-hidden />
+                    Crear camión nuevo
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -694,29 +894,68 @@ export function CollectionOrderReceptionistView({
               {selectedProviderLabel}
             </h3>
             <p className="mt-0.5 text-[10px] font-black uppercase tracking-wide text-slate-400">
-              1 camión · {selectedList.length} OR
+              {isAddingToExisting
+                ? `Sumar ${selectedList.length} OR · queda en ${
+                    targetGroupOrders.length + selectedList.length
+                  } OR`
+                : `1 camión · ${selectedList.length} OR`}
             </p>
-            <ul className="mt-3 max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/50">
-              {selectedList.map((o) => (
-                <li
-                  key={o.id}
-                  className="flex items-baseline justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
-                >
-                  <span>
-                    OR{" "}
-                    <span className="font-black tabular-nums">
-                      #{o.numero ?? o.id.slice(0, 6)}
+            {isAddingToExisting && targetGroupOrders.length > 0 ? (
+              <div className="mt-3">
+                <p className="mb-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                  Ya en el camión
+                </p>
+                <ul className="max-h-28 space-y-1 overflow-y-auto rounded-xl border border-sky-100 bg-sky-50/80 p-2.5 dark:border-sky-900 dark:bg-sky-950/40">
+                  {targetGroupOrders.map((o) => (
+                    <li
+                      key={o.id}
+                      className="flex items-baseline justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                    >
+                      <span>
+                        OR{" "}
+                        <span className="font-black tabular-nums">
+                          #{o.numero ?? o.id.slice(0, 6)}
+                        </span>
+                      </span>
+                      <span className="tabular-nums font-black text-violet-700 dark:text-violet-300">
+                        {orderDisplayBultos(o)} bult
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className={isAddingToExisting ? "mt-2" : "mt-3"}>
+              {isAddingToExisting ? (
+                <p className="mb-1 text-[9px] font-black uppercase tracking-wide text-slate-400">
+                  Se suman ahora
+                </p>
+              ) : null}
+              <ul className="max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+                {selectedList.map((o) => (
+                  <li
+                    key={o.id}
+                    className="flex items-baseline justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                  >
+                    <span>
+                      OR{" "}
+                      <span className="font-black tabular-nums">
+                        #{o.numero ?? o.id.slice(0, 6)}
+                      </span>
                     </span>
-                  </span>
-                  <span className="tabular-nums font-black text-violet-700 dark:text-violet-300">
-                    {orderDisplayBultos(o)} bult
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    <span className="tabular-nums font-black text-violet-700 dark:text-violet-300">
+                      {orderDisplayBultos(o)} bult
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
             <p className="mt-2 text-right text-xs font-black text-slate-600 dark:text-slate-300">
               Total{" "}
-              {selectedList.reduce((s, o) => s + orderDisplayBultos(o), 0)}{" "}
+              {(isAddingToExisting
+                ? [...targetGroupOrders, ...selectedList]
+                : selectedList
+              ).reduce((s, o) => s + orderDisplayBultos(o), 0)}{" "}
               bultos
             </p>
             <div className="mt-4 flex gap-2">
@@ -730,11 +969,15 @@ export function CollectionOrderReceptionistView({
               </button>
               <button
                 type="button"
-                disabled={groupBusy || selectedList.length < 2}
+                disabled={groupBusy || !canConfirmAction}
                 onClick={() => void submitTruckGroup()}
                 className="flex-1 rounded-xl bg-[#16263F] py-2.5 text-[10px] font-black uppercase text-white disabled:opacity-40"
               >
-                {groupBusy ? "Guardando…" : "Enviar a fila"}
+                {groupBusy
+                  ? "Guardando…"
+                  : isAddingToExisting
+                    ? "Confirmar suma"
+                    : "Enviar a fila"}
               </button>
             </div>
           </div>

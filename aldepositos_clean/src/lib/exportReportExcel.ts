@@ -412,6 +412,7 @@ function addReportSheet(
   task: Task,
   currentDate: string,
   logoId: number | null,
+  options?: { sheetName?: string },
 ): void {
   const {
     measureRows,
@@ -429,7 +430,12 @@ function addReportSheet(
       : buildQuickHeaders(showReferenceColumn, showWeightColumn);
   const colCount = headers.length;
 
-  const ws = wb.addWorksheet(safeSheetName(task.ra), {
+  const sheetName = (options?.sheetName?.trim() || safeSheetName(task.ra)).slice(
+    0,
+    31,
+  );
+
+  const ws = wb.addWorksheet(sheetName, {
     properties: { defaultRowHeight: 20, defaultColWidth: 10 },
     views: [{ showGridLines: false, zoomScale: 100 }],
   });
@@ -839,6 +845,52 @@ export async function buildReportWorkbook(params: {
 
   for (const task of tasks) {
     addReportSheet(wb, task, currentDate, logoId);
+  }
+
+  return { workbook: wb, logoDataUrl };
+}
+
+/** Exporta hojas con nombre custom (inventario parcial: RA / LG / EN ALMACEN). */
+export async function buildNamedReportWorkbook(params: {
+  sheets: Array<{ task: Task; sheetName: string }>;
+  currentDate?: string;
+}): Promise<ReportWorkbookResult> {
+  const { sheets } = params;
+  if (sheets.length === 0) {
+    throw new Error("No hay hojas para exportar.");
+  }
+
+  const currentDate =
+    params.currentDate ??
+    new Date().toLocaleDateString("es-PA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+
+  const ExcelJSMod = await loadExcelJS();
+  const wb = new ExcelJSMod.Workbook();
+  wb.creator = "ALDEPOSITOS";
+  wb.created = new Date();
+
+  const logoBuffer = await loadLogoBuffer();
+  const logoDataUrl = await loadLogoDataUrl();
+  const logoId =
+    logoBuffer != null
+      ? wb.addImage({ buffer: logoBuffer, extension: "png" })
+      : null;
+
+  const usedNames = new Set<string>();
+  for (const sheet of sheets) {
+    let name = sheet.sheetName.replace(/[\\/*?:[\]]/g, "-").trim().slice(0, 31) || "Hoja";
+    let n = 2;
+    const base = name;
+    while (usedNames.has(name.toLowerCase())) {
+      name = `${base.slice(0, 28)}_${n}`.slice(0, 31);
+      n += 1;
+    }
+    usedNames.add(name.toLowerCase());
+    addReportSheet(wb, sheet.task, currentDate, logoId, { sheetName: name });
   }
 
   return { workbook: wb, logoDataUrl };

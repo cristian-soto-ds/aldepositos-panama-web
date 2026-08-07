@@ -118,7 +118,7 @@ function addGeminiSheet(
   gemini: ReceptionGeminiSummary,
   dateLabel: string,
 ) {
-  const ws = wb.addWorksheet("Resumen Alde.IA", {
+  const ws = wb.addWorksheet("Resumen AldeGpt Terra", {
     properties: { defaultRowHeight: 18 },
     views: [{ showGridLines: false }],
   });
@@ -127,7 +127,7 @@ function addGeminiSheet(
 
   ws.mergeCells(1, 1, 1, 2);
   const title = ws.getCell(1, 1);
-  title.value = gemini.titulo ?? `Análisis del día — ${dateLabel}`;
+  title.value = gemini.titulo ?? `Análisis del período — ${dateLabel}`;
   title.font = { name: "Calibri", bold: true, size: 16, color: { argb: TITLE_COLOR } };
   title.alignment = { vertical: "middle", horizontal: "left" };
 

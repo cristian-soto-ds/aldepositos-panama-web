@@ -573,13 +573,69 @@ export type MergeConcurrentQuickRowsOptions = {
    * «Sin referencias»), no un payload slim incompleto.
    */
   allowEmptyRemoteWipe?: boolean;
+  /**
+   * Si true, fuerza tratar ausencias en remoto como borrados aunque el payload
+   * parezca incompleto (subset). Por defecto se protege contra ecos parciales.
+   */
+  forceRemoteDeletions?: boolean;
+  /**
+   * `task.rowCount` del remoto. Si es mayor que `remoteRows.length`, el payload
+   * está truncado y no debe borrar refs. Si coincide, el snapshot es coherente.
+   */
+  remoteRowCount?: number;
 };
+
+/**
+ * Remoto “atrasado” / parcial: no debe provocar borrado masivo de referencias.
+ * - `[]` sin wipe intencional
+ * - `remoteRowCount` mayor que filas recibidas (slim/truncado)
+ * - subset de ids conocidos sin meta coherente
+ */
+export function isIncompleteQuickRemote<T extends QuickMeasureRow>(
+  baselineRows: T[],
+  localRows: T[],
+  remoteRows: T[],
+  meta?: { remoteRowCount?: number },
+): boolean {
+  if (remoteRows.length === 0) return true;
+
+  const declared = meta?.remoteRowCount;
+  if (typeof declared === "number" && Number.isFinite(declared) && declared >= 0) {
+    // Meta dice más filas de las recibidas → payload truncado/slim.
+    if (declared > remoteRows.length) return true;
+    // rowCount cuenta filas “activas”; puede ser ≤ measureData.length (shells).
+    // Si no exige más de lo recibido, el snapshot es usable (borrados OK).
+    return false;
+  }
+
+  const localN = localRows.length;
+  const baseN = baselineRows.length;
+  const remoteN = remoteRows.length;
+  if (remoteN >= localN && remoteN >= baseN) return false;
+
+  const known = new Set<string>();
+  for (const r of baselineRows) {
+    const id = String(r.id ?? "");
+    if (id) known.add(id);
+  }
+  for (const r of localRows) {
+    const id = String(r.id ?? "");
+    if (id) known.add(id);
+  }
+
+  for (const r of remoteRows) {
+    const id = String(r.id ?? "");
+    if (id && !known.has(id)) return false;
+  }
+  return remoteN < Math.max(localN, baseN);
+}
 
 /**
  * Une capturas concurrentes de varios inventariadores sobre el mismo RA.
  * - Filas nuevas de cualquiera se conservan.
  * - Eliminaciones (fila en baseline ausente en local o remoto) se respetan.
  * - En la misma fila, cada campo se resuelve a 3 vías vs el último estado persistido.
+ * - Ecos remotos incompletos (subset) no borran refs locales.
  */
 export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   baselineRows: T[],
@@ -616,11 +672,20 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
     remoteRows.map((r) => [String(r.id ?? ""), r] as const),
   );
 
+  const incompleteRemote =
+    !options?.allowEmptyRemoteWipe &&
+    !options?.forceRemoteDeletions &&
+    isIncompleteQuickRemote(baselineRows, localRows, remoteRows, {
+      remoteRowCount: options?.remoteRowCount,
+    });
+
   // Remoto quitó una fila que seguía en baseline/local → borrado remoto.
-  // No aplica a altas locales protegidas (eco de BD sin la paleta recién creada).
-  for (const id of baseById.keys()) {
-    if (protectedIds.has(id)) continue;
-    if (!remoteById.has(id) && localById.has(id)) deleted.add(id);
+  // No aplica a ecos parciales ni a altas locales protegidas.
+  if (!incompleteRemote) {
+    for (const id of baseById.keys()) {
+      if (protectedIds.has(id)) continue;
+      if (!remoteById.has(id) && localById.has(id)) deleted.add(id);
+    }
   }
 
   const order: string[] = [];
@@ -639,8 +704,12 @@ export function mergeConcurrentQuickRows<T extends QuickMeasureRow>(
   const merged: T[] = [];
   for (const id of order) {
     if (deleted.has(id)) continue;
-    // Alta local protegida: no aplicar el "falta en remoto = borrado" del 3-vías.
-    if (protectedIds.has(id) && localById.has(id) && !remoteById.has(id)) {
+    // Alta local protegida / eco incompleto: conservar fila solo-local.
+    if (
+      localById.has(id) &&
+      !remoteById.has(id) &&
+      (protectedIds.has(id) || incompleteRemote)
+    ) {
       merged.push(stripQuickMeasureRow(localById.get(id)!) as T);
       continue;
     }

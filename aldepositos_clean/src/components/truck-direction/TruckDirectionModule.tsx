@@ -28,11 +28,6 @@ import {
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 import { updateReceptionTruckStatus } from "@/lib/receptionLogistics/repository";
 import {
-  DailyReceptionReportError,
-  generateAndDownloadDailyReceptionReport,
-} from "@/lib/receptionLogistics/generateDailyReceptionReport";
-import { ReceptionReportExportModal } from "@/components/modals/ReceptionReportExportModal";
-import {
   formatDateInputPanama,
   panamaDayBounds,
   parseDateInputPanama,
@@ -41,10 +36,15 @@ import {
   type ReceptionReportFilter,
   type ReceptionReportPreset,
 } from "@/lib/receptionLogistics/receptionReportFilter";
+import {
+  DailyReceptionReportError,
+  generateAndDownloadDailyReceptionReport,
+} from "@/lib/receptionLogistics/generateDailyReceptionReport";
 import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
 import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
 import { ReceptionKanbanCardContent } from "@/components/truck-direction/ReceptionKanbanCardContent";
 import type { ReceptionCardDensity } from "@/components/truck-direction/ReceptionKanbanCardContent";
+import { ReceptionReportExportModal } from "@/components/modals/ReceptionReportExportModal";
 import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 import { RampOccupancyTvCard } from "@/components/reception/RampOccupancyControls";
 import {
@@ -97,10 +97,10 @@ function filterCompletedTrucks(
 export function TruckDirectionModule() {
   const { trucks, setTrucks, loading } = useReceptionQueue();
   const { occupancy: rampOccupancy } = useRampOccupancy();
-  const [reportBusy, setReportBusy] = useState(false);
-  const [reportModalOpen, setReportModalOpen] = useState(false);
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
   const [completedFilter, setCompletedFilter] =
     useState<CompletedColumnFilter>("today");
   const [completedFilterDate, setCompletedFilterDate] = useState(() =>
@@ -146,34 +146,6 @@ export function TruckDirectionModule() {
     [byStatus],
   );
 
-  const onGenerateReport = useCallback(
-    async (filter: ReceptionReportFilter) => {
-      setReportBusy(true);
-      try {
-        const result = await generateAndDownloadDailyReceptionReport(trucks, {
-          filter,
-        });
-        const geminiNote = result.withGemini
-          ? " Incluye hoja de resumen con Alde.IA."
-          : "";
-        alert(
-          `Reporte generado: ${result.rowCount} OR del período seleccionado.${geminiNote}`,
-        );
-        setReportModalOpen(false);
-      } catch (e) {
-        if (e instanceof DailyReceptionReportError && e.code === "NO_ROWS") {
-          alert(e.message);
-          return;
-        }
-        console.error(e);
-        alert("No se pudo generar el reporte. Intentá de nuevo.");
-      } finally {
-        setReportBusy(false);
-      }
-    },
-    [trucks],
-  );
-
   const handleDropOnColumn = useCallback(
     async (status: ReceptionStatusId) => {
       const id = dragTruckId.current;
@@ -209,6 +181,36 @@ export function TruckDirectionModule() {
     [trucks, setTrucks],
   );
 
+  const handleExportReport = useCallback(
+    async (filter: ReceptionReportFilter) => {
+      setReportBusy(true);
+      try {
+        const result = await generateAndDownloadDailyReceptionReport(trucks, {
+          filter,
+          exportedByLabel: "ALDEPOSITOS",
+        });
+        setReportOpen(false);
+        const terraNote = result.withTerra
+          ? " Incluye resumen AldeGpt Terra."
+          : " (sin resumen IA; el detalle Excel sí se descargó).";
+        alert(
+          `Excel listo: ${result.rowCount} OR exportadas.${terraNote}`,
+        );
+      } catch (e) {
+        const msg =
+          e instanceof DailyReceptionReportError
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : "No se pudo generar el Excel.";
+        alert(msg);
+      } finally {
+        setReportBusy(false);
+      }
+    },
+    [trucks],
+  );
+
   return (
     <>
       {tvModeOpen ? (
@@ -220,6 +222,16 @@ export function TruckDirectionModule() {
           />
         </div>
       ) : null}
+
+      <ReceptionReportExportModal
+        open={reportOpen}
+        trucks={trucks}
+        busy={reportBusy}
+        onCancel={() => {
+          if (!reportBusy) setReportOpen(false);
+        }}
+        onConfirm={(filter) => void handleExportReport(filter)}
+      />
 
       <div className="flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4 md:p-6">
       <header className="shrink-0">
@@ -233,24 +245,19 @@ export function TruckDirectionModule() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={() => setReportOpen(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-800 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Excel camiones
+            </button>
+            <button
+              type="button"
               onClick={() => setTvModeOpen(true)}
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-800 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             >
               <Monitor className="h-4 w-4" />
               Modo TV
-            </button>
-            <button
-              type="button"
-              onClick={() => setReportModalOpen(true)}
-              disabled={reportBusy}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#16263F] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-md transition hover:brightness-110 disabled:opacity-60"
-            >
-              {reportBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FileSpreadsheet className="h-4 w-4" />
-              )}
-              {RECEPTION_COPY.reportLabel}
             </button>
           </div>
         </div>
@@ -441,16 +448,6 @@ export function TruckDirectionModule() {
         </button>
       </p>
     </div>
-
-      <ReceptionReportExportModal
-        open={reportModalOpen}
-        trucks={trucks}
-        busy={reportBusy}
-        onCancel={() => {
-          if (!reportBusy) setReportModalOpen(false);
-        }}
-        onConfirm={(filter) => void onGenerateReport(filter)}
-      />
     </>
   );
 }

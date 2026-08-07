@@ -75,7 +75,7 @@ export async function downloadLoadSessionExcel(input: {
   wb.created = new Date();
 
   const kindLabel =
-    input.session.kind === "carga" ? "CARGA" : "DESCARGA";
+    input.session.kind === "carga" ? "CARGUE" : "DESCARGA";
 
   // ── Resumen ──
   const wsR = wb.addWorksheet("Resumen");
@@ -84,16 +84,35 @@ export async function downloadLoadSessionExcel(input: {
   wsR.mergeCells("A1:H1");
   wsR.getCell("A2").value =
     `Contenedor: ${input.session.container_number || "—"}  ·  Estado: ${input.session.status}`;
+  const info = (input.session.container_info ?? null) as
+    | {
+        type?: string;
+        consignment?: string;
+        bl?: string;
+        seal1?: string;
+        seal2?: string;
+        responsible?: string;
+        date?: string;
+        tare?: number;
+      }
+    | null;
   wsR.getCell("A3").value =
-    `Creada: ${fmtWhen(input.session.created_at)}  ·  Responsable: ${input.session.created_by || "—"}` +
+    `Creada: ${fmtWhen(input.session.created_at)}  ·  Responsable: ${
+      (info?.responsible || input.session.created_by || "—")
+    }` +
     (input.session.closed_at
       ? `  ·  Cerrada: ${fmtWhen(input.session.closed_at)}`
       : "");
+  if (info) {
+    const seals = [info.seal1, info.seal2].filter(Boolean).join(" / ") || "—";
+    wsR.getCell("A4").value =
+      `Tipo: ${info.type || "—"}  ·  Consignación: ${info.consignment || "—"}  ·  Seguimiento: ${info.bl || "—"}  ·  Sellos: ${seals}  ·  Tara: ${info.tare ?? "—"} kg  ·  Fecha: ${info.date || "—"}`;
+  }
   if (input.session.notes) {
-    wsR.getCell("A4").value = `Notas: ${input.session.notes}`;
+    wsR.getCell(info ? "A5" : "A4").value = `Notas: ${input.session.notes}`;
   }
 
-  const headerR = 6;
+  const headerR = info ? 7 : 6;
   const headersR = [
     "RA",
     "Cliente",

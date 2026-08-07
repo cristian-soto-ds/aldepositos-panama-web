@@ -14,6 +14,7 @@ import {
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import {
+  addOrdersToReceptionGroup,
   createReceptionTruckGroup,
   removeOrderFromReceptionGroup,
   setCollectionOrderReceptionStatus,
@@ -174,6 +175,49 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
     [setOrders],
   );
 
+  const handleAddOrdersToTruckGroup = useCallback(
+    async (input: { groupId: string; orderIds: string[] }) => {
+      setReceptionBusyId("__group__");
+      try {
+        const truck = await addOrdersToReceptionGroup(input);
+        const mates = orders.filter((o) => o.receptionGroupId === input.groupId);
+        const groupStatus =
+          mates.find((m) => m.receptionStatus)?.receptionStatus ??
+          RECEPTION_STATUS.EN_FILA;
+        const queuedAt =
+          mates.find((m) => m.receptionQueuedAt)?.receptionQueuedAt ??
+          new Date().toISOString();
+        const idSet = new Set(input.orderIds);
+        setOrders((prev) =>
+          sortCollectionOrdersByNumero(
+            prev.map((o) =>
+              idSet.has(o.id)
+                ? {
+                    ...o,
+                    receptionStatus: groupStatus,
+                    receptionGroupId: truck.id,
+                    receptionQueuedAt: o.receptionQueuedAt || queuedAt,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : o,
+            ),
+          ),
+        );
+      } catch (e) {
+        console.error(e);
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo agregar la OR al camión.",
+        );
+        throw e;
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders],
+  );
+
   return (
     <CollectionOrderReceptionistView
       standalone
@@ -190,6 +234,7 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
         void handleClearReceptionStatus(orderId)
       }
       onCreateTruckGroup={handleCreateTruckGroup}
+      onAddOrdersToTruckGroup={handleAddOrdersToTruckGroup}
     />
   );
 }

@@ -78,23 +78,24 @@ export function mapTaskToWarehouseRA(
 
 /**
  * Código de pedido para etiqueta/Xellent:
- * código único del expedidor + RA del pedido.
- * Ej: EXP-AAA-0003 + 64368 → EXP-AAA-0003-64368
+ * marca (REF) + RA concatenados.
+ * Ej: 424/AAA + 64353 → 424/AAA64353
  */
-export function buildOrderBarcode(shipperBarcode: string, ra: string): string {
-  const exp = String(shipperBarcode ?? "")
+export function normalizeMarcaForBarcode(orderRef: string): string {
+  return String(orderRef ?? "")
     .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9\-]/g, "");
-  const raPart =
-    String(ra ?? "")
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9\-]/g, "") || "SINRA";
-  if (!exp) {
-    throw new Error("Se necesita el código del expedidor para generar el pedido");
+    .replace(/\s+/g, "")
+    .replace(/[^A-Z0-9/\-]/g, "");
+}
+
+export function buildOrderBarcode(orderRef: string, ra: string): string {
+  const marca = normalizeMarcaForBarcode(orderRef);
+  const raPart = normalizeRaForPackageBarcode(ra);
+  if (!marca) {
+    throw new Error("Se necesita la marca (REF) para generar el código del pedido");
   }
-  return `${exp}-${raPart}`;
+  return `${marca}${raPart}`;
 }
 
 /** Normaliza el RA para códigos de bulto (solo A-Z0-9). */
@@ -109,6 +110,7 @@ export function normalizeRaForPackageBarcode(ra: string): string {
 
 /** Formatos de código por bulto físico. */
 export type PackageBarcodeFormat =
+  | "marca_ra_bulto"
   | "corto"
   | "completo"
   | "expedidor_ra_bulto";
@@ -120,43 +122,29 @@ export const PACKAGE_BARCODE_FORMAT_OPTIONS: ReadonlyArray<{
   hint: string;
 }> = [
   {
-    id: "corto",
-    label: "Corto",
-    example: "64368-001",
-    hint: "Solo RA + número de bulto (mejor en etiquetas chicas)",
-  },
-  {
-    id: "completo",
-    label: "Completo EXP",
-    example: "EXP-AAA-0003-64368-001/018",
-    hint: "Pedido EXP + bulto / total",
-  },
-  {
-    id: "expedidor_ra_bulto",
-    label: "Expedidor + RA + bulto",
-    example: "EXP-AAA-0003-64368-001",
-    hint: "Código de expedidor, RA y número de bulto",
+    id: "marca_ra_bulto",
+    label: "Marca + RA + bulto",
+    example: "424/AAA64353-1",
+    hint: "Marca y RA juntos, luego el consecutivo de bulto",
   },
 ];
 
-export const DEFAULT_PACKAGE_BARCODE_FORMAT: PackageBarcodeFormat = "corto";
+export const DEFAULT_PACKAGE_BARCODE_FORMAT: PackageBarcodeFormat =
+  "marca_ra_bulto";
 
 const PACKAGE_FORMAT_STORAGE_KEY = "aldepositos.packageBarcodeFormat";
 
 export function isPackageBarcodeFormat(v: unknown): v is PackageBarcodeFormat {
   return (
-    v === "corto" || v === "completo" || v === "expedidor_ra_bulto"
+    v === "marca_ra_bulto" ||
+    v === "corto" ||
+    v === "completo" ||
+    v === "expedidor_ra_bulto"
   );
 }
 
 export function loadPackageBarcodeFormat(): PackageBarcodeFormat {
-  if (typeof window === "undefined") return DEFAULT_PACKAGE_BARCODE_FORMAT;
-  try {
-    const raw = window.localStorage.getItem(PACKAGE_FORMAT_STORAGE_KEY);
-    if (isPackageBarcodeFormat(raw)) return raw;
-  } catch {
-    /* ignore */
-  }
+  // Formato único vigente: Marca+RA-consecutivo.
   return DEFAULT_PACKAGE_BARCODE_FORMAT;
 }
 
@@ -172,11 +160,13 @@ export function savePackageBarcodeFormat(format: PackageBarcodeFormat): void {
 export type PackageBarcodeInput = {
   ra: string;
   seq: number;
-  /** Total de bultos (requerido para formato completo). */
+  /** Total de bultos (requerido para formato completo legado). */
   total?: number;
-  /** Código de pedido EXP-…-RA (preferido). */
+  /** Código de pedido Marca+RA (preferido). */
   orderBarcode?: string | null;
-  /** Código de expedidor EXP-… (si no hay orderBarcode). */
+  /** Marca / REF del pedido (si aún no hay orderBarcode). */
+  orderRef?: string | null;
+  /** Código de expedidor EXP-… (solo formatos legados). */
   shipperBarcode?: string | null;
 };
 
@@ -196,67 +186,104 @@ function padTotal(total: number): string {
   return String(Math.max(1, Math.floor(Number(total) || 1))).padStart(3, "0");
 }
 
+function seqPart(seq: number, padded: boolean): string {
+  const n = Math.max(1, Math.floor(Number(seq) || 1));
+  return padded ? String(n).padStart(3, "0") : String(n);
+}
+
 function resolveOrderBarcodeForPackage(input: PackageBarcodeInput): string | null {
   const order = String(input.orderBarcode ?? "")
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
-  if (order.startsWith("EXP-")) return order;
-  const shipper = String(input.shipperBarcode ?? "")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "");
-  if (shipper.startsWith("EXP-")) {
-    return buildOrderBarcode(shipper, input.ra);
+  if (order) return order;
+  const ref = String(input.orderRef ?? "").trim();
+  if (ref) {
+    try {
+      return buildOrderBarcode(ref, input.ra);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
 
-/** Extrae el RA (último segmento) de un código de pedido EXP-…-RA. */
+/**
+ * Extrae el RA del código de pedido.
+ * - Nuevo: Marca+RA → dígitos finales (424/AAA64353 → 64353)
+ * - Legado: EXP-…-RA → último segmento
+ */
 export function raFromOrderBarcode(orderBarcode: string): string | null {
   const s = String(orderBarcode ?? "")
     .trim()
     .toUpperCase()
     .replace(/\s+/g, "");
-  if (!s.startsWith("EXP-")) return null;
-  const parts = s.split("-").filter(Boolean);
-  if (parts.length < 3) return null;
-  const ra = parts[parts.length - 1]!;
+  if (!s) return null;
+  if (s.startsWith("EXP-")) {
+    const parts = s.split("-").filter(Boolean);
+    if (parts.length < 3) return null;
+    const ra = parts[parts.length - 1]!;
+    if (!/^[A-Z0-9]+$/.test(ra)) return null;
+    return ra;
+  }
+  const m = /^(.*?)(\d{3,})$/.exec(s);
+  if (!m) return null;
+  const ra = m[2]!;
   if (!/^[A-Z0-9]+$/.test(ra)) return null;
   return ra;
 }
 
 /**
- * Arma el código de un bulto según el formato elegido.
- * - corto: `64368-001`
- * - completo: `EXP-AAA-0003-64368-001/018`
- * - expedidor_ra_bulto: `EXP-AAA-0003-64368-001`
+ * Arma el código de un bulto según el formato.
+ * Vigente: `424/AAA64353-1` (Marca+RA-consecutivo).
+ * Legados: corto / completo EXP / expedidor+RA+bulto.
  */
 export function buildPackageBarcode(
   input: PackageBarcodeInput,
-  format: PackageBarcodeFormat = "corto",
+  format: PackageBarcodeFormat = DEFAULT_PACKAGE_BARCODE_FORMAT,
 ): string {
   const raPart = normalizeRaForPackageBarcode(input.ra);
-  const seqPart = padSeq(input.seq);
 
   if (format === "corto") {
-    return `${raPart}-${seqPart}`;
+    return `${raPart}-${padSeq(input.seq)}`;
+  }
+
+  if (format === "marca_ra_bulto") {
+    const order =
+      resolveOrderBarcodeForPackage({ ...input, ra: raPart }) ??
+      (() => {
+        throw new Error(
+          "Se necesita la marca (REF) o el código de pedido para etiquetas de bulto",
+        );
+      })();
+    // Si el orderBarcode aún es legado EXP-, preferir armar desde orderRef.
+    let orderCode = order;
+    if (order.startsWith("EXP-") && input.orderRef?.trim()) {
+      orderCode = buildOrderBarcode(input.orderRef, raPart);
+    } else if (order.startsWith("EXP-")) {
+      // Sin marca: no inventar; usar RA puro como último recurso no aplica —
+      // exigir marca vía resolve ya falló si no había orderRef.
+      throw new Error(
+        "El código de pedido es legado (EXP). Regenerá el pedido con marca (REF).",
+      );
+    }
+    return `${orderCode}-${seqPart(input.seq, false)}`;
   }
 
   const order =
     resolveOrderBarcodeForPackage({ ...input, ra: raPart }) ??
-    buildOrderBarcode("EXP-SINEXP-0000", raPart);
+    `EXP-SINEXP-0000-${raPart}`;
 
   if (format === "completo") {
     const totalPart = padTotal(input.total ?? input.seq);
-    return `${order}-${seqPart}/${totalPart}`;
+    return `${order}-${padSeq(input.seq)}/${totalPart}`;
   }
 
-  return `${order}-${seqPart}`;
+  return `${order}-${padSeq(input.seq)}`;
 }
 
 /**
- * Interpreta cualquier formato de bulto soportado.
+ * Interpreta cualquier formato de bulto soportado (vigente + legados).
  * Rechaza códigos de pedido/expedidor sin número de bulto.
  */
 export function parsePackageBarcode(raw: string): ParsedPackageBarcode | null {
@@ -266,7 +293,7 @@ export function parsePackageBarcode(raw: string): ParsedPackageBarcode | null {
     .replace(/\s+/g, "");
   if (!s) return null;
 
-  // completo: EXP-…-RA-001/018
+  // completo legado: EXP-…-RA-001/018
   const completo = /^(EXP-.+)-(\d{1,4})\/(\d{1,4})$/.exec(s);
   if (completo) {
     const order = completo[1]!;
@@ -283,7 +310,7 @@ export function parsePackageBarcode(raw: string): ParsedPackageBarcode | null {
     };
   }
 
-  // expedidor + RA + bulto: EXP-…-RA-001
+  // expedidor + RA + bulto legado: EXP-…-RA-001
   const withShipper = /^(EXP-.+)-(\d{1,4})$/.exec(s);
   if (withShipper) {
     const order = withShipper[1]!;
@@ -301,7 +328,21 @@ export function parsePackageBarcode(raw: string): ParsedPackageBarcode | null {
   // Pedido o expedidor solo (sin bulto) → no válido para pistoleo
   if (s.startsWith("EXP-")) return null;
 
-  // corto: 64368-001
+  // Marca+RA-consecutivo: 424/AAA64353-1 (marca con letra o /)
+  const marcaRa = /^(.*[A-Z\/].*?)(\d{3,})-(\d{1,4})$/.exec(s);
+  if (marcaRa) {
+    const ra = marcaRa[2]!;
+    const seq = parseInt(marcaRa[3]!, 10);
+    if (!Number.isFinite(seq) || seq < 1) return null;
+    return {
+      ra,
+      seq,
+      format: "marca_ra_bulto",
+      barcode: s,
+    };
+  }
+
+  // corto legado: 64368-001
   const corto = /^([A-Z0-9]+)-(\d{1,4})$/.exec(s);
   if (!corto) return null;
   const seq = parseInt(corto[2]!, 10);
@@ -318,7 +359,7 @@ export function parsePackageBarcode(raw: string): ParsedPackageBarcode | null {
 export function buildPackageBarcodeList(
   input: Omit<PackageBarcodeInput, "seq"> | string,
   totalBultos: number,
-  format: PackageBarcodeFormat = "corto",
+  format: PackageBarcodeFormat = DEFAULT_PACKAGE_BARCODE_FORMAT,
 ): string[] {
   const total = Math.max(0, Math.floor(Number(totalBultos) || 0));
   const base: Omit<PackageBarcodeInput, "seq"> =

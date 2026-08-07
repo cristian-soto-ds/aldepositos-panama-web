@@ -181,9 +181,6 @@ export function RampOccupancyControls({
               TV
             </span>
           </h3>
-          <p className="mt-0.5 pl-9 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-            {RAMP_OCCUPANCY_COPY.sectionHint}
-          </p>
         </div>
 
         <div className="flex w-full gap-2 sm:w-auto sm:max-w-sm">

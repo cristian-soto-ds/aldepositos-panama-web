@@ -45,8 +45,6 @@ const ReekonCaptureView = dynamic(
 import {
   type AutosaveState,
 } from "@/components/control-panel/SyncStatusBadge";
-import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
-import { extractReferenciasBultosFromFile } from "@/lib/quickAiExtract";
 import { useEditingFocusRef, useInventoryRealtimeSync } from "@/hooks/useInventoryRealtimeSync";
 import { tableScrollHostClass } from "@/lib/responsiveUi";
 import {
@@ -71,6 +69,7 @@ import {
   stripQuickRowsForPersist,
   mergeReempaqueFlagsOntoRows,
   mergeConcurrentQuickRows,
+  isIncompleteQuickRemote,
   quickRowsCaptureContainedIn,
   isQuickRowComplete,
   type CaptureLayout,
@@ -914,9 +913,6 @@ export function QuickInventoryEntry({
   const [deletePalletConfirm, setDeletePalletConfirm] = useState<number | null>(
     null,
   );
-  const [aiExtractBusy, setAiExtractBusy] = useState(false);
-  const [aiExtractError, setAiExtractError] = useState<string | null>(null);
-  const aiFileRef = useRef<HTMLInputElement>(null);
   const sourceReferencesRef = useRef<Record<string, string>>({});
   const withModeRowsSnapshotRef = useRef<MeasureRow[] | null>(null);
   // Espejo del modo de captura para leerlo de forma síncrona (p. ej. al aplicar
@@ -998,7 +994,11 @@ export function QuickInventoryEntry({
     (
       localRows: MeasureRow[],
       remoteRows: MeasureRow[],
-      options?: { fromLive?: boolean; allowEmptyRemoteWipe?: boolean },
+      options?: {
+        fromLive?: boolean;
+        allowEmptyRemoteWipe?: boolean;
+        remoteRowCount?: number;
+      },
     ) => {
       // Payload remoto vacío = incompleto; no marcar borrados masivos —
       // salvo vaciado intencional del inventariador (sin refs).
@@ -1008,40 +1008,58 @@ export function QuickInventoryEntry({
           latestTaskRef.current?.referenceModeChosen === true &&
           latestTaskRef.current?.referenceMode === "without");
 
+      const incompleteRemote =
+        !intentionalWipe &&
+        isIncompleteQuickRemote(
+          serverBaselineRowsRef.current,
+          localRows,
+          remoteRows,
+          { remoteRowCount: options?.remoteRowCount },
+        );
+
       if (remoteRows.length > 0 || intentionalWipe) {
         const remoteIds = new Set(remoteRows.map((r) => String(r.id)));
         // Confirmación: la alta local ya está en el remoto.
         for (const id of Array.from(pendingLocalCreationIdsRef.current)) {
           if (remoteIds.has(id)) pendingLocalCreationIdsRef.current.delete(id);
         }
-        // Solo en vivo: un eco de BD atrasado NO debe borrar paletas/filas
-        // recién publicadas por live (causaba el parpadeo pone/quita).
-        if (options?.fromLive && remoteRows.length > 0) {
-          for (const id of lastSeenRemoteIdsRef.current) {
+
+        if (incompleteRemote) {
+          // Eco parcial: no tombstonar refs que siguen en el editor.
+          for (const r of localRows) {
+            const id = String(r.id ?? "");
+            if (id) pendingDeletionIdsRef.current.delete(id);
+          }
+        } else {
+          // Solo en vivo: un eco de BD atrasado NO debe borrar paletas/filas
+          // recién publicadas por live (causaba el parpadeo pone/quita).
+          if (options?.fromLive && remoteRows.length > 0) {
+            for (const id of lastSeenRemoteIdsRef.current) {
+              if (
+                id &&
+                !remoteIds.has(id) &&
+                !pendingLocalCreationIdsRef.current.has(id)
+              ) {
+                pendingDeletionIdsRef.current.add(id);
+              }
+            }
+          }
+          for (const base of serverBaselineRowsRef.current) {
+            const id = String(base.id ?? "");
             if (
               id &&
               !remoteIds.has(id) &&
               !pendingLocalCreationIdsRef.current.has(id)
             ) {
+              // Borrado confirmado vs baseline de BD.
               pendingDeletionIdsRef.current.add(id);
             }
           }
-        }
-        for (const base of serverBaselineRowsRef.current) {
-          const id = String(base.id ?? "");
-          if (
-            id &&
-            !remoteIds.has(id) &&
-            !pendingLocalCreationIdsRef.current.has(id)
-          ) {
-            // Borrado confirmado vs baseline de BD.
-            pendingDeletionIdsRef.current.add(id);
+          if (remoteRows.length > 0) {
+            lastSeenRemoteIdsRef.current = remoteIds;
+          } else if (intentionalWipe) {
+            lastSeenRemoteIdsRef.current = new Set();
           }
-        }
-        if (remoteRows.length > 0) {
-          lastSeenRemoteIdsRef.current = remoteIds;
-        } else if (intentionalWipe) {
-          lastSeenRemoteIdsRef.current = new Set();
         }
       }
       return mergeConcurrentQuickRows(
@@ -1052,6 +1070,7 @@ export function QuickInventoryEntry({
           deletedIds: pendingDeletionIdsRef.current,
           protectIds: pendingLocalCreationIdsRef.current,
           allowEmptyRemoteWipe: intentionalWipe,
+          remoteRowCount: options?.remoteRowCount,
         },
       );
     },
@@ -2304,66 +2323,6 @@ export function QuickInventoryEntry({
     }
     // No flush inmediato: el debounce (QUICK_AUTOSAVE_MS) agrupa clics rápidos
     // en un solo guardado y evita que el eco del save pise filas nuevas.
-  };
-
-  /**
-   * Alde.IA: lee un documento y agrega SOLO referencias + bultos como filas nuevas.
-   * El resto (medidas, peso, etc.) lo captura el inventariador después.
-   */
-  const runAiRefExtract = async (file: File) => {
-    setAiExtractBusy(true);
-    setAiExtractError(null);
-    try {
-      const lines = await extractReferenciasBultosFromFile(file);
-      if (lines.length === 0) {
-        setAiExtractError("No se detectaron referencias en el documento.");
-        return;
-      }
-      let firstNewId: string | null = null;
-      setMeasureRows((prev) => {
-        // Conserva las filas con datos; descarta las vacías (p. ej. la fila inicial).
-        const kept = prev.filter((r) => quickRowHasPartialData(r));
-        const pallet =
-          referenceMode === "palletized" ? Math.max(1, maxPalletNumber(kept)) : undefined;
-        const additions: MeasureRow[] = lines.map((l) => {
-          const id = generateId();
-          pendingLocalCreationIdsRef.current.add(id);
-          if (!firstNewId) firstNewId = id;
-          return {
-            id,
-            referencia: l.referencia,
-            bultos: l.bultos,
-            l: "",
-            w: "",
-            h: "",
-            weight: "",
-            reempaque: false,
-            bultoContenedor: "",
-            referenciasContenedor: "",
-            reempaqueRefs: [],
-            referenciaContenedora: "",
-            ...(pallet ? { pallet } : {}),
-          };
-        });
-        const next = [...kept, ...additions];
-        latestRowsRef.current = next;
-        return next;
-      });
-      if (firstNewId) setExpandedRowId(firstNewId);
-    } catch (err) {
-      setAiExtractError(
-        err instanceof Error ? err.message : "No se pudo leer el documento.",
-      );
-    } finally {
-      setAiExtractBusy(false);
-    }
-  };
-
-  /** Abre el selector de archivo para la lectura con Alde.IA. */
-  const openAiFilePicker = () => {
-    if (aiExtractBusy) return;
-    setAiExtractError(null);
-    aiFileRef.current?.click();
   };
 
   /**
@@ -3858,17 +3817,6 @@ export function QuickInventoryEntry({
   if (captureLayout === "reekon") {
     return (
       <>
-        <input
-          ref={aiFileRef}
-          type="file"
-          accept=".pdf,.png,.jpg,.jpeg,.webp"
-          className="hidden"
-          onChange={(ev) => {
-            const file = ev.target.files?.[0];
-            ev.target.value = "";
-            if (file) void runAiRefExtract(file);
-          }}
-        />
         <div className="flex h-full min-h-0 w-full flex-1 flex-col">
           {correctionBanner ? (
             <div className="shrink-0 px-2 pt-2 sm:px-3">{correctionBanner}</div>
@@ -4143,31 +4091,6 @@ export function QuickInventoryEntry({
                 </div>
               </div>
               <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:justify-end">
-                <input
-                  ref={aiFileRef}
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp"
-                  className="hidden"
-                  onChange={(ev) => {
-                    const file = ev.target.files?.[0];
-                    ev.target.value = "";
-                    if (file) void runAiRefExtract(file);
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={openAiFilePicker}
-                  disabled={aiExtractBusy}
-                  title="Leer un documento con Alde.IA y agregar solo referencias y bultos"
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[11px] font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-60 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-900/50 sm:text-xs"
-                >
-                  {aiExtractBusy ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <GeminiSparkIcon size={14} />
-                  )}
-                  {aiExtractBusy ? "Leyendo…" : "Leer documento"}
-                </button>
                 <div className="inline-flex w-full items-center gap-1 rounded-xl border border-slate-200 bg-white px-1.5 py-1 dark:border-slate-600 dark:bg-slate-900 sm:w-auto">
                   <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-600 dark:bg-slate-800 sm:w-auto">
                     <button
@@ -4216,11 +4139,6 @@ export function QuickInventoryEntry({
               </div>
             </div>
 
-            {aiExtractError ? (
-              <div className="shrink-0 border-b border-red-200 bg-red-50 px-3 py-1.5 text-[11px] font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-                {aiExtractError}
-              </div>
-            ) : null}
             <div className="inventory-table-scroll-host table-scroll-hint flex min-h-0 flex-1 basis-0 flex-col overflow-hidden bg-white dark:bg-slate-900">
             <div className={`${tableScrollHostClass} inventory-measures-scroll`}>
             <table

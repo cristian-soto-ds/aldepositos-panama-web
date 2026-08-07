@@ -27,7 +27,7 @@ export async function generateAndDownloadDailyReceptionReport(
     exportedByLabel?: string;
     filter?: ReceptionReportFilter;
   },
-): Promise<{ rowCount: number; withGemini: boolean }> {
+): Promise<{ rowCount: number; withGemini: boolean; withTerra: boolean }> {
   const filter = options?.filter;
   const { rows, summary: baseSummary } = buildDailyReceptionReport(trucks, filter);
 
@@ -93,5 +93,6 @@ export async function generateAndDownloadDailyReceptionReport(
   return {
     rowCount: rows.length,
     withGemini: !!geminiSummary?.resumen,
+    withTerra: !!geminiSummary?.resumen,
   };
 }

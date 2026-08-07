@@ -78,6 +78,22 @@ export const PENDING_SHIPPER_LABEL = "PENDIENTE DE ASIGNAR";
 export type LoadSessionKind = "carga" | "descarga";
 export type LoadSessionStatus = "abierta" | "cerrada";
 
+/**
+ * Datos logísticos del contenedor (mismo shape que Entrega de carga / dispatchInfo).
+ * Se persiste en `warehouse_load_sessions.container_info` (migración 021).
+ */
+export type LoadSessionContainerInfo = {
+  type: string;
+  consignment: string;
+  number: string;
+  bl: string;
+  seal1: string;
+  seal2: string;
+  responsible: string;
+  date: string;
+  tare?: number;
+};
+
 export type WarehouseLoadSession = {
   id: string;
   kind: LoadSessionKind;
@@ -92,6 +108,8 @@ export type WarehouseLoadSession = {
   ready_for_descarga?: boolean;
   /** Si es descarga, apunta a la sesión de carga de origen. */
   source_carga_session_id?: string | null;
+  /** Metadatos logísticos del contenedor (tipo, sellos, BL, etc.). */
+  container_info?: LoadSessionContainerInfo | Record<string, unknown> | null;
 };
 
 export type WarehouseLoadSessionRa = {

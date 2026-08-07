@@ -88,13 +88,15 @@ describe("mergeConcurrentQuickRows", () => {
       row("2", { referencia: "B", bultos: "1" }),
       row("3", { referencia: "C", bultos: "1" }),
     ];
-    // El otro inventariador borró la fila 2.
+    // El otro inventariador borró la fila 2 (snapshot coherente con rowCount).
     const remote = [
       row("1", { referencia: "A", bultos: "1" }),
       row("3", { referencia: "C", bultos: "1", weight: "2" }),
     ];
 
-    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      remoteRowCount: 2,
+    });
     expect(merged.map((r) => r.id)).toEqual(["1", "3"]);
     expect(merged[0]).toMatchObject({ l: "10.00" });
     expect(merged[1]).toMatchObject({ weight: "2.00" });
@@ -115,6 +117,58 @@ describe("mergeConcurrentQuickRows", () => {
     const local = [row("1", { l: "1" }), row("2", { l: "2" })];
     const merged = mergeConcurrentQuickRows(baseline, local, []);
     expect(merged).toHaveLength(2);
+  });
+
+  it("no borra refs locales ante un remoto incompleto (subset)", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("2", { referencia: "B", bultos: "2" }),
+      row("3", { referencia: "C", bultos: "3" }),
+    ];
+    const local = [
+      row("1", { referencia: "A", bultos: "1", l: "10" }),
+      row("2", { referencia: "B", bultos: "2" }),
+      row("3", { referencia: "C", bultos: "3" }),
+    ];
+    // Eco slim / atrasado: solo una fila conocida.
+    const remote = [row("1", { referencia: "A", bultos: "1" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote);
+    expect(merged.map((r) => r.id)).toEqual(["1", "2", "3"]);
+    expect(merged[0]).toMatchObject({ l: "10.00" });
+  });
+
+  it("con rowCount coherente sí aplica borrado remoto", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("2", { referencia: "B", bultos: "2" }),
+      row("3", { referencia: "C", bultos: "3" }),
+    ];
+    const local = [...baseline];
+    const remote = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("2", { referencia: "B", bultos: "2" }),
+    ];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      remoteRowCount: 2,
+    });
+    expect(merged.map((r) => r.id)).toEqual(["1", "2"]);
+  });
+
+  it("con rowCount mayor que filas recibidas no borra (truncado)", () => {
+    const baseline = [
+      row("1", { referencia: "A", bultos: "1" }),
+      row("2", { referencia: "B", bultos: "2" }),
+      row("3", { referencia: "C", bultos: "3" }),
+    ];
+    const local = [...baseline];
+    const remote = [row("1", { referencia: "A", bultos: "1" })];
+
+    const merged = mergeConcurrentQuickRows(baseline, local, remote, {
+      remoteRowCount: 3,
+    });
+    expect(merged.map((r) => r.id)).toEqual(["1", "2", "3"]);
   });
 
   it("con baseline atrasado, deletedIds propaga borrado de fila solo-en-vivo", () => {

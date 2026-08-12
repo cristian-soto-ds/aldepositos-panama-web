@@ -37,6 +37,7 @@ type EditorMode = "create" | "edit";
 export function ReferenceCatalogModule() {
   const [rows, setRows] = useState<ReferenceCatalogRecord[]>([]);
   const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
@@ -57,13 +58,14 @@ export function ReferenceCatalogModule() {
   const load = useCallback(async () => {
     setLoading(true);
     setBanner(null);
-    const { rows: data, total: count } = await fetchReferenceCatalogPage({
+    const { rows: data, total: count, hasMore: more } = await fetchReferenceCatalogPage({
       search: searchApplied,
       page,
       pageSize: PAGE_SIZE,
     });
     setRows(data);
     setTotal(count);
+    setHasMore(more);
     setLoading(false);
   }, [page, searchApplied]);
 
@@ -73,7 +75,7 @@ export function ReferenceCatalogModule() {
     void load();
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, page + 1 + (hasMore ? 1 : 0));
 
   const openCreate = () => {
     setEditorMode("create");
@@ -309,7 +311,9 @@ export function ReferenceCatalogModule() {
           <span>
             {total === 0
               ? "0 referencias"
-              : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} de ${total}`}
+              : hasMore
+                ? `${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + rows.length}+`
+                : `${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + rows.length}`}
           </span>
           <div className="flex items-center gap-1">
             <button

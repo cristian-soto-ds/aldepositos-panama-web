@@ -115,7 +115,13 @@ export function collectionOrderToReceptionTruck(
     collectionOrderId: order.id,
     collectionOrderIds: [order.id],
     orderNumeros: [numero],
-    orderLines: [{ numero, bultos: orderBultos(order) }],
+    orderLines: [
+      {
+        numero,
+        bultos: orderBultos(order),
+        cliente: order.cliente?.trim() || undefined,
+      },
+    ],
     source: "collection_order",
     rampAssignedAt: isRamp
       ? (existing?.rampAssignedAt ?? now)
@@ -189,6 +195,7 @@ export function buildGroupReceptionTruck(
   const orderLines = withStatus.map((o) => ({
     numero: orderDisplayNumero(o),
     bultos: orderBultos(o),
+    cliente: o.cliente?.trim() || undefined,
   }));
 
   const earliestCreated = withStatus.reduce((min, o) => {

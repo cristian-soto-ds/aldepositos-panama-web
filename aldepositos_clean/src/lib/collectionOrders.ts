@@ -1,10 +1,13 @@
 import { supabase } from "@/lib/supabase";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { normalizeCollectionOrderFields } from "@/lib/collectionOrderReconcile";
+import { emptyManualRaTaskFields } from "@/lib/collectionOrderToTask";
 import { normalizeOrNumero } from "@/lib/parseCollectionOrdersHtm";
 import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
+import type { Task } from "@/lib/types/task";
 import type { DbPayloadRow } from "@/lib/realtimePatch";
+import { countOrdersForCollectionListTab } from "@/lib/collectionOrderListTabs";
 
 function isCollectionOrder(value: unknown): value is CollectionOrder {
   return (
@@ -66,6 +69,119 @@ export function collectionOrderTransferBlockedReason(
   return null;
 }
 
+function normalizeRaKeyForLink(ra: unknown): string {
+  return String(ra ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/^RA[\s\-_#]*/i, "");
+}
+
+/** RAs de inventario vinculados a esta OR (por id de OR o por número en linkedRaNumbers). */
+export function findTasksLinkedToCollectionOrder(
+  tasks: Task[],
+  order: CollectionOrder,
+): Task[] {
+  const linkedKeys = new Set(
+    (order.linkedRaNumbers ?? [])
+      .map(normalizeRaKeyForLink)
+      .filter(Boolean),
+  );
+  return tasks.filter((t) => {
+    if (t.linkedCollectionOrderId === order.id) return true;
+    const ra = normalizeRaKeyForLink(t.ra);
+    return Boolean(ra && linkedKeys.has(ra));
+  });
+}
+
+/**
+ * Limpia el RA tras desvincular un traslado OR→RA:
+ * solo deja id + número RA (lo manual); quita candado, medidas y datos de OR.
+ */
+export function clearRaAfterCollectionUnlink(task: Task): Task {
+  const { linkedCollectionOrderId: _link, ...rest } = task;
+  return {
+    ...rest,
+    ...emptyManualRaTaskFields(),
+    measureData: [],
+    currentBultos: 0,
+    capturedWeight: 0,
+    rowCount: 0,
+    completeRowCount: 0,
+    referenceMode: undefined,
+    referenceModeChosen: false,
+    // Vuelve a pendiente vacío (no borra el RA).
+    status:
+      String(task.status ?? "").toLowerCase() === "completed"
+        ? task.status
+        : "pending",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Desvincula OR↔RA(s): la OR vuelve a poder transferirse y los RA
+ * quedan disponibles otra vez en el selector (sin datos de inventario).
+ */
+export function unlinkCollectionOrderFromRas(input: {
+  order: CollectionOrder;
+  tasks: Task[];
+  /** Si se omite, desvincula todos los RA ligados a la OR. */
+  raNumbers?: string[];
+}): {
+  order: CollectionOrder;
+  clearedTasks: Task[];
+  blockedCompleted: Task[];
+} {
+  const { order, tasks } = input;
+  const linked = findTasksLinkedToCollectionOrder(tasks, order);
+  const onlyKeys =
+    input.raNumbers && input.raNumbers.length > 0
+      ? new Set(input.raNumbers.map(normalizeRaKeyForLink).filter(Boolean))
+      : null;
+
+  const targets = onlyKeys
+    ? linked.filter((t) => onlyKeys.has(normalizeRaKeyForLink(t.ra)))
+    : linked;
+
+  const blockedCompleted = targets.filter(
+    (t) => String(t.status ?? "").toLowerCase() === "completed",
+  );
+  const clearable = targets.filter(
+    (t) => String(t.status ?? "").toLowerCase() !== "completed",
+  );
+
+  const removeKeys = new Set(
+    clearable.map((t) => normalizeRaKeyForLink(t.ra)).filter(Boolean),
+  );
+  // También limpia números huérfanos en la OR (RA ya borrado / no en tasks).
+  if (!onlyKeys) {
+    for (const ra of order.linkedRaNumbers ?? []) {
+      const key = normalizeRaKeyForLink(ra);
+      if (key) removeKeys.add(key);
+    }
+  } else {
+    for (const key of onlyKeys) removeKeys.add(key);
+  }
+  // No quitar de la OR los RA completados que no se pueden limpiar.
+  for (const t of blockedCompleted) {
+    removeKeys.delete(normalizeRaKeyForLink(t.ra));
+  }
+
+  const nextLinked = (order.linkedRaNumbers ?? []).filter(
+    (ra) => !removeKeys.has(normalizeRaKeyForLink(ra)),
+  );
+
+  return {
+    order: {
+      ...order,
+      linkedRaNumbers: nextLinked,
+      updatedAt: new Date().toISOString(),
+    },
+    clearedTasks: clearable.map(clearRaAfterCollectionUnlink),
+    blockedCompleted,
+  };
+}
+
 export function upsertCollectionOrderInList(
   prev: CollectionOrder[],
   order: CollectionOrder,
@@ -108,6 +224,148 @@ export async function fetchCollectionOrders(): Promise<CollectionOrder[]> {
       .filter(isCollectionOrder)
       .map((order) => normalizeCollectionOrderFields(order)),
   );
+}
+
+/**
+ * Sin líneas Magaya: para el módulo Recepcionista (tabs + fila/rampa).
+ * Usa RPC si está aplicada; si no, cae al fetch completo y recorta en cliente.
+ */
+export function slimCollectionOrderForReceptionist(
+  order: CollectionOrder,
+): CollectionOrder {
+  if (!order.lines?.length) return order;
+  let expected = order.expectedBultos;
+  if (expected == null || !(expected > 0)) {
+    let sum = 0;
+    for (const l of order.lines) {
+      const n = parseFloat(String(l.bultos ?? "").replace(",", "."));
+      if (Number.isFinite(n) && n > 0) sum += Math.round(n);
+    }
+    if (sum > 0) expected = sum;
+  }
+  return {
+    ...order,
+    lines: [],
+    expectedBultos: expected ?? order.expectedBultos,
+  };
+}
+
+export async function fetchCollectionOrdersForReceptionist(): Promise<
+  CollectionOrder[]
+> {
+  const { data, error } = await supabase.rpc(
+    "fetch_collection_orders_receptionist_slim",
+  );
+  if (!error && data) {
+    const rows = data as { id?: string; payload: unknown }[];
+    return sortCollectionOrdersByNumero(
+      rows
+        .map((r) => {
+          const order = orderFromDbRow(r as DbPayloadRow);
+          return order ? slimCollectionOrderForReceptionist(order) : null;
+        })
+        .filter((o): o is CollectionOrder => !!o),
+    );
+  }
+
+  // Fallback si la migración RPC aún no está en el proyecto.
+  console.warn(
+    "[collection_orders] RPC slim no disponible; fetch completo + strip local.",
+    error?.message,
+  );
+  const full = await fetchCollectionOrders();
+  return full.map(slimCollectionOrderForReceptionist);
+}
+
+/** OR del mismo camión unificado (evita paginar toda la cola de recepción). */
+export async function fetchCollectionOrdersByReceptionGroupId(
+  groupId: string,
+): Promise<CollectionOrder[]> {
+  const gid = String(groupId ?? "").trim();
+  if (!gid) return [];
+
+  const { data, error } = await supabase
+    .from("collection_orders")
+    .select("id, payload")
+    .eq("payload->>receptionGroupId", gid);
+  if (error) throw error;
+
+  return ((data ?? []) as DbPayloadRow[])
+    .map((r) => orderFromDbRow(r))
+    .filter((o): o is CollectionOrder => !!o);
+}
+
+export type CollectionOrderTabCounts = {
+  total: number;
+  enBodega: number;
+  pendientes: number;
+};
+
+/** Firma barata para no re-renderizar si el reload no cambió nada. */
+export function collectionOrdersListFingerprint(orders: CollectionOrder[]): string {
+  if (orders.length === 0) return "0";
+  let acc = String(orders.length);
+  for (const o of orders) {
+    acc += `|${o.id}:${o.updatedAt ?? ""}:${o.receptionStatus ?? ""}:${o.lines?.length ?? 0}`;
+  }
+  return acc;
+}
+
+/**
+ * Conteos del dashboard: id + campos de tab, sin líneas Magaya.
+ * No usar para editar OR.
+ */
+function tabStubFromPayload(
+  id: string,
+  payload: unknown,
+): CollectionOrder {
+  const p =
+    payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : {};
+  const linked = Array.isArray(p.linkedRaNumbers)
+    ? (p.linkedRaNumbers as string[])
+    : [];
+  return {
+    id,
+    cliente: String(p.cliente ?? ""),
+    proveedor: String(p.proveedor ?? ""),
+    marca: typeof p.marca === "string" ? p.marca : undefined,
+    lines: [],
+    status: "draft",
+    createdAt: "",
+    updatedAt: "",
+    receptionStatus: p.receptionStatus as CollectionOrder["receptionStatus"],
+    linkedRaNumbers: linked,
+    sinInventario: p.sinInventario === true,
+  };
+}
+
+export async function fetchCollectionOrderTabCounts(): Promise<CollectionOrderTabCounts> {
+  const pageSize = 1000;
+  const stubs: CollectionOrder[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("collection_orders")
+      .select("id, payload")
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as { id?: string; payload?: unknown }[];
+    for (const row of chunk) {
+      stubs.push(tabStubFromPayload(String(row.id ?? ""), row.payload));
+    }
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+    if (from > 100_000) break;
+  }
+
+  return {
+    total: stubs.length,
+    enBodega: countOrdersForCollectionListTab(stubs, "warehouse"),
+    pendientes: countOrdersForCollectionListTab(stubs, "general"),
+  };
 }
 
 /**

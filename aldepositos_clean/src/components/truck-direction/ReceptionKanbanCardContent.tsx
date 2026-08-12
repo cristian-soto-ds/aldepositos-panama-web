@@ -20,7 +20,7 @@ function looksLikeOrPlate(plate: string): boolean {
 
 function resolveOrderLines(
   truck: ReceptionTruck,
-): Array<{ numero: string; bultos: number }> {
+): Array<{ numero: string; bultos: number; cliente?: string }> {
   if (truck.orderLines && truck.orderLines.length > 0) {
     return truck.orderLines;
   }
@@ -155,6 +155,10 @@ export function ReceptionKanbanCardContent({
 
   /** Unificado = varias OR en el mismo camión. */
   const isUnified = isCollection && (isGroup || lines.length > 1);
+  const consigneeLabel =
+    isCollection && !isUnified && client && client !== providerTitle
+      ? client
+      : null;
   const singleOr = isCollection && !isUnified && lines.length === 1 ? lines[0]! : null;
 
   return (
@@ -175,6 +179,15 @@ export function ReceptionKanbanCardContent({
             <p className={titleClass} title={providerTitle}>
               {providerTitle}
             </p>
+
+            {consigneeLabel ? (
+              <p
+                className={`mt-0.5 break-words font-semibold leading-snug tracking-tight text-inherit opacity-70 ${OR_SCALE_CLASS[titleScale]}`}
+                title={consigneeLabel}
+              >
+                {consigneeLabel}
+              </p>
+            ) : null}
 
             {/* Imagen 1: un solo pedido → «Camión» + OR */}
             {singleOr ? (
@@ -203,18 +216,26 @@ export function ReceptionKanbanCardContent({
                       : ""
                   }`}
                 >
-                  {lines.map((line, i) => (
+                  {lines.map((line, i) => {
+                    const lineClient = displayLabel(line.cliente);
+                    return (
                     <li
                       key={`${line.numero}-${line.bultos}-${i}`}
-                      className={`flex items-center justify-between gap-2 px-2.5 ${orClass} ${
+                      className={`flex items-center gap-2 px-2.5 ${orClass} ${
                         i > 0
                           ? "border-t border-black/[0.06] dark:border-white/10"
                           : ""
                       } ${isDense ? "py-1" : "py-1.5"}`}
                     >
-                      <span className="min-w-0 truncate">
+                      <span className="w-[5.75rem] shrink-0 truncate sm:w-[6.5rem]">
                         <span className="font-bold opacity-55">OR</span>{" "}
                         <span className="font-extrabold">#{line.numero}</span>
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 truncate text-left font-semibold tracking-tight opacity-80"
+                        title={lineClient ?? undefined}
+                      >
+                        {lineClient ?? ""}
                       </span>
                       <span className="shrink-0 tabular-nums">
                         <span className="font-extrabold">{line.bultos}</span>{" "}
@@ -223,7 +244,8 @@ export function ReceptionKanbanCardContent({
                         </span>
                       </span>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             ) : null}

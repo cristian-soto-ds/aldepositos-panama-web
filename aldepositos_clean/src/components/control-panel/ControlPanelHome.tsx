@@ -17,10 +17,11 @@ import {
 import type { Task } from "@/lib/types/task";
 import type { UserPreferences } from "@/lib/userPreferences";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
-import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
-import { fetchCollectionOrders } from "@/lib/collectionOrders";
-import { countOrdersForCollectionListTab } from "@/lib/collectionOrderListTabs";
+import {
+  fetchCollectionOrderTabCounts,
+  type CollectionOrderTabCounts,
+} from "@/lib/collectionOrders";
 import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import {
   isIsoInPanamaRange,
@@ -237,20 +238,24 @@ export function ControlPanelHome({
   }, []);
 
   const { trucks: receptionTrucks } = useReceptionQueue();
-  const [collectionOrders, setCollectionOrders] = useState<CollectionOrder[]>([]);
+  const [collectionStats, setCollectionStats] = useState<CollectionOrderTabCounts>({
+    total: 0,
+    enBodega: 0,
+    pendientes: 0,
+  });
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const list = await fetchCollectionOrders();
-        if (alive) setCollectionOrders(list);
+        const counts = await fetchCollectionOrderTabCounts();
+        if (alive) setCollectionStats(counts);
       } catch {
         /* Silencioso */
       }
     };
     void load();
-    const intervalId = window.setInterval(() => void load(), 30_000);
+    const intervalId = window.setInterval(() => void load(), 180_000);
     return () => {
       alive = false;
       window.clearInterval(intervalId);
@@ -280,13 +285,6 @@ export function ControlPanelHome({
       activos: enFila + enRampa + carretillado,
     };
   }, [receptionTrucks]);
-
-  const collectionStats = useMemo(() => {
-    const total = collectionOrders.length;
-    const enBodega = countOrdersForCollectionListTab(collectionOrders, "warehouse");
-    const pendientes = countOrdersForCollectionListTab(collectionOrders, "general");
-    return { total, enBodega, pendientes };
-  }, [collectionOrders]);
 
   const dashboard = useMemo(() => {
     const total = tasks.length;

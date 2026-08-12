@@ -19,6 +19,7 @@ import {
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import { RAMP_OCCUPANCY_META_ID } from "@/lib/receptionLogistics/rampOccupancy";
 import {
+  fetchCollectionOrdersByReceptionGroupId,
   fetchCollectionOrdersForReception,
   fetchCollectionOrderById,
   updateCollectionOrder,
@@ -29,6 +30,24 @@ import {
   publishReceptionTruckLive,
   subscribeReceptionLive,
 } from "@/lib/receptionLogistics/receptionLiveSync";
+
+function findLocalTruck(id: string): ReceptionTruck | null {
+  return readLocalSnapshot().trucks.find((t) => t.id === id) ?? null;
+}
+
+/** Preferir snapshot local; si falta, solo la tabla de camiones (sin merge de OR). */
+async function findTruckPreferLocal(
+  truckId: string,
+): Promise<ReceptionTruck | null> {
+  const local = findLocalTruck(truckId);
+  if (local) return local;
+  try {
+    const raw = await fetchReceptionTrucksRaw();
+    return raw.find((t) => t.id === truckId) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Completados más viejos que esto no se bajan en el hydrate del tablero. */
 const RECEPTION_COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -252,23 +271,21 @@ export async function createReceptionTruckGroup(input: {
   }, null as number | null);
   const receptionQueuedAt =
     earliestQueued != null ? new Date(earliestQueued).toISOString() : now;
-  const updatedOrders: CollectionOrder[] = [];
 
-  for (const order of loaded) {
-    // Quitar tarjeta individual si existía.
-    const soloId = receptionTruckIdForCollectionOrder(order.id);
-    await removeReceptionTruckById(soloId);
+  await Promise.all(
+    loaded.map((order) =>
+      removeReceptionTruckById(receptionTruckIdForCollectionOrder(order.id)),
+    ),
+  );
 
-    const payload: CollectionOrder = {
-      ...order,
-      receptionStatus: RECEPTION_STATUS.EN_FILA,
-      receptionGroupId: groupId,
-      receptionQueuedAt: order.receptionQueuedAt || receptionQueuedAt,
-      updatedAt: now,
-    };
-    await updateCollectionOrder(payload);
-    updatedOrders.push(payload);
-  }
+  const updatedOrders: CollectionOrder[] = loaded.map((order) => ({
+    ...order,
+    receptionStatus: RECEPTION_STATUS.EN_FILA,
+    receptionGroupId: groupId,
+    receptionQueuedAt: order.receptionQueuedAt || receptionQueuedAt,
+    updatedAt: now,
+  }));
+  await Promise.all(updatedOrders.map((payload) => updateCollectionOrder(payload)));
 
   const truck = buildGroupReceptionTruck(updatedOrders, null, {
     groupId,
@@ -305,8 +322,7 @@ export async function addOrdersToReceptionGroup(input: {
     throw new Error("Seleccioná al menos 1 OR para agregar al camión.");
   }
 
-  const allReception = await fetchCollectionOrdersForReception();
-  const siblings = allReception.filter((o) => o.receptionGroupId === groupId);
+  const siblings = await fetchCollectionOrdersByReceptionGroupId(groupId);
   if (siblings.length === 0) {
     throw new Error("No se encontró el camión unificado (puede haberse disuelto).");
   }
@@ -318,52 +334,51 @@ export async function addOrdersToReceptionGroup(input: {
     throw new Error("Ese camión ya está completado; no se pueden sumar más OR.");
   }
 
-  const loaded: CollectionOrder[] = [];
-  for (const id of uniqueIds) {
-    if (siblings.some((s) => s.id === id)) {
-      throw new Error("Esa OR ya forma parte del camión seleccionado.");
-    }
-    const order = await fetchCollectionOrderById(id);
-    if (!order) throw new Error(`No se encontró la OR ${id}`);
-    if (order.receptionGroupId) {
-      throw new Error(
-        `La OR #${order.numero ?? id.slice(0, 8)} ya pertenece a otro camión.`,
-      );
-    }
-    if (
-      order.receptionStatus &&
-      order.receptionStatus !== RECEPTION_STATUS.EN_FILA
-    ) {
-      throw new Error(
-        `La OR #${order.numero ?? id.slice(0, 8)} ya está en rampa o completada.`,
-      );
-    }
-    loaded.push(order);
-  }
+  const loaded = await Promise.all(
+    uniqueIds.map(async (id) => {
+      if (siblings.some((s) => s.id === id)) {
+        throw new Error("Esa OR ya forma parte del camión seleccionado.");
+      }
+      const order = await fetchCollectionOrderById(id);
+      if (!order) throw new Error(`No se encontró la OR ${id}`);
+      if (order.receptionGroupId) {
+        throw new Error(
+          `La OR #${order.numero ?? id.slice(0, 8)} ya pertenece a otro camión.`,
+        );
+      }
+      if (
+        order.receptionStatus &&
+        order.receptionStatus !== RECEPTION_STATUS.EN_FILA
+      ) {
+        throw new Error(
+          `La OR #${order.numero ?? id.slice(0, 8)} ya está en rampa o completada.`,
+        );
+      }
+      return order;
+    }),
+  );
 
-  const trucks = await fetchReceptionTrucks();
-  const groupTruck = trucks.find((t) => t.id === groupId) ?? null;
+  const groupTruck = await findTruckPreferLocal(groupId);
   const now = new Date().toISOString();
   const groupQueuedAt =
     siblings
       .map((o) => o.receptionQueuedAt)
       .find((t) => !!t?.trim()) ?? now;
 
-  const updatedNew: CollectionOrder[] = [];
-  for (const order of loaded) {
-    const soloId = receptionTruckIdForCollectionOrder(order.id);
-    await removeReceptionTruckById(soloId);
+  await Promise.all(
+    loaded.map((order) =>
+      removeReceptionTruckById(receptionTruckIdForCollectionOrder(order.id)),
+    ),
+  );
 
-    const payload: CollectionOrder = {
-      ...order,
-      receptionStatus: groupStatus,
-      receptionGroupId: groupId,
-      receptionQueuedAt: order.receptionQueuedAt || groupQueuedAt,
-      updatedAt: now,
-    };
-    await updateCollectionOrder(payload);
-    updatedNew.push(payload);
-  }
+  const updatedNew: CollectionOrder[] = loaded.map((order) => ({
+    ...order,
+    receptionStatus: groupStatus,
+    receptionGroupId: groupId,
+    receptionQueuedAt: order.receptionQueuedAt || groupQueuedAt,
+    updatedAt: now,
+  }));
+  await Promise.all(updatedNew.map((payload) => updateCollectionOrder(payload)));
 
   const allMembers = [...siblings, ...updatedNew];
   const rebuilt = buildGroupReceptionTruck(allMembers, groupTruck, {
@@ -407,8 +422,7 @@ export async function removeOrderFromReceptionGroup(
   }
 
   const groupId = order.receptionGroupId;
-  const trucks = await fetchReceptionTrucks();
-  const groupTruck = trucks.find((t) => t.id === groupId) ?? null;
+  const groupTruck = await findTruckPreferLocal(groupId);
 
   const {
     receptionStatus: _s,
@@ -422,10 +436,9 @@ export async function removeOrderFromReceptionGroup(
   };
   await updateCollectionOrder(cleared);
 
-  const allReception = await fetchCollectionOrdersForReception();
-  const siblings = allReception.filter(
-    (o) => o.receptionGroupId === groupId && o.id !== orderId,
-  );
+  const siblings = (
+    await fetchCollectionOrdersByReceptionGroupId(groupId)
+  ).filter((o) => o.id !== orderId);
 
   if (siblings.length === 0) {
     await removeReceptionTruckById(groupId);
@@ -509,8 +522,7 @@ export async function syncCollectionOrderToReceptionQueue(
   // OR dentro de un grupo: reconstruir tarjeta de grupo.
   if (order.receptionGroupId) {
     const groupId = order.receptionGroupId;
-    const all = await fetchCollectionOrdersForReception();
-    const siblings = all.filter((o) => o.receptionGroupId === groupId);
+    const siblings = await fetchCollectionOrdersByReceptionGroupId(groupId);
 
     if (!order.receptionStatus) {
       // Ya no debería llegar con groupId y sin status; limpiar huérfanos.
@@ -520,24 +532,32 @@ export async function syncCollectionOrderToReceptionQueue(
       return;
     }
 
-    const trucks = readLocalSnapshot().trucks;
-    const existing = trucks.find((t) => t.id === groupId) ?? null;
-    const truck = buildGroupReceptionTruck(siblings.length ? siblings : [order], existing, {
-      groupId,
-    });
+    const existing = findLocalTruck(groupId);
+    const truck = buildGroupReceptionTruck(
+      siblings.length ? siblings : [order],
+      existing,
+      { groupId },
+    );
     if (truck) await upsertReceptionTruck(truck);
     // Eliminar posibles tarjetas individuales de esas OR.
-    for (const o of siblings.length ? siblings : [order]) {
-      await removeReceptionTruckById(receptionTruckIdForCollectionOrder(o.id));
-    }
+    const members = siblings.length ? siblings : [order];
+    await Promise.all(
+      members.map((o) =>
+        removeReceptionTruckById(receptionTruckIdForCollectionOrder(o.id)),
+      ),
+    );
     return;
   }
 
   const truckId = receptionTruckIdForCollectionOrder(order.id);
-  const trucks = await fetchReceptionTrucks();
+  const local = readLocalSnapshot().trucks;
   const existing =
-    trucks.find((t) => t.id === truckId) ??
-    trucks.find((t) => receptionOrderIds(t).includes(order.id) && !isReceptionGroupTruckId(t.id)) ??
+    local.find((t) => t.id === truckId) ??
+    local.find(
+      (t) =>
+        receptionOrderIds(t).includes(order.id) &&
+        !isReceptionGroupTruckId(t.id),
+    ) ??
     null;
 
   // Si estaba en un grupo y se limpió el groupId, no tocar grupos aquí.
@@ -564,18 +584,21 @@ export async function updateReceptionTruckStatus(
   status: ReceptionStatusId,
   options?: { issueReceipt?: boolean },
 ): Promise<ReceptionTruck | null> {
-  // Preferir snapshot local (instantáneo). Si falta, un fetch puntual.
+  // Preferir snapshot local (instantáneo). Si falta, solo tabla de camiones.
   let trucks = readLocalSnapshot().trucks;
   let idx = trucks.findIndex((t) => t.id === truckId);
   if (idx < 0) {
-    trucks = await fetchReceptionTrucks();
-    idx = trucks.findIndex((t) => t.id === truckId);
+    try {
+      trucks = await fetchReceptionTrucksRaw();
+      idx = trucks.findIndex((t) => t.id === truckId);
+    } catch {
+      /* seguir con local */
+    }
   }
 
-  // Grupo huérfano: reconstruir desde las OR y seguir.
+  // Grupo huérfano: reconstruir desde las OR del grupo y seguir.
   if (idx < 0 && isReceptionGroupTruckId(truckId)) {
-    const all = await fetchCollectionOrdersForReception();
-    const siblings = all.filter((o) => o.receptionGroupId === truckId);
+    const siblings = await fetchCollectionOrdersByReceptionGroupId(truckId);
     if (siblings.length === 0) return null;
     const rebuilt = buildGroupReceptionTruck(siblings, null, { groupId: truckId });
     if (!rebuilt) return null;
@@ -656,28 +679,22 @@ export async function setCollectionOrderReceptionStatus(
   // Camión agrupado: mover todas las OR del grupo juntas (fila / rampas / carret.).
   if (order.receptionGroupId) {
     const groupId = order.receptionGroupId;
-    const all = await fetchCollectionOrdersForReception();
     const byId = new Map<string, CollectionOrder>();
-    for (const o of all) {
-      if (o.receptionGroupId === groupId) byId.set(o.id, o);
+    for (const o of await fetchCollectionOrdersByReceptionGroupId(groupId)) {
+      byId.set(o.id, o);
     }
     byId.set(order.id, order);
 
-    const updated: CollectionOrder[] = [];
-    for (const o of byId.values()) {
-      const next: CollectionOrder = {
-        ...o,
-        receptionStatus: status,
-        receptionGroupId: groupId,
-        receptionQueuedAt: o.receptionQueuedAt || now,
-        updatedAt: now,
-      };
-      await updateCollectionOrder(next);
-      updated.push(next);
-    }
+    const updated: CollectionOrder[] = Array.from(byId.values()).map((o) => ({
+      ...o,
+      receptionStatus: status,
+      receptionGroupId: groupId,
+      receptionQueuedAt: o.receptionQueuedAt || now,
+      updatedAt: now,
+    }));
+    await Promise.all(updated.map((next) => updateCollectionOrder(next)));
 
-    const trucks = await fetchReceptionTrucks();
-    const existing = trucks.find((t) => t.id === groupId) ?? null;
+    const existing = await findTruckPreferLocal(groupId);
     const base = buildGroupReceptionTruck(updated, existing, { groupId });
     if (base) {
       const isRamp = isRampReceptionStatus(status);
@@ -694,11 +711,11 @@ export async function setCollectionOrderReceptionStatus(
             : existing?.warehouseReceiptNumber,
       };
       await upsertReceptionTruck(truck);
-      for (const o of updated) {
-        await removeReceptionTruckById(
-          receptionTruckIdForCollectionOrder(o.id),
-        );
-      }
+      await Promise.all(
+        updated.map((o) =>
+          removeReceptionTruckById(receptionTruckIdForCollectionOrder(o.id)),
+        ),
+      );
     }
     return updated;
   }
@@ -751,13 +768,11 @@ async function completeSingleOrderFromReceptionGroup(
   };
   await updateCollectionOrder(completed);
 
-  const allReception = await fetchCollectionOrdersForReception();
-  const siblings = allReception.filter(
-    (o) => o.receptionGroupId === groupId && o.id !== order.id,
-  );
+  const siblings = (
+    await fetchCollectionOrdersByReceptionGroupId(groupId)
+  ).filter((o) => o.id !== order.id);
 
-  const trucks = await fetchReceptionTrucks();
-  const existingGroup = trucks.find((t) => t.id === groupId) ?? null;
+  const existingGroup = await findTruckPreferLocal(groupId);
   const result: CollectionOrder[] = [completed];
 
   if (siblings.length === 0) {

@@ -160,43 +160,66 @@ function ilikeSearchPattern(raw: string): string | null {
   return `%${t}%`;
 }
 
+function looksLikePartCode(raw: string): boolean {
+  const t = raw.trim();
+  if (t.length < 2) return false;
+  // Códigos tipo 05135-67851 / SKU: no buscar descripción con %x%.
+  return /[0-9]/.test(t) || /^[A-Z0-9._/-]+$/i.test(t);
+}
+
 export async function fetchReferenceCatalogPage(opts: {
   search: string;
   page: number;
   pageSize: number;
-}): Promise<{ rows: ReferenceCatalogRecord[]; total: number }> {
+}): Promise<{ rows: ReferenceCatalogRecord[]; total: number; hasMore: boolean }> {
   const pageSize = Math.min(Math.max(opts.pageSize, 5), 200);
   const page = Math.max(opts.page, 0);
   const from = page * pageSize;
-  const to = from + pageSize - 1;
+  const to = from + pageSize;
 
   try {
     let query = supabase
       .from("reference_catalog")
-      .select("*", { count: "exact" })
+      .select(
+        "id, numero_parte, numero_parte_normalizado, descripcion, piezas, longitud_cm, altura_cm, ancho_cm, peso_por_pieza_kg, volumen_m3, unidad, created_at, updated_at",
+      )
       .order("updated_at", { ascending: false })
       .range(from, to);
 
-    const pattern = ilikeSearchPattern(opts.search);
-    if (pattern) {
-      const q = `"${pattern.replace(/"/g, '""')}"`;
-      query = query.or(
-        `numero_parte.ilike.${q},numero_parte_normalizado.ilike.${q},descripcion.ilike.${q}`,
-      );
+    const rawSearch = opts.search.trim();
+    if (rawSearch) {
+      if (looksLikePartCode(rawSearch)) {
+        const key = normalizePartNumber(rawSearch).replace(/%/g, "").replace(/_/g, "");
+        if (key) {
+          query = query.ilike("numero_parte_normalizado", `${key}%`);
+        }
+      } else {
+        const pattern = ilikeSearchPattern(rawSearch);
+        if (pattern) {
+          const q = `"${pattern.replace(/"/g, '""')}"`;
+          query = query.or(
+            `numero_parte.ilike.${q},numero_parte_normalizado.ilike.${q},descripcion.ilike.${q}`,
+          );
+        }
+      }
     }
 
-    const { data, error, count } = await query;
+    const { data, error } = await query;
 
     if (error) {
       console.warn("[reference_catalog] fetchReferenceCatalogPage:", error.message);
-      return { rows: [], total: 0 };
+      return { rows: [], total: 0, hasMore: false };
     }
 
-    const rows = (data ?? []).map((r) => mapDbRow(r as ReferenceCatalogDbRow));
-    return { rows, total: count ?? rows.length };
+    const fetched = data ?? [];
+    const hasMore = fetched.length > pageSize;
+    const pageRows = hasMore ? fetched.slice(0, pageSize) : fetched;
+    const rows = pageRows.map((r) => mapDbRow(r as ReferenceCatalogDbRow));
+    const total = page * pageSize + rows.length + (hasMore ? 1 : 0);
+    return { rows, total, hasMore };
   } catch (e) {
     console.warn("[reference_catalog] fetchReferenceCatalogPage:", e);
-    return { rows: [], total: 0 };
+    return { rows: [], total: 0, hasMore: false };
   }
 }
 

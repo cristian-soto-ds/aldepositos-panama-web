@@ -12,6 +12,7 @@ import {
   Save,
   Send,
   Trash2,
+  Unlink,
   Recycle,
   CheckCircle2,
   AlertTriangle,
@@ -32,6 +33,7 @@ import {
   parseCollectionOrderNumber,
   sortCollectionOrdersByNumero,
   updateCollectionOrder,
+  unlinkCollectionOrderFromRas,
   upsertCollectionOrderInList,
 } from "@/lib/collectionOrders";
 import { classifyHtmCollectionOrders } from "@/lib/parseCollectionOrdersHtm";
@@ -516,7 +518,10 @@ function taskIsBlockedForCollectionOrder(
 
 type CollectionOrderModuleProps = {
   tasks: Task[];
-  onUpdateTask: (task: Task) => void | Promise<void>;
+  onUpdateTask: (
+    task: Task,
+    options?: { skipRemote?: boolean; allowEmptyMeasureData?: boolean },
+  ) => void | Promise<void>;
   userEmail: string | null;
   /** Nombre visible en el panel para el asistente IA (opcional). */
   userDisplayName?: string | null;
@@ -542,6 +547,10 @@ export function CollectionOrderModule({
   const [csvOpen, setCsvOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
+  const [unlinkConfirm, setUnlinkConfirm] = useState<CollectionOrder | null>(
+    null,
+  );
+  const [unlinkBusy, setUnlinkBusy] = useState(false);
   const [geminiOpen, setGeminiOpen] = useState(false);
   const [chatGptOpen, setChatGptOpen] = useState(false);
   const [terraJobByOrderId, setTerraJobByOrderId] = useState<
@@ -1424,6 +1433,79 @@ export function CollectionOrderModule({
 
   const requestDeleteOrder = (o: CollectionOrder) => {
     setDeleteConfirm({ kind: "single", order: o });
+  };
+
+  /** Admin: deshace OR→RA (limpia medidas del RA y libera el vínculo). */
+  const requestUnlinkOrder = (o: CollectionOrder) => {
+    const hasLink =
+      (o.linkedRaNumbers ?? []).some((ra) => String(ra ?? "").trim()) ||
+      tasks.some((t) => t.linkedCollectionOrderId === o.id);
+    if (!hasLink) {
+      alert("Esta orden no tiene un RA vinculado.");
+      return;
+    }
+    setUnlinkConfirm(o);
+  };
+
+  const confirmUnlinkOrder = async () => {
+    if (!unlinkConfirm) return;
+    setUnlinkBusy(true);
+    try {
+      const result = unlinkCollectionOrderFromRas({
+        order: unlinkConfirm,
+        tasks,
+      });
+      if (
+        result.clearedTasks.length === 0 &&
+        result.blockedCompleted.length > 0
+      ) {
+        alert(
+          "No se puede desvincular: el RA ya está completado. Pedí rectificación o un admin con acceso a reportes.",
+        );
+        return;
+      }
+      if (
+        result.clearedTasks.length === 0 &&
+        (unlinkConfirm.linkedRaNumbers ?? []).length === 0
+      ) {
+        alert("No encontré un RA vinculado para deshacer.");
+        return;
+      }
+
+      for (const t of result.clearedTasks) {
+        await onUpdateTask(t, { allowEmptyMeasureData: true });
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(`detailed_inventory_draft_v1_${t.id}`);
+          window.localStorage.removeItem(`quick_inventory_draft_v1_${t.id}`);
+          window.localStorage.removeItem(`airway_inventory_draft_v1_${t.id}`);
+        }
+      }
+      await updateCollectionOrder(result.order);
+      setOrders((prev) => upsertCollectionOrderInList(prev, result.order));
+      if (editing?.id === result.order.id) {
+        setEditing(result.order);
+      }
+
+      const ras = result.clearedTasks
+        .map((t) => String(t.ra ?? "").trim())
+        .filter(Boolean)
+        .join(", ");
+      const blockedNote =
+        result.blockedCompleted.length > 0
+          ? ` (${result.blockedCompleted.length} RA completado(s) no se tocaron)`
+          : "";
+      alert(
+        ras
+          ? `Desvinculado. RA ${ras} quedó libre (sin medidas) para volver a vincular.${blockedNote}`
+          : `Vínculo quitado de la OR.${blockedNote}`,
+      );
+      setUnlinkConfirm(null);
+    } catch (e) {
+      console.error(e);
+      alert("No se pudo desvincular. Revisá la conexión con Supabase.");
+    } finally {
+      setUnlinkBusy(false);
+    }
   };
 
   const requestDeleteSelectedOrders = () => {
@@ -2800,6 +2882,20 @@ export function CollectionOrderModule({
                       {inWarehouse ? "Asignar RA" : "Abrir"}
                       <ChevronRight className="h-3 w-3 opacity-80" aria-hidden />
                     </button>
+                    {hasRa ? (
+                      <button
+                        type="button"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          requestUnlinkOrder(o);
+                        }}
+                        title="Desvincular OR del RA: limpia las medidas del RA y permite volver a transferir"
+                        className="relative z-[1] inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-amber-900 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60"
+                      >
+                        <Unlink className="h-3 w-3" aria-hidden />
+                        Desvincular
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={(ev) => {
@@ -2857,6 +2953,28 @@ export function CollectionOrderModule({
           if (!deleteConfirmBusy) setDeleteConfirm(null);
         }}
         onConfirm={() => void confirmDeleteOrders()}
+      />
+      <DeleteRaConfirmModal
+        open={unlinkConfirm != null}
+        headingTitle="Desvincular OR → RA"
+        questionPrefix="¿Desvincular la orden"
+        raLabel={
+          unlinkConfirm
+            ? collectionOrderDeleteLabel(unlinkConfirm)
+            : "—"
+        }
+        questionSuffix=" del RA?"
+        clientHint={
+          unlinkConfirm
+            ? `Se borran las medidas del RA vinculado (${(unlinkConfirm.linkedRaNumbers ?? []).join(", ") || "—"}) y queda libre para volver a transferir. La OR no se elimina.`
+            : undefined
+        }
+        busy={unlinkBusy}
+        onCancel={() => {
+          if (!unlinkBusy) setUnlinkConfirm(null);
+        }}
+        onConfirm={() => void confirmUnlinkOrder()}
+        confirmLabel="Desvincular"
       />
       </>
     );
@@ -3262,6 +3380,17 @@ export function CollectionOrderModule({
           >
             <Send className="h-4 w-4" /> Pasar al RA
           </button>
+          {(e.linkedRaNumbers ?? []).some((ra) => String(ra ?? "").trim()) ? (
+            <button
+              type="button"
+              disabled={unlinkBusy || saveBusy}
+              title="Desvincular: limpia las medidas del RA y deja libre el vínculo para volver a transferir"
+              onClick={() => requestUnlinkOrder(e)}
+              className="flex items-center gap-2 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <Unlink className="h-4 w-4" /> Desvincular RA
+            </button>
+          ) : null}
         </div>
         <p className="mb-2 text-[10px] text-slate-500 dark:text-slate-400">
           Podés digitar referencias en cualquier etapa de recepción. «Pasar al
@@ -4136,6 +4265,29 @@ export function CollectionOrderModule({
             model,
           });
         }}
+      />
+
+      <DeleteRaConfirmModal
+        open={unlinkConfirm != null}
+        headingTitle="Desvincular OR → RA"
+        questionPrefix="¿Desvincular la orden"
+        raLabel={
+          unlinkConfirm
+            ? collectionOrderDeleteLabel(unlinkConfirm)
+            : "—"
+        }
+        questionSuffix=" del RA?"
+        clientHint={
+          unlinkConfirm
+            ? `Se borran las medidas del RA vinculado (${(unlinkConfirm.linkedRaNumbers ?? []).join(", ") || "—"}) y queda libre para volver a transferir. La OR no se elimina.`
+            : undefined
+        }
+        busy={unlinkBusy}
+        onCancel={() => {
+          if (!unlinkBusy) setUnlinkConfirm(null);
+        }}
+        onConfirm={() => void confirmUnlinkOrder()}
+        confirmLabel="Desvincular"
       />
     </>
   );

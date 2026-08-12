@@ -7,8 +7,11 @@ import {
   subscribeLiveUpdates,
 } from "@/lib/liveCollaboration";
 import {
+  collectionOrdersListFingerprint,
   fetchCollectionOrders,
+  fetchCollectionOrdersForReceptionist,
   patchCollectionOrdersList,
+  slimCollectionOrderForReceptionist,
   subscribeCollectionOrdersRealtime,
   type CollectionOrderRealtimeChange,
 } from "@/lib/collectionOrders";
@@ -21,12 +24,22 @@ import type { CollectionOrder } from "@/lib/types/collectionOrder";
 type Options = {
   enabled: boolean;
   userKey?: string | null;
+  /**
+   * `receptionist`: lista sin líneas Magaya (RPC slim) — tabs + fila/rampa.
+   * `full`: payload completo (módulo OR / edición).
+   */
+  mode?: "full" | "receptionist";
 };
 
-export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
+export function useSupabaseCollectionOrders({
+  enabled,
+  userKey,
+  mode = "full",
+}: Options) {
   const [orders, setOrders] = useState<CollectionOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [reloadError, setReloadError] = useState<string | null>(null);
+  const slim = mode === "receptionist";
 
   const reload = useCallback(async () => {
     if (!enabled) {
@@ -36,13 +49,16 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
       return;
     }
     try {
-      const list = await fetchCollectionOrders();
+      const list = slim
+        ? await fetchCollectionOrdersForReceptionist()
+        : await fetchCollectionOrders();
       setReloadError(null);
-      setOrders((prev) => {
-        const prevJson = JSON.stringify(prev);
-        const nextJson = JSON.stringify(list);
-        return prevJson === nextJson ? prev : list;
-      });
+      setOrders((prev) =>
+        collectionOrdersListFingerprint(prev) ===
+        collectionOrdersListFingerprint(list)
+          ? prev
+          : list,
+      );
     } catch (e) {
       console.error(e);
       // No vaciar la lista: un fallo de red no debe “borrar” las OR de la UI.
@@ -54,14 +70,24 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
     } finally {
       setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, slim]);
 
-  const applyRealtimeChange = useCallback((change: CollectionOrderRealtimeChange) => {
-    setOrders((prev) => {
-      const patched = patchCollectionOrdersList(prev, change);
-      return patched ?? prev;
-    });
-  }, []);
+  const applyRealtimeChange = useCallback(
+    (change: CollectionOrderRealtimeChange) => {
+      const normalized: CollectionOrderRealtimeChange =
+        slim && change.order
+          ? {
+              ...change,
+              order: slimCollectionOrderForReceptionist(change.order),
+            }
+          : change;
+      setOrders((prev) => {
+        const patched = patchCollectionOrdersList(prev, normalized);
+        return patched ?? prev;
+      });
+    },
+    [slim],
+  );
 
   useEffect(() => {
     void reload();
@@ -109,7 +135,7 @@ export function useSupabaseCollectionOrders({ enabled, userKey }: Options) {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       const now = Date.now();
-      if (now - lastFocusReloadRef.current < 30_000) return;
+      if (now - lastFocusReloadRef.current < 90_000) return;
       lastFocusReloadRef.current = now;
       void reload();
     };

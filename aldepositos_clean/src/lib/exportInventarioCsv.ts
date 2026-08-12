@@ -8,7 +8,6 @@
 import {
   cubicajeM3FromDims,
   csvMeasureNum,
-  parseMeasureNumber,
   roundMeasureNearest,
   roundUpMeasure,
 } from "@/lib/measureDecimals";
@@ -36,7 +35,9 @@ const CSV_UNIDAD_FIJA = "PZA";
 const CSV_TIPO_EMBALAJE_FIJO = "Cartón";
 
 function parseNum(v: unknown): number {
-  return parseMeasureNumber(v);
+  if (v === null || v === undefined || v === "") return 0;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** Números para CSV: vacío o inválido → 0 */

@@ -13,6 +13,8 @@ type DeleteRaConfirmModalProps = {
   /** Sufijo tras el valor destacado (por defecto: «?»). */
   questionSuffix?: string;
   clientHint?: string;
+  /** Título del botón confirmar (por defecto: «Eliminar»). */
+  confirmLabel?: string;
   busy?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -25,6 +27,7 @@ export function DeleteRaConfirmModal({
   questionPrefix = "¿Eliminar el RA",
   questionSuffix = "?",
   clientHint,
+  confirmLabel = "Eliminar",
   busy = false,
   onCancel,
   onConfirm,
@@ -118,7 +121,7 @@ export function DeleteRaConfirmModal({
             ) : (
               <Trash2 className="h-4 w-4" />
             )}
-            Eliminar
+            {confirmLabel}
           </button>
         </div>
       </div>

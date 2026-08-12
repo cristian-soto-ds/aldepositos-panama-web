@@ -24,8 +24,8 @@ export type ReceptionTruck = {
   collectionOrderIds?: string[];
   /** Números OR visibles en la tarjeta (grupo). */
   orderNumeros?: string[];
-  /** Desglose por OR: número + bultos (tarjeta camión). */
-  orderLines?: Array<{ numero: string; bultos: number }>;
+  /** Desglose por OR: número + bultos + consignatario (tarjeta camión). */
+  orderLines?: Array<{ numero: string; bultos: number; cliente?: string }>;
   source?: "collection_order" | "import";
   createdAt: string;
   updatedAt: string;

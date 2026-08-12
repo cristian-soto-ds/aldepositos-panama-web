@@ -89,8 +89,36 @@ describe("reception OR truck grouping", () => {
     expect(truck?.plate).toBe("KING CARGO");
     expect(truck?.provider).toBe("KING CARGO");
     expect(truck?.orderLines).toEqual([
-      { numero: "1", bultos: 10 },
-      { numero: "2", bultos: 15 },
+      { numero: "1", bultos: 10, cliente: "AAA" },
+      { numero: "2", bultos: 15, cliente: "AAA" },
+    ]);
+  });
+
+  it("buildGroupReceptionTruck incluye consignatario por OR", () => {
+    const orders = [
+      makeOrder({
+        id: "a",
+        numero: "3986",
+        cliente: "PONCHO",
+        expectedBultos: 12,
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-cons",
+      }),
+      makeOrder({
+        id: "b",
+        numero: "3981",
+        cliente: "RED",
+        expectedBultos: 4,
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-cons",
+      }),
+    ];
+    const truck = buildGroupReceptionTruck(orders, null, {
+      groupId: "or-grp-cons",
+    });
+    expect(truck?.orderLines).toEqual([
+      { numero: "3986", bultos: 12, cliente: "PONCHO" },
+      { numero: "3981", bultos: 4, cliente: "RED" },
     ]);
   });
 

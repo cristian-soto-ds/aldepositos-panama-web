@@ -19,7 +19,6 @@ import {
   ChevronRight,
   CheckSquare,
 } from "lucide-react";
-import { GeminiSparkIcon } from "@/components/ui/GeminiSparkIcon";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
 import {
@@ -85,10 +84,6 @@ import {
   downloadMagayaReferenciasExcelFromSections,
 } from "@/lib/exportMagayaExcel";
 import { InventoryCsvExportModal } from "@/components/modals/InventoryCsvExportModal";
-import {
-  CollectionOrderGeminiPanel,
-  type CollectionOrderGeminiJobState,
-} from "@/components/control-panel/CollectionOrderGeminiPanel";
 import { GeneralChatGptPanel } from "@/components/control-panel/GeneralChatGptPanel";
 import { AldeGptTerraIcon } from "@/components/ui/AldeGptTerraBrand";
 import {
@@ -102,14 +97,12 @@ import {
   ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
   type AldeGptTerraLine,
 } from "@/lib/aldeGptTerraDocumentExtract";
-import { AI_ASSISTANT_DISPLAY_NAME } from "@/lib/aiAssistantBrand";
 import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
 import {
   HtmImportResultModal,
   type HtmImportResultSummary,
 } from "@/components/modals/HtmImportResultModal";
-import type { CollectionGeminiLine } from "@/lib/collectionOrderGeminiSchema";
 import {
   applyPesoTotalToLine,
   applyUnidadesTotalesToLine,
@@ -130,13 +123,6 @@ import {
   isIncompleteCollectionRemote,
 } from "@/lib/collectionOrderLineMerge";
 import { supabase } from "@/lib/supabase";
-import { prepareGeminiAttachment } from "@/lib/geminiClientAttachment";
-import { postCollectionOrderGemini } from "@/lib/geminiCollectionOrderApi";
-import { toRefsBultosOnlyLines } from "@/lib/geminiRefsBultosMode";
-import { remapWeightMisfiledAsWidth } from "@/lib/collectionOrderGeminiPostProcess";
-import {
-  recordGeminiRequestSuccess,
-} from "@/lib/geminiClientUsage";
 
 const generateId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -161,16 +147,6 @@ function collectionOrderClientHint(o: CollectionOrder): string | undefined {
     .join(" · ");
   return hint || undefined;
 }
-
-const makeEmptyGeminiJob = (): CollectionOrderGeminiJobState => ({
-  input: "",
-  history: [],
-  busy: false,
-  errorBanner: null,
-  pendingFileName: null,
-  lastLines: [],
-  usageSummary: null,
-});
 
 function sanitizeIntegerInput(raw: string): string {
   const digitsOnly = raw.replace(/\D+/g, "");
@@ -252,15 +228,8 @@ function CollectionOrderAiAnalyzingStrip(props: {
   dense?: boolean;
   /** Una sola fila: barra flexible + texto (menos alto). */
   inlineRow?: boolean;
-  brand?: "gemini" | "terra";
 }) {
-  const { label, className, dense, inlineRow, brand = "gemini" } = props;
-  const BrandIcon =
-    brand === "terra" ? (
-      <AldeGptTerraIcon size={14} className="shrink-0" />
-    ) : (
-      <GeminiSparkIcon size={14} className="shrink-0" />
-    );
+  const { label, className, dense, inlineRow } = props;
   if (inlineRow) {
     return (
       <div
@@ -274,7 +243,7 @@ function CollectionOrderAiAnalyzingStrip(props: {
             <div className="collection-order-ai-progress-fill" />
           </div>
           <p className="flex shrink-0 items-center gap-1.5 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200">
-            {BrandIcon}
+            <AldeGptTerraIcon size={14} className="shrink-0" />
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-slate-500" aria-hidden />
             <span className="max-w-[14rem] truncate sm:max-w-[20rem]">{label}</span>
           </p>
@@ -299,7 +268,7 @@ function CollectionOrderAiAnalyzingStrip(props: {
             : "mt-1.5 flex items-center gap-2 text-[10px] font-semibold tracking-wide text-slate-700 dark:text-slate-200"
         }
       >
-        {BrandIcon}
+        <AldeGptTerraIcon size={14} className="shrink-0" />
         <Loader2
           className={dense ? "h-3 w-3 shrink-0 animate-spin" : "h-3.5 w-3.5 shrink-0 animate-spin"}
           aria-hidden
@@ -311,14 +280,8 @@ function CollectionOrderAiAnalyzingStrip(props: {
 }
 
 /** Una línea: barra corta + texto (lista de órdenes, poco espacio). */
-function CollectionOrderAiAnalyzingInline(props: {
-  brand?: "gemini" | "terra";
-}) {
-  const brand = props.brand ?? "gemini";
-  const title =
-    brand === "terra"
-      ? `${ALDEGPT_TERRA_DISPLAY_NAME} está analizando el documento`
-      : `${AI_ASSISTANT_DISPLAY_NAME} está analizando el documento`;
+function CollectionOrderAiAnalyzingInline() {
+  const title = `${ALDEGPT_TERRA_DISPLAY_NAME} está analizando el documento`;
   return (
     <div
       className="inline-flex min-w-0 max-w-[11rem] shrink-0 flex-col gap-0.5 rounded-lg border border-slate-200 bg-white px-1.5 py-1 shadow-sm dark:border-slate-600 dark:bg-slate-900 sm:max-w-[13rem]"
@@ -331,11 +294,7 @@ function CollectionOrderAiAnalyzingInline(props: {
         <div className="collection-order-ai-progress-fill" />
       </div>
       <span className="flex items-center gap-1 text-[8px] font-semibold leading-none tracking-wide text-slate-600 dark:text-slate-300">
-        {brand === "terra" ? (
-          <AldeGptTerraIcon size={10} className="shrink-0" />
-        ) : (
-          <GeminiSparkIcon size={10} className="shrink-0" />
-        )}
+        <AldeGptTerraIcon size={10} className="shrink-0" />
         <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin" aria-hidden />
         <span className="truncate">Analizando…</span>
       </span>
@@ -551,7 +510,6 @@ export function CollectionOrderModule({
     null,
   );
   const [unlinkBusy, setUnlinkBusy] = useState(false);
-  const [geminiOpen, setGeminiOpen] = useState(false);
   const [chatGptOpen, setChatGptOpen] = useState(false);
   const [terraJobByOrderId, setTerraJobByOrderId] = useState<
     Record<
@@ -562,9 +520,6 @@ export function CollectionOrderModule({
         progress: { current: number; total: number } | null;
       }
     >
-  >({});
-  const [geminiJobByOrderId, setGeminiJobByOrderId] = useState<
-    Record<string, CollectionOrderGeminiJobState>
   >({});
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [unresolvedRefByRow, setUnresolvedRefByRow] = useState<
@@ -604,7 +559,7 @@ export function CollectionOrderModule({
   const ordersRef = useRef<CollectionOrder[]>([]);
   const isOrderSavingRef = useRef(false);
   const saveGenerationRef = useRef(0);
-  /** OR con extracción Terra/Alde.IA en curso: no autosave ni ecos vacíos. */
+  /** OR con extracción Terra en curso: no autosave ni ecos vacíos. */
   const extractBusyOrderIdsRef = useRef<Set<string>>(new Set());
   const lastSavedOrderHashRef = useRef("");
   const lastRemoteOrderHashRef = useRef("");
@@ -881,7 +836,7 @@ export function CollectionOrderModule({
           });
           if (!ok) {
             alert(
-              "No se pudo guardar la OR al volver a la lista. Revisá la conexión e intentá de nuevo con «Guardar borrador».",
+              "No se pudo guardar la OR al volver a la lista. Revisá la conexión e intentá de nuevo con «Guardar».",
             );
             return;
           }
@@ -905,29 +860,6 @@ export function CollectionOrderModule({
   const exitListSelectMode = () => {
     setListSelectMode(false);
     setSelectedOrderIds({});
-  };
-
-  const getGeminiJob = (orderId: string): CollectionOrderGeminiJobState => {
-    return geminiJobByOrderId[orderId] ?? makeEmptyGeminiJob();
-  };
-
-  const patchGeminiJob = (orderId: string, patch: Partial<CollectionOrderGeminiJobState>) => {
-    if (patch.busy === true) {
-      extractBusyOrderIdsRef.current.add(orderId);
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
-        autoSaveTimerRef.current = null;
-      }
-    } else if (patch.busy === false) {
-      extractBusyOrderIdsRef.current.delete(orderId);
-    }
-    setGeminiJobByOrderId((prev) => {
-      const current = prev[orderId] ?? makeEmptyGeminiJob();
-      return {
-        ...prev,
-        [orderId]: { ...current, ...patch },
-      };
-    });
   };
 
   const updateEditing = (patch: Partial<CollectionOrder>) => {
@@ -1018,7 +950,7 @@ export function CollectionOrderModule({
         ...prev,
         lines: prev.lines.map((r) => {
           if (r.id !== rowId) return r;
-          // No pisar cantidades/peso ya puestos por Terra / Alde.IA / el usuario.
+          // No pisar cantidades/peso ya puestos por Terra / el usuario.
           const next = { ...r };
           for (const [key, value] of Object.entries(patch)) {
             if (value === undefined || value === null || value === "") continue;
@@ -1623,11 +1555,6 @@ export function CollectionOrderModule({
       }
       const deletedSet = new Set(deletedIds);
       setOrders((prev) => prev.filter((x) => !deletedSet.has(x.id)));
-      setGeminiJobByOrderId((prev) => {
-        const next = { ...prev };
-        for (const id of deletedIds) delete next[id];
-        return next;
-      });
       setSelectedOrderIds((prev) => {
         const next = { ...prev };
         for (const id of deletedIds) delete next[id];
@@ -2055,7 +1982,7 @@ export function CollectionOrderModule({
 
   /**
    * Aplica líneas Terra a una OR concreta (sigue funcionando si saliste a la lista
-   * u abriste otra orden, como Alde.IA).
+   * u abriste otra orden, como AldeGpt Terra).
    */
   const applyTerraLinesForOrderId = useCallback(
     (targetOrderId: string, incoming: AldeGptTerraLine[]) => {
@@ -2723,12 +2650,8 @@ export function CollectionOrderModule({
 
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {displayedListOrders.map((o) => {
-              const job = geminiJobByOrderId[o.id];
               const terraJob = terraJobByOrderId[o.id];
-              const analyzing =
-                job?.busy === true || terraJob?.busy === true;
-              const analyzingBrand: "gemini" | "terra" =
-                terraJob?.busy === true ? "terra" : "gemini";
+              const analyzing = terraJob?.busy === true;
               const refCount = listReferenciasCount(o.lines);
               const bultosTot = orderDisplayBultos(o);
               const refWord = refCount === 1 ? "referencia" : "referencias";
@@ -2799,9 +2722,7 @@ export function CollectionOrderModule({
                           En bodega
                         </span>
                       ) : null}
-                      {analyzing && (
-                        <CollectionOrderAiAnalyzingInline brand={analyzingBrand} />
-                      )}
+                      {analyzing && <CollectionOrderAiAnalyzingInline />}
                     </div>
                     {o.proveedor?.trim() && (
                       <p className="mt-1 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
@@ -2985,280 +2906,7 @@ export function CollectionOrderModule({
   const maxExistingNumber = Math.max(0, ...orders.map((o) => parseOrderNumber(o.numero)));
   const suggestedNumber = String(maxExistingNumber + 1);
   const orderId = e.id;
-  const geminiJob = getGeminiJob(orderId);
   const terraJob = getTerraJob(orderId);
-
-  const sendToGemini = async (args: {
-    text: string;
-    file: File | null;
-    onlyRefsBultos?: boolean;
-  }) => {
-    const text = String(args.text ?? "").trim();
-    const f = args.file;
-    const onlyRefsBultos = args.onlyRefsBultos === true;
-    if (!text && !f) return;
-
-    const userVisible = [text, f ? `📎 ${f.name}` : ""].filter(Boolean).join("\n");
-    const nextHistory = [...geminiJob.history, { role: "user", text: userVisible } as const];
-    patchGeminiJob(orderId, {
-      errorBanner: null,
-      busy: true,
-      history: nextHistory,
-      pendingFileName: f ? f.name : null,
-    });
-
-    const contextHint =
-      e.lines.map((r) => String(r.referencia ?? "").trim()).filter(Boolean).length > 0
-        ? `Referencias ya cargadas en la orden (no duplicar salvo corrección): ${e.lines
-            .map((r) => String(r.referencia ?? "").trim())
-            .filter(Boolean)
-            .slice(0, 40)
-            .join(", ")}${e.lines.filter((r) => String(r.referencia ?? "").trim()).length > 40 ? "…" : ""}`
-        : undefined;
-
-    try {
-      const filePromise =
-        f != null
-          ? prepareGeminiAttachment(f, f.type || "application/octet-stream")
-          : Promise.resolve(undefined);
-      const [sessionOutcome, fileOutcome] = await Promise.allSettled([
-        supabase.auth.getSession(),
-        filePromise,
-      ]);
-
-      if (sessionOutcome.status === "rejected") {
-        patchGeminiJob(orderId, {
-          errorBanner: { text: "No se pudo comprobar la sesión. Reintenta." },
-          busy: false,
-        });
-        return;
-      }
-      if (fileOutcome.status === "rejected") {
-        const reason = fileOutcome.reason;
-        const detail =
-          reason instanceof Error && reason.message
-            ? reason.message
-            : "No se pudo leer o optimizar el archivo adjunto.";
-        patchGeminiJob(orderId, {
-          errorBanner: { text: detail },
-          busy: false,
-        });
-        return;
-      }
-
-      const token = sessionOutcome.value.data.session?.access_token;
-      if (!token) {
-        patchGeminiJob(orderId, {
-          errorBanner: { text: "Sesión expirada. Vuelve a iniciar sesión.", code: 401 },
-          busy: false,
-        });
-        return;
-      }
-
-      const outboundMessage = (text || "Analiza el documento adjunto y extrae las líneas.").slice(
-        0,
-        28_000,
-      );
-
-      const res = await postCollectionOrderGemini(token, {
-        message: outboundMessage,
-        history: nextHistory.map((t) => ({
-          role: t.role,
-          text: String(t.text ?? "").slice(0, 6500),
-        })),
-        attachment: fileOutcome.value,
-        orderNumber: String(e.numero ?? "").trim() || undefined,
-        contextHint,
-        viewerDisplayName: String(userDisplayName ?? "").trim() || undefined,
-        extractMode: onlyRefsBultos ? "refsBultosOnly" : undefined,
-      });
-
-      let data: {
-        error?: string;
-        reply?: string;
-        lines?: CollectionGeminiLine[];
-        usage?: {
-          promptTokenCount?: number;
-          candidatesTokenCount?: number;
-          totalTokenCount?: number;
-        } | null;
-        processing?: {
-          cartonesFooter?: number | null;
-          bultosSum?: number;
-          extractionIncomplete?: boolean;
-          extractionIncompleteReason?: string;
-        };
-      };
-      try {
-        const ct = res.headers.get("content-type") || "";
-        if (!ct.toLowerCase().includes("application/json")) {
-          throw new Error("non_json_response");
-        }
-        data = (await res.json()) as typeof data;
-      } catch {
-        const hint =
-          res.status === 504
-            ? "Se agotó el tiempo de espera (504). Probá con un PDF más liviano o dividido, o reintenta en unos segundos."
-            : "La respuesta no fue JSON (posible gateway/proxy). Reintenta en unos segundos.";
-        patchGeminiJob(orderId, {
-          errorBanner: {
-            text: `Error ${res.status}. ${hint}`,
-            code: res.status,
-          },
-          busy: false,
-        });
-        return;
-      }
-
-      if (!res.ok) {
-        patchGeminiJob(orderId, {
-          errorBanner: { text: data.error || `Error ${res.status}`, code: res.status },
-          busy: false,
-        });
-        return;
-      }
-
-      const reply = String(data.reply ?? "");
-      const rawLines = Array.isArray(data.lines) ? data.lines : [];
-      const lines = onlyRefsBultos ? toRefsBultosOnlyLines(rawLines) : rawLines;
-      const usageSummary = recordGeminiRequestSuccess(data.usage ?? null);
-
-      if (!onlyRefsBultos && data.processing?.extractionIncomplete) {
-        const reason = String(data.processing.extractionIncompleteReason ?? "").trim();
-        patchGeminiJob(orderId, {
-          errorBanner: {
-            text: reason
-              ? `Extracción incompleta: ${reason}`
-              : "Extracción incompleta: revisá bultos, descripción o peso en algunas filas.",
-          },
-        });
-      }
-
-      patchGeminiJob(orderId, {
-        lastLines: lines,
-        usageSummary,
-        history: [...nextHistory, { role: "model", text: reply } as const],
-        pendingFileName: null,
-        busy: false,
-      });
-      applyGeminiLinesToOrder(lines, {
-        cartonesFooter: onlyRefsBultos ? undefined : data.processing?.cartonesFooter,
-      });
-    } catch (err) {
-      const errText =
-        err instanceof DOMException && err.name === "TimeoutError"
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Error de red (revisa tu conexión).";
-      patchGeminiJob(orderId, {
-        errorBanner: { text: errText },
-        busy: false,
-      });
-    }
-  };
-
-  const applyGeminiLinesToOrder = (
-    incoming?: CollectionGeminiLine[],
-    opts?: { cartonesFooter?: number | null },
-  ) => {
-    const source = Array.isArray(incoming)
-      ? incoming
-      : (geminiJobByOrderId[orderId]?.lastLines ?? []);
-    const useful = source.filter(
-      (row) =>
-        row.referencia ||
-        row.descripcion ||
-        row.bultos ||
-        row.unidadesPorBulto ||
-        row.unidadesTotales ||
-        row.pesoUnaPiezaKg ||
-        row.pesoPorBulto ||
-        row.pesoTotalKg ||
-        row.l ||
-        row.w ||
-        row.h ||
-        row.volumenM3 ||
-        row.modelo ||
-        row.paisOrigen ||
-        row.tejido ||
-        row.talla ||
-        row.forro ||
-        row.genero ||
-        row.composicion,
-    );
-    if (useful.length === 0) return;
-
-    const baseOrder =
-      (editingRef.current && editingRef.current.id === orderId
-        ? editingRef.current
-        : ordersRef.current.find((o) => o.id === orderId)) ?? e;
-
-    const mergedLines = [...(baseOrder.lines || [])];
-    const lineIndex = new Map<string, number>();
-    mergedLines.forEach((row, i) => {
-      const key = collectionLineDedupeKey(row.referencia, row.descripcion);
-      if (key) lineIndex.set(key, i);
-    });
-
-    for (const row of useful) {
-      const remapped = remapWeightMisfiledAsWidth(row);
-      const imported = normalizeCollectionOrderLineFromImport(remapped);
-      const normalized: CollectionOrderLine = {
-        id: generateId(),
-        ...imported,
-      };
-      const referencia = imported.referencia;
-      const key = collectionLineDedupeKey(
-        imported.referencia,
-        imported.descripcion,
-      );
-      if (key && lineIndex.has(key)) {
-        const idx = lineIndex.get(key)!;
-        const existingId = mergedLines[idx]!.id;
-        mergedLines[idx] = { ...mergedLines[idx], ...normalized, id: existingId };
-        void runCatalogLookup(existingId, referencia);
-      } else {
-        mergedLines.push(normalized);
-        if (key) lineIndex.set(key, mergedLines.length - 1);
-        void runCatalogLookup(normalized.id, referencia);
-      }
-    }
-
-    const cartones = opts?.cartonesFooter;
-    const cleanedLines = withoutBlankCollectionLines(mergedLines);
-    const nextOrder: CollectionOrder = {
-      ...baseOrder,
-      lines: cleanedLines.length > 0 ? cleanedLines : [],
-      updatedAt: new Date().toISOString(),
-      ...(cartones != null &&
-      cartones > 0 &&
-      (baseOrder.expectedBultos == null || baseOrder.expectedBultos === 0)
-        ? { expectedBultos: Math.round(cartones) }
-        : {}),
-    };
-    patchGeminiJob(orderId, { lastLines: [] });
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-    saveGenerationRef.current += 1;
-    editingRef.current = nextOrder;
-    ordersRef.current = upsertCollectionOrderInList(
-      ordersRef.current,
-      nextOrder,
-    );
-    lastRemoteOrderHashRef.current = JSON.stringify(nextOrder.lines);
-    lastLivePublishedHashRef.current = JSON.stringify(nextOrder.lines);
-    setEditing((prev) => {
-      if (prev && prev.id === orderId) {
-        return nextOrder;
-      }
-      return prev;
-    });
-    setOrders((prev) => upsertCollectionOrderInList(prev, nextOrder));
-    void persistOrder({ order: nextOrder, showAlerts: false });
-  };
 
   const applyTerraLinesToOrder = (incoming: AldeGptTerraLine[]) => {
     applyTerraLinesForOrderId(orderId, incoming);
@@ -3319,31 +2967,15 @@ export function CollectionOrderModule({
             onClick={() => void saveOrder()}
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1f3467] to-[#0f172a] px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-md hover:brightness-110 disabled:opacity-50"
           >
-            <Save className="h-4 w-4" /> Guardar borrador
-          </button>
-          <button
-            type="button"
-            disabled={saveBusy}
-            onClick={() => setGeminiOpen(true)}
-            title={`${AI_ASSISTANT_DISPLAY_NAME}: PDF, imagen o texto`}
-            className={`alde-ia-trigger flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-[#1e1f20] dark:text-slate-100 dark:hover:bg-[#282a2c] ${
-              geminiJob.busy ? "alde-ia-trigger--busy" : ""
-            }`}
-          >
-            {geminiJob.busy ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" aria-hidden />
-            ) : (
-              <GeminiSparkIcon size={18} className="shrink-0" />
-            )}
-            {AI_ASSISTANT_DISPLAY_NAME}
+            <Save className="h-4 w-4" /> Guardar
           </button>
           <button
             type="button"
             disabled={saveBusy}
             onClick={() => setChatGptOpen(true)}
             title={`${ALDEGPT_TERRA_DISPLAY_NAME}: chat y extracción (puedes salir de la OR mientras analiza)`}
-            className={`flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-[#1e1f20] dark:text-slate-100 dark:hover:bg-[#282a2c] ${
-              terraJob.busy ? "alde-ia-trigger--busy" : ""
+            className={`ai-extract-trigger flex items-center gap-2 rounded-full border border-slate-200/90 bg-white px-3.5 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-[#1e1f20] dark:text-slate-100 dark:hover:bg-[#282a2c] ${
+              terraJob.busy ? "ai-extract-trigger--busy" : ""
             }`}
           >
             {terraJob.busy ? (
@@ -3397,24 +3029,6 @@ export function CollectionOrderModule({
           RA» solo se habilita cuando el OR está en bodega (Completado).
         </p>
 
-        {geminiJob.busy && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-slate-200 bg-[#e8f0fe]/95 px-2.5 py-1.5 shadow-md dark:border-slate-600 dark:bg-[#131314]/90"
-          >
-            <CollectionOrderAiAnalyzingStrip
-              inlineRow
-              brand="gemini"
-              label={
-                geminiJob.pendingFileName
-                  ? `${AI_ASSISTANT_DISPLAY_NAME} · analizando ${geminiJob.pendingFileName} (puede tardar hasta 5 min en documentos extensos)…`
-                  : `${AI_ASSISTANT_DISPLAY_NAME} · analizando documento…`
-              }
-            />
-          </div>
-        )}
-
         {terraJob.busy && (
           <div
             role="status"
@@ -3423,7 +3037,6 @@ export function CollectionOrderModule({
           >
             <CollectionOrderAiAnalyzingStrip
               inlineRow
-              brand="terra"
               label={
                 terraJob.pendingFileName
                   ? terraJob.progress && terraJob.progress.total > 1
@@ -4233,21 +3846,6 @@ export function CollectionOrderModule({
         noEligibleTargets={transferTargetsExcluded}
         onCancel={() => setTransferOpen(false)}
         onConfirm={(taskId, merge) => void confirmTransfer(taskId, merge)}
-      />
-
-      <CollectionOrderGeminiPanel
-        open={geminiOpen}
-        onClose={() => setGeminiOpen(false)}
-        orderNumber={String(e.numero ?? "").trim()}
-        viewerDisplayName={userDisplayName}
-        existingReferencias={e.lines
-          .map((r) => String(r.referencia ?? "").trim())
-          .filter(Boolean)
-          .slice(0, 80)}
-        job={geminiJob}
-        onChangeJob={(patch) => patchGeminiJob(orderId, patch)}
-        onSend={sendToGemini}
-        onApplyLines={applyGeminiLinesToOrder}
       />
 
       <GeneralChatGptPanel

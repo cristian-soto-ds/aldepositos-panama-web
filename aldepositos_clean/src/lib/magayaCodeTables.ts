@@ -1,5 +1,5 @@
 /**
- * Tablas de referencia para Alde.IA → CSV Magaya.
+ * Tablas de referencia para AldeGpt Terra → CSV Magaya.
  * Amplía este archivo cuando confirmen códigos nuevos en facturas/packing lists;
  * el modelo las usa como conocimiento estable (no sustituye leer el documento).
  */

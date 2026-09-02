@@ -194,7 +194,7 @@ function PanelPageInner() {
   const [deleteRaBusy, setDeleteRaBusy] = useState(false);
   /**
    * Mantener Orden de recolección montado tras la 1ª visita para que
-   * AldeGpt Terra / Alde.IA sigan extrayendo al cambiar de módulo.
+   * AldeGpt Terra siga extrayendo al cambiar de módulo.
    */
   const [collectionOrdersKeptAlive, setCollectionOrdersKeptAlive] =
     useState(false);

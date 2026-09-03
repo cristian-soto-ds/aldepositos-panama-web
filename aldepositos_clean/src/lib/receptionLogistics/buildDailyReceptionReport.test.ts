@@ -48,11 +48,17 @@ function dayFilter(
 describe("buildDailyReceptionReport", () => {
   it("excluye OR con llegada de ayer del filtro de hoy", () => {
     const trucks = [
-      makeTruck({ createdAt: isoOnPanamaDay(2026, 7, 5) }),
+      makeTruck({
+        createdAt: isoOnPanamaDay(2026, 7, 5),
+        queuedAt: isoOnPanamaDay(2026, 7, 5),
+        sortOrder: Date.parse(isoOnPanamaDay(2026, 7, 5)),
+      }),
       makeTruck({
         id: "or-co-test-2",
         plate: "OR #2720",
         createdAt: isoOnPanamaDay(2026, 7, 6),
+        queuedAt: isoOnPanamaDay(2026, 7, 6),
+        sortOrder: Date.parse(isoOnPanamaDay(2026, 7, 6)),
       }),
     ];
 
@@ -62,10 +68,31 @@ describe("buildDailyReceptionReport", () => {
     expect(rows[0]?.orNumero).toBe("2720");
   });
 
+  it("usa queuedAt (no createdAt) como hora de fila", () => {
+    const queuedAt = isoOnPanamaDay(2026, 7, 6, 9);
+    const trucks = [
+      makeTruck({
+        createdAt: isoOnPanamaDay(2026, 7, 5, 8),
+        queuedAt,
+        sortOrder: Date.parse(queuedAt),
+        rampAssignedAt: isoOnPanamaDay(2026, 7, 6, 9.5),
+        completedAt: isoOnPanamaDay(2026, 7, 6, 11),
+      }),
+    ];
+
+    const { rows } = buildDailyReceptionReport(trucks, dayFilter(2026, 7, 6));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.queuedAtIso).toBe(queuedAt);
+    expect(rows[0]?.horaLlegada).not.toBe("—");
+    expect(rows[0]?.minutosEnFila).toBe(30);
+  });
+
   it("excluye OR completada ayer del filtro de hoy por criterio completado", () => {
     const trucks = [
       makeTruck({
         createdAt: isoOnPanamaDay(2026, 7, 5),
+        queuedAt: isoOnPanamaDay(2026, 7, 5),
         completedAt: isoOnPanamaDay(2026, 7, 5, 14),
         status: RECEPTION_STATUS.COMPLETADO,
       }),
@@ -73,6 +100,7 @@ describe("buildDailyReceptionReport", () => {
         id: "or-co-test-2",
         plate: "OR #2720",
         createdAt: isoOnPanamaDay(2026, 7, 6, 8),
+        queuedAt: isoOnPanamaDay(2026, 7, 6, 8),
         completedAt: isoOnPanamaDay(2026, 7, 6, 11),
         status: RECEPTION_STATUS.COMPLETADO,
       }),
@@ -89,11 +117,17 @@ describe("buildDailyReceptionReport", () => {
 
   it("incluye OR en ambos extremos de un rango multi-día", () => {
     const trucks = [
-      makeTruck({ createdAt: isoOnPanamaDay(2026, 7, 4) }),
+      makeTruck({
+        createdAt: isoOnPanamaDay(2026, 7, 4),
+        queuedAt: isoOnPanamaDay(2026, 7, 4),
+        sortOrder: Date.parse(isoOnPanamaDay(2026, 7, 4)),
+      }),
       makeTruck({
         id: "or-co-test-2",
         plate: "OR #2720",
         createdAt: isoOnPanamaDay(2026, 7, 6),
+        queuedAt: isoOnPanamaDay(2026, 7, 6),
+        sortOrder: Date.parse(isoOnPanamaDay(2026, 7, 6)),
       }),
     ];
 
@@ -113,12 +147,14 @@ describe("buildDailyReceptionReport", () => {
       makeTruck({
         status: RECEPTION_STATUS.EN_FILA,
         createdAt: isoOnPanamaDay(2026, 7, 6),
+        queuedAt: isoOnPanamaDay(2026, 7, 6),
       }),
       makeTruck({
         id: "or-co-test-2",
         plate: "OR #2720",
         status: RECEPTION_STATUS.COMPLETADO,
         createdAt: isoOnPanamaDay(2026, 7, 6, 9),
+        queuedAt: isoOnPanamaDay(2026, 7, 6, 9),
         completedAt: isoOnPanamaDay(2026, 7, 6, 12),
       }),
     ];
@@ -136,6 +172,7 @@ describe("buildDailyReceptionReport", () => {
     const trucks = [
       makeTruck({
         createdAt: isoOnPanamaDay(2026, 7, 6),
+        queuedAt: isoOnPanamaDay(2026, 7, 6),
         source: "import",
         collectionOrderId: undefined,
         id: "manual-import-1",
@@ -147,6 +184,7 @@ describe("buildDailyReceptionReport", () => {
         collectionOrderId: undefined,
         source: "import",
         createdAt: isoOnPanamaDay(2026, 7, 6),
+        queuedAt: isoOnPanamaDay(2026, 7, 6),
       }),
     ];
 

@@ -5,6 +5,14 @@ import {
   isCollectionOrderReceptionTruck,
   isGroupedReceptionTruck,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import {
+  RECEPTION_STATUS,
+  isRampReceptionStatus,
+} from "@/lib/receptionLogistics/config";
+import {
+  formatReceptionClock,
+  resolveQueuedAt,
+} from "@/lib/receptionLogistics/receptionTiming";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 
 export type ReceptionCardDensity = "normal" | "compact" | "dense";
@@ -107,6 +115,33 @@ function resolveTitleScale(
   return isTv ? "2xl" : "xl";
 }
 
+function buildTimingLine(
+  truck: ReceptionTruck,
+  variant: "operator" | "tv",
+): string | null {
+  const fila = formatReceptionClock(resolveQueuedAt(truck));
+  const rampa = formatReceptionClock(truck.rampAssignedAt);
+  const listo = formatReceptionClock(
+    truck.completedAt ??
+      (truck.status === RECEPTION_STATUS.COMPLETADO ? truck.updatedAt : undefined),
+  );
+  const onRamp = isRampReceptionStatus(truck.status);
+  const done = truck.status === RECEPTION_STATUS.COMPLETADO;
+
+  if (variant === "tv") {
+    if (done && listo !== "—") return `Listo ${listo}`;
+    if (onRamp && rampa !== "—") return `Rampa ${rampa}`;
+    if (fila !== "—") return `Fila ${fila}`;
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (fila !== "—") parts.push(`Fila ${fila}`);
+  if ((onRamp || done) && rampa !== "—") parts.push(`Rampa ${rampa}`);
+  if (done && listo !== "—") parts.push(`Listo ${listo}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 type ReceptionKanbanCardContentProps = {
   truck: ReceptionTruck;
   /** Posición en fila (1 = primero en entrar). Solo columna «En Fila». */
@@ -146,6 +181,7 @@ export function ReceptionKanbanCardContent({
   const titleScale = resolveTitleScale(providerTitle, density, isTv);
   const titleClass = `break-words font-extrabold leading-snug tracking-tight text-inherit ${PROVIDER_SCALE_CLASS[titleScale]}`;
   const orClass = `break-words font-bold leading-snug tabular-nums text-inherit ${OR_SCALE_CLASS[titleScale]}`;
+  const timingLine = buildTimingLine(truck, variant);
 
   const queueSize = isDense
     ? "h-6 w-6 text-[10px] rounded"
@@ -189,7 +225,6 @@ export function ReceptionKanbanCardContent({
               </p>
             ) : null}
 
-            {/* Imagen 1: un solo pedido → «Camión» + OR */}
             {singleOr ? (
               <p className={`mt-1 ${orClass}`}>
                 <span className="font-extrabold opacity-55">Camión</span>
@@ -199,7 +234,6 @@ export function ReceptionKanbanCardContent({
               </p>
             ) : null}
 
-            {/* Imagen 2/3: unificado → listado vertical OR + bultos; total a la derecha */}
             {isUnified && lines.length > 0 ? (
               <div className="mt-1.5 min-w-0">
                 <p
@@ -219,31 +253,31 @@ export function ReceptionKanbanCardContent({
                   {lines.map((line, i) => {
                     const lineClient = displayLabel(line.cliente);
                     return (
-                    <li
-                      key={`${line.numero}-${line.bultos}-${i}`}
-                      className={`flex items-center gap-2 px-2.5 ${orClass} ${
-                        i > 0
-                          ? "border-t border-black/[0.06] dark:border-white/10"
-                          : ""
-                      } ${isDense ? "py-1" : "py-1.5"}`}
-                    >
-                      <span className="w-[5.75rem] shrink-0 truncate sm:w-[6.5rem]">
-                        <span className="font-bold opacity-55">OR</span>{" "}
-                        <span className="font-extrabold">#{line.numero}</span>
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 truncate text-left font-semibold tracking-tight opacity-80"
-                        title={lineClient ?? undefined}
+                      <li
+                        key={`${line.numero}-${line.bultos}-${i}`}
+                        className={`flex items-center gap-2 px-2.5 ${orClass} ${
+                          i > 0
+                            ? "border-t border-black/[0.06] dark:border-white/10"
+                            : ""
+                        } ${isDense ? "py-1" : "py-1.5"}`}
                       >
-                        {lineClient ?? ""}
-                      </span>
-                      <span className="shrink-0 tabular-nums">
-                        <span className="font-extrabold">{line.bultos}</span>{" "}
-                        <span className="text-[9px] font-bold uppercase tracking-wide opacity-45">
-                          bult
+                        <span className="w-[5.75rem] shrink-0 truncate sm:w-[6.5rem]">
+                          <span className="font-bold opacity-55">OR</span>{" "}
+                          <span className="font-extrabold">#{line.numero}</span>
                         </span>
-                      </span>
-                    </li>
+                        <span
+                          className="min-w-0 flex-1 truncate text-left font-semibold tracking-tight opacity-80"
+                          title={lineClient ?? undefined}
+                        >
+                          {lineClient ?? ""}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          <span className="font-extrabold">{line.bultos}</span>{" "}
+                          <span className="text-[9px] font-bold uppercase tracking-wide opacity-45">
+                            bult
+                          </span>
+                        </span>
+                      </li>
                     );
                   })}
                 </ul>
@@ -263,6 +297,21 @@ export function ReceptionKanbanCardContent({
                 className={`mt-0.5 font-medium uppercase tracking-wide text-inherit opacity-55 ${OR_SCALE_CLASS[titleScale]}`}
               >
                 RA {truck.ra}
+              </p>
+            ) : null}
+
+            {timingLine ? (
+              <p
+                className={`mt-1.5 font-semibold tabular-nums tracking-tight text-inherit opacity-55 ${
+                  isDense
+                    ? "text-[9px]"
+                    : isCompact || isTv
+                      ? "text-[10px]"
+                      : "text-[11px]"
+                }`}
+                title={timingLine}
+              >
+                {timingLine}
               </p>
             ) : null}
           </div>

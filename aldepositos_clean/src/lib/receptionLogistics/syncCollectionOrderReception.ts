@@ -4,6 +4,10 @@ import {
   RECEPTION_STATUS,
   isRampReceptionStatus,
 } from "@/lib/receptionLogistics/config";
+import {
+  RECEPTION_SORT_EPOCH_MIN,
+  queuedAtFromHints,
+} from "@/lib/receptionLogistics/receptionTiming";
 
 export function receptionTruckIdForCollectionOrder(orderId: string): string {
   return `or-co-${orderId}`;
@@ -31,9 +35,6 @@ export function orderBultos(order: CollectionOrder): number {
   }
   return sum;
 }
-
-/** sortOrder en ms; valores bajos son legado (número OR usado por error). */
-const RECEPTION_SORT_EPOCH_MIN = 1_000_000_000_000;
 
 /**
  * Posición en fila (FIFO del recepcionista).
@@ -98,6 +99,13 @@ export function collectionOrderToReceptionTruck(
   const numero = orderDisplayNumero(order);
   const status = order.receptionStatus;
   const isRamp = isRampReceptionStatus(status);
+  const sortOrder = resolveReceptionSortOrder(
+    existing,
+    order.receptionQueuedAt,
+  );
+  const queuedAt =
+    queuedAtFromHints(existing, order.receptionQueuedAt) ??
+    new Date(sortOrder).toISOString();
 
   return {
     id: receptionTruckIdForCollectionOrder(order.id),
@@ -108,10 +116,7 @@ export function collectionOrderToReceptionTruck(
     expectedBultos: orderBultos(order),
     notes: order.expedidor?.trim() || order.notes?.trim() || undefined,
     status,
-    sortOrder: resolveReceptionSortOrder(
-      existing,
-      order.receptionQueuedAt,
-    ),
+    sortOrder,
     collectionOrderId: order.id,
     collectionOrderIds: [order.id],
     orderNumeros: [numero],
@@ -123,6 +128,7 @@ export function collectionOrderToReceptionTruck(
       },
     ],
     source: "collection_order",
+    queuedAt,
     rampAssignedAt: isRamp
       ? (existing?.rampAssignedAt ?? now)
       : existing?.rampAssignedAt,
@@ -204,6 +210,12 @@ export function buildGroupReceptionTruck(
     return min == null || t < min ? t : min;
   }, null as number | null);
 
+  const queueHint = earliestReceptionQueuedAt(withStatus);
+  const sortOrder = resolveReceptionSortOrder(existing, queueHint);
+  const queuedAt =
+    queuedAtFromHints(existing, queueHint) ??
+    new Date(sortOrder).toISOString();
+
   return {
     id: meta.groupId,
     /** Título operativo: proveedor (no placa). */
@@ -223,15 +235,13 @@ export function buildGroupReceptionTruck(
       .slice(0, 2)
       .join(" · ") || undefined,
     status,
-    sortOrder: resolveReceptionSortOrder(
-      existing,
-      earliestReceptionQueuedAt(withStatus),
-    ),
+    sortOrder,
     collectionOrderId: ids[0],
     collectionOrderIds: ids,
     orderNumeros: numeros,
     orderLines,
     source: "collection_order",
+    queuedAt,
     rampAssignedAt: isRamp
       ? (existing?.rampAssignedAt ?? now)
       : existing?.rampAssignedAt,

@@ -46,11 +46,31 @@ const MAGAYA_TIPO_EMBALAJE = "Cartón";
 const MAGAYA_UNIDAD = "PZA";
 const MAGAYA_FORRO_DEFAULT = "N/A";
 
-/** Evita que Excel interprete rangos tipo 1-15 como fecha; punto final solo si hay texto. */
-function tallaParaCsvMagaya(raw: string): string {
+/** Mayúsculas cerradas (ES) para textos Magaya (excepto Tipo de Embalaje = «Cartón»). */
+export function toMagayaExportUpper(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLocaleUpperCase("es");
+}
+
+/**
+ * Talla Magaya: solo primera y última del rango.
+ * Ej. `3-5-7-9-11-13-15.` → `3-15.`
+ * Punto final para que Excel no interprete el rango como fecha.
+ */
+export function tallaParaCsvMagaya(raw: string): string {
   const t = sanitizeMagayaOptionalText(raw, "talla");
   if (!t) return "";
-  return t.endsWith(".") ? t : `${t}.`;
+  const core = t.replace(/\.\s*$/, "").trim();
+  if (!core) return "";
+  const parts = core
+    .split(/[-–—]/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const collapsed =
+    parts.length >= 2 ? `${parts[0]}-${parts[parts.length - 1]}` : core;
+  const upper = toMagayaExportUpper(collapsed);
+  return upper.endsWith(".") ? upper : `${upper}.`;
 }
 
 function parseNum(v: unknown): number {
@@ -96,25 +116,27 @@ export function buildMagayaRowValues(
   const pesoColumn = pesoMagayaIgualCsvInventario(row);
   const cubicaje = cubicajeTotalM3(row, bultos, l, w, h);
 
-  const modelo = sanitizeMagayaOptionalText(
-    String(row.magayaModelo ?? "").trim(),
-    "modelo",
+  const modelo = toMagayaExportUpper(
+    sanitizeMagayaOptionalText(String(row.magayaModelo ?? "").trim(), "modelo"),
   );
-  const pais = sanitizeMagayaOptionalText(
-    String(row.paisOrigen ?? "").trim(),
-    "pais",
+  const pais = toMagayaExportUpper(
+    sanitizeMagayaOptionalText(String(row.paisOrigen ?? "").trim(), "pais"),
   );
-  const descripcion = normalizeJeansDescripcion(
-    String(row.descripcion ?? "").trim(),
+  const descripcion = toMagayaExportUpper(
+    normalizeJeansDescripcion(String(row.descripcion ?? "").trim()),
   );
-  const composicion = sanitizeMagayaOptionalText(
-    String(row.composicion ?? "").trim(),
-    "composicion",
+  const composicion = toMagayaExportUpper(
+    sanitizeMagayaOptionalText(
+      String(row.composicion ?? "").trim(),
+      "composicion",
+    ),
   );
-  const tejido = rejectTejidoInferredFromProduct(
-    sanitizeMagayaOptionalText(String(row.tejido ?? "").trim(), "tejido"),
-    descripcion,
-    composicion,
+  const tejido = toMagayaExportUpper(
+    rejectTejidoInferredFromProduct(
+      sanitizeMagayaOptionalText(String(row.tejido ?? "").trim(), "tejido"),
+      descripcion,
+      composicion,
+    ),
   );
   const talla = tallaParaCsvMagaya(String(row.talla ?? ""));
   const forroRaw = sanitizeMagayaOptionalText(
@@ -122,15 +144,17 @@ export function buildMagayaRowValues(
     "modelo",
   );
   // Forro Magaya: N/A solo si no hay valor real (requisito plantilla).
-  const forro = forroRaw || MAGAYA_FORRO_DEFAULT;
+  const forro = toMagayaExportUpper(forroRaw || MAGAYA_FORRO_DEFAULT);
   const generoRaw = sanitizeMagayaOptionalText(
     String(row.genero ?? "").trim(),
     "genero",
   );
-  const genero = generoRaw ? generoRaw.toLocaleUpperCase("es") : "";
+  let genero = generoRaw ? toMagayaExportUpper(generoRaw) : "";
+  // Magaya: CABALLERO se exporta siempre como HOMBRE.
+  if (genero === "CABALLERO") genero = "HOMBRE";
 
   return [
-    String(row.referencia ?? "").trim(),
+    toMagayaExportUpper(String(row.referencia ?? "").trim()),
     descripcion,
     modelo,
     MAGAYA_TIPO_EMBALAJE,

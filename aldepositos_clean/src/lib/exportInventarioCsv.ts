@@ -32,7 +32,15 @@ const HEADERS = [
 
 /** Valores fijos por fila para integraciones que exigen unidad y tipo de embalaje. */
 const CSV_UNIDAD_FIJA = "PZA";
+/** Tipo de embalaje: se mantiene «Cartón» (no mayúsculas cerradas). */
 const CSV_TIPO_EMBALAJE_FIJO = "Cartón";
+
+/** Mayúsculas cerradas (ES) en textos del CSV / Excel inventario (excepto tipo de embalaje). */
+function toInventarioExportUpper(value: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLocaleUpperCase("es");
+}
 
 function parseNum(v: unknown): number {
   if (v === null || v === undefined || v === "") return 0;
@@ -140,9 +148,9 @@ function buildLineCells(
   const vol = volumenM3ForRow(row, bultos, l, w, h, reempaque);
 
   return [
-    numero.trim(),
-    String(row.referencia ?? "").trim(),
-    String(row.descripcion ?? "").trim(),
+    toInventarioExportUpper(numero.trim()),
+    toInventarioExportUpper(String(row.referencia ?? "").trim()),
+    toInventarioExportUpper(String(row.descripcion ?? "").trim()),
     csvNum(bultos),
     csvNum(cantidad),
     csvMeasureNum(l),
@@ -195,9 +203,11 @@ export function buildInventarioExcelRowValues(
   })();
 
   return [
-    numeroCell,
-    String(row.referencia ?? "").trim(),
-    String(row.descripcion ?? "").trim(),
+    typeof numeroCell === "string"
+      ? toInventarioExportUpper(numeroCell)
+      : numeroCell,
+    toInventarioExportUpper(String(row.referencia ?? "").trim()),
+    toInventarioExportUpper(String(row.descripcion ?? "").trim()),
     bultos,
     cantidad,
     roundUpMeasure(l),

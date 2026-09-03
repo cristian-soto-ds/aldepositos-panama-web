@@ -12,7 +12,6 @@ import {
   Loader2,
   Monitor,
   Truck,
-  FileSpreadsheet,
 } from "lucide-react";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import {
@@ -33,18 +32,12 @@ import {
   parseDateInputPanama,
   presetDateRange,
   isIsoInPanamaRange,
-  type ReceptionReportFilter,
   type ReceptionReportPreset,
 } from "@/lib/receptionLogistics/receptionReportFilter";
-import {
-  DailyReceptionReportError,
-  generateAndDownloadDailyReceptionReport,
-} from "@/lib/receptionLogistics/generateDailyReceptionReport";
 import { printWarehouseReceipt } from "@/lib/receptionLogistics/warehouseReceipt";
 import { TruckDirectionTvModule } from "@/components/truck-direction/TruckDirectionTvModule";
 import { ReceptionKanbanCardContent } from "@/components/truck-direction/ReceptionKanbanCardContent";
 import type { ReceptionCardDensity } from "@/components/truck-direction/ReceptionKanbanCardContent";
-import { ReceptionReportExportModal } from "@/components/modals/ReceptionReportExportModal";
 import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 import { RampOccupancyTvCard } from "@/components/reception/RampOccupancyControls";
 import {
@@ -99,8 +92,6 @@ export function TruckDirectionModule() {
   const { occupancy: rampOccupancy } = useRampOccupancy();
   const [moveBusy, setMoveBusy] = useState<string | null>(null);
   const [tvModeOpen, setTvModeOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportBusy, setReportBusy] = useState(false);
   const [completedFilter, setCompletedFilter] =
     useState<CompletedColumnFilter>("today");
   const [completedFilterDate, setCompletedFilterDate] = useState(() =>
@@ -181,36 +172,6 @@ export function TruckDirectionModule() {
     [trucks, setTrucks],
   );
 
-  const handleExportReport = useCallback(
-    async (filter: ReceptionReportFilter) => {
-      setReportBusy(true);
-      try {
-        const result = await generateAndDownloadDailyReceptionReport(trucks, {
-          filter,
-          exportedByLabel: "ALDEPOSITOS",
-        });
-        setReportOpen(false);
-        const terraNote = result.withTerra
-          ? " Incluye resumen AldeGpt Terra."
-          : " (sin resumen IA; el detalle Excel sí se descargó).";
-        alert(
-          `Excel listo: ${result.rowCount} OR exportadas.${terraNote}`,
-        );
-      } catch (e) {
-        const msg =
-          e instanceof DailyReceptionReportError
-            ? e.message
-            : e instanceof Error
-              ? e.message
-              : "No se pudo generar el Excel.";
-        alert(msg);
-      } finally {
-        setReportBusy(false);
-      }
-    },
-    [trucks],
-  );
-
   return (
     <>
       {tvModeOpen ? (
@@ -223,16 +184,6 @@ export function TruckDirectionModule() {
         </div>
       ) : null}
 
-      <ReceptionReportExportModal
-        open={reportOpen}
-        trucks={trucks}
-        busy={reportBusy}
-        onCancel={() => {
-          if (!reportBusy) setReportOpen(false);
-        }}
-        onConfirm={(filter) => void handleExportReport(filter)}
-      />
-
       <div className="flex h-full min-h-0 flex-col gap-4 p-3 sm:p-4 md:p-6">
       <header className="shrink-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -243,14 +194,6 @@ export function TruckDirectionModule() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setReportOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-800 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-            >
-              <FileSpreadsheet className="h-4 w-4" />
-              Excel camiones
-            </button>
             <button
               type="button"
               onClick={() => setTvModeOpen(true)}
@@ -435,7 +378,6 @@ export function TruckDirectionModule() {
       )}
 
       <p className="shrink-0 text-center text-[10px] text-slate-400 dark:text-slate-500">
-        <FileSpreadsheet className="mr-1 inline h-3 w-3" />
         Arrastra tarjetas entre columnas · Recibo automático al asignar rampa
         {" · "}
         <button

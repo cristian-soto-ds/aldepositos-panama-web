@@ -30,6 +30,7 @@ import {
   publishReceptionTruckLive,
   subscribeReceptionLive,
 } from "@/lib/receptionLogistics/receptionLiveSync";
+import { RECEPTION_SORT_EPOCH_MIN } from "@/lib/receptionLogistics/receptionTiming";
 
 function findLocalTruck(id: string): ReceptionTruck | null {
   return readLocalSnapshot().trucks.find((t) => t.id === id) ?? null;
@@ -616,6 +617,12 @@ export async function updateReceptionTruckStatus(
     ...prev,
     status,
     updatedAt: now,
+    // Conserva la hora de fila; si faltaba, sella desde sortOrder/ahora.
+    queuedAt:
+      prev.queuedAt ??
+      (prev.sortOrder >= RECEPTION_SORT_EPOCH_MIN
+        ? new Date(prev.sortOrder).toISOString()
+        : undefined),
     // Sella la hora de atención al entrar a una rampa o carretillado.
     rampAssignedAt: isRamp ? (prev.rampAssignedAt ?? now) : prev.rampAssignedAt,
     // Conserva qué rampa/carretillado se usó (persiste aunque luego se complete).

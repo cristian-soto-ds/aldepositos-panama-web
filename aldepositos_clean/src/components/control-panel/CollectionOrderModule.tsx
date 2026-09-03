@@ -48,6 +48,8 @@ import {
 } from "@/lib/measureDecimals";
 import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
+import { TerraExtractFeedbackModal } from "@/components/modals/TerraExtractFeedbackModal";
+import { createTerraExtractCase } from "@/lib/terraExtractCases";
 import {
   countOrdersForCollectionListTab,
   isOrderInWarehouse,
@@ -518,9 +520,27 @@ export function CollectionOrderModule({
         busy: boolean;
         pendingFileName: string | null;
         progress: { current: number; total: number } | null;
+        /** Tras extract exitoso: pedir confirmación Sí / Reportar. */
+        feedbackPending?: boolean;
+        lastExtract?: {
+          lines: AldeGptTerraLine[];
+          fileNames: string[];
+          model: string;
+          extractMode: string;
+          at: number;
+        };
       }
     >
   >({});
+  /** Archivos del último extract por OR (para re-adjuntar al reportar, ~30 min). */
+  const terraExtractFilesRef = useRef<
+    Record<string, { files: File[]; at: number }>
+  >({});
+  const [terraFeedbackModalOpen, setTerraFeedbackModalOpen] = useState(false);
+  const [terraFeedbackBusy, setTerraFeedbackBusy] = useState(false);
+  const [terraFeedbackError, setTerraFeedbackError] = useState<string | null>(
+    null,
+  );
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [unresolvedRefByRow, setUnresolvedRefByRow] = useState<
     Record<string, boolean>
@@ -530,6 +550,10 @@ export function CollectionOrderModule({
   /** Totales capturados en modo "total" antes de blur — se fusionan al guardar / pasar al RA */
   const [pendingUndTot, setPendingUndTot] = useState<Record<string, string>>({});
   const [pendingPesoTot, setPendingPesoTot] = useState<Record<string, string>>({});
+  /** Selección de líneas en el editor (eliminar varias de una vez). */
+  const [selectedLineIds, setSelectedLineIds] = useState<Record<string, boolean>>(
+    {},
+  );
   /**
    * UND/BULTO: cuando NO está enfocado, mostramos entero (mejor legibilidad).
    * Cuando se enfoca, mostramos el valor real (puede tener decimales) sin perder precisión interna.
@@ -698,6 +722,7 @@ export function CollectionOrderModule({
       ? (JSON.parse(JSON.stringify(remote.lines)) as CollectionOrderLine[])
       : [];
     pendingRemoteOrderRef.current = null;
+    setSelectedLineIds({});
   }, [editing?.id, orders]);
 
   useEffect(() => {
@@ -850,6 +875,7 @@ export function CollectionOrderModule({
     setUnresolvedRefByRow({});
     setPendingUndTot({});
     setPendingPesoTot({});
+    setSelectedLineIds({});
     setFocusedUndBultoRowId(null);
     setUndBultoDraft({});
     setExpectedPesoDraft(null);
@@ -984,6 +1010,12 @@ export function CollectionOrderModule({
   };
 
   const deleteRow = (lineId: string) => {
+    setSelectedLineIds((prev) => {
+      if (!(lineId in prev)) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      return next;
+    });
     setUnresolvedRefByRow((prev) => {
       if (!(lineId in prev)) return prev;
       const next = { ...prev };
@@ -1012,6 +1044,65 @@ export function CollectionOrderModule({
       editingRef.current = next;
       return next;
     });
+  };
+
+  const deleteSelectedRows = () => {
+    const ids = Object.keys(selectedLineIds).filter((id) => selectedLineIds[id]);
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    if (
+      !window.confirm(
+        ids.length === 1
+          ? "¿Eliminar la línea seleccionada?"
+          : `¿Eliminar las ${ids.length} líneas seleccionadas?`,
+      )
+    ) {
+      return;
+    }
+    setUnresolvedRefByRow((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of idSet) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setPendingUndTot((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of idSet) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setPendingPesoTot((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of idSet) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const filtered = prev.lines.filter((r) => !idSet.has(r.id));
+      const next = {
+        ...prev,
+        lines: withoutBlankCollectionLines(filtered),
+      };
+      editingRef.current = next;
+      return next;
+    });
+    setSelectedLineIds({});
   };
 
   const persistOrder = useCallback(
@@ -1951,6 +2042,7 @@ export function CollectionOrderModule({
       busy: false,
       pendingFileName: null,
       progress: null,
+      feedbackPending: false,
     };
 
   const patchTerraJob = (
@@ -1959,6 +2051,16 @@ export function CollectionOrderModule({
       busy: boolean;
       pendingFileName: string | null;
       progress: { current: number; total: number } | null;
+      feedbackPending: boolean;
+      lastExtract:
+        | {
+            lines: AldeGptTerraLine[];
+            fileNames: string[];
+            model: string;
+            extractMode: string;
+            at: number;
+          }
+        | undefined;
     }>,
   ) => {
     if (patch.busy === true) {
@@ -1975,10 +2077,93 @@ export function CollectionOrderModule({
         busy: false,
         pendingFileName: null,
         progress: null,
+        feedbackPending: false,
       };
       return { ...prev, [oid]: { ...cur, ...patch } };
     });
   };
+
+  const dismissTerraFeedback = useCallback((oid: string) => {
+    patchTerraJob(oid, { feedbackPending: false });
+    setTerraFeedbackModalOpen(false);
+    setTerraFeedbackError(null);
+  }, []);
+
+  const handleTerraFeedbackOk = useCallback(
+    async (oid: string) => {
+      const job = terraJobByOrderId[oid];
+      const last = job?.lastExtract;
+      const order =
+        (editingRef.current?.id === oid
+          ? editingRef.current
+          : ordersRef.current.find((o) => o.id === oid)) ?? null;
+      setTerraFeedbackBusy(true);
+      setTerraFeedbackError(null);
+      try {
+        await createTerraExtractCase({
+          collectionOrderId: oid,
+          orderNumero: order?.numero ?? null,
+          proveedor: order?.proveedor ?? null,
+          cliente: order?.cliente ?? null,
+          model: last?.model ?? "terra",
+          extractMode: last?.extractMode ?? "full",
+          status: "ok",
+          note: "Extracción verificada como correcta.",
+          linesSnapshot: last?.lines ?? [],
+          fileNames: last?.fileNames ?? [],
+          createLearningNote: true,
+        });
+        dismissTerraFeedback(oid);
+      } catch (e) {
+        console.error(e);
+        setTerraFeedbackError(
+          e instanceof Error ? e.message : "No se pudo guardar el feedback.",
+        );
+      } finally {
+        setTerraFeedbackBusy(false);
+      }
+    },
+    [terraJobByOrderId, dismissTerraFeedback],
+  );
+
+  const handleTerraFeedbackReportSubmit = useCallback(
+    async (input: { note: string; files: File[] }) => {
+      const oid = editingRef.current?.id;
+      if (!oid) return;
+      const job = terraJobByOrderId[oid];
+      const last = job?.lastExtract;
+      const order = editingRef.current;
+      setTerraFeedbackBusy(true);
+      setTerraFeedbackError(null);
+      try {
+        await createTerraExtractCase({
+          collectionOrderId: oid,
+          orderNumero: order?.numero ?? null,
+          proveedor: order?.proveedor ?? null,
+          cliente: order?.cliente ?? null,
+          model: last?.model ?? "terra",
+          extractMode: last?.extractMode ?? "full",
+          status: "failed",
+          note: input.note,
+          linesSnapshot: last?.lines ?? [],
+          files: input.files,
+          fileNames:
+            input.files.length > 0
+              ? input.files.map((f) => f.name)
+              : (last?.fileNames ?? []),
+        });
+        dismissTerraFeedback(oid);
+      } catch (e) {
+        console.error(e);
+        setTerraFeedbackError(
+          e instanceof Error ? e.message : "No se pudo guardar el caso.",
+        );
+      } finally {
+        setTerraFeedbackBusy(false);
+      }
+    },
+    [terraJobByOrderId, dismissTerraFeedback],
+  );
 
   /**
    * Aplica líneas Terra a una OR concreta (sigue funcionando si saliste a la lista
@@ -2231,10 +2416,16 @@ export function CollectionOrderModule({
         model = ALDEGPT_DEFAULT_MODEL,
       } = args;
       const fileNames = files.map((f) => f.name);
+      const extractAt = Date.now();
+      terraExtractFilesRef.current[targetOrderId] = {
+        files: [...files],
+        at: extractAt,
+      };
       patchTerraJob(targetOrderId, {
         busy: true,
         pendingFileName: fileNames[0] ?? null,
         progress: { current: 1, total: Math.max(1, files.length) },
+        feedbackPending: false,
       });
 
       const normalizeUploadFilename = (name: string) => {
@@ -2416,10 +2607,23 @@ export function CollectionOrderModule({
           (extracted.length > 0
             ? `Se extrajeron ${extracted.length} fila(s) del documento.`
             : "");
+        // Casos Terra solo con «Solo referencias y bultos» (no con el + / extract full).
+        const askFeedback =
+          extractMode === "refsBultosOnly" && extracted.length > 0;
         patchTerraJob(targetOrderId, {
           busy: false,
           pendingFileName: null,
           progress: null,
+          feedbackPending: askFeedback,
+          lastExtract: askFeedback
+            ? {
+                lines: extracted,
+                fileNames,
+                model,
+                extractMode,
+                at: extractAt,
+              }
+            : undefined,
         });
         return { reply, lines: extracted };
       } catch (err) {
@@ -2907,6 +3111,12 @@ export function CollectionOrderModule({
   const suggestedNumber = String(maxExistingNumber + 1);
   const orderId = e.id;
   const terraJob = getTerraJob(orderId);
+  const selectedLineCount = e.lines.reduce(
+    (n, row) => n + (selectedLineIds[row.id] ? 1 : 0),
+    0,
+  );
+  const allLinesSelected =
+    e.lines.length > 0 && selectedLineCount === e.lines.length;
 
   const applyTerraLinesToOrder = (incoming: AldeGptTerraLine[]) => {
     applyTerraLinesForOrderId(orderId, incoming);
@@ -3047,6 +3257,79 @@ export function CollectionOrderModule({
             />
           </div>
         )}
+
+        {!terraJob.busy && terraJob.feedbackPending && (
+          <div
+            role="status"
+            className="sticky top-0 z-30 mb-2 shrink-0 rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2.5 shadow-md dark:border-emerald-800 dark:bg-emerald-950/50"
+          >
+            <p className="mb-2 text-xs font-semibold text-emerald-950 dark:text-emerald-100">
+              ¿La extracción de {ALDEGPT_TERRA_DISPLAY_NAME} quedó bien?
+              {terraJob.lastExtract
+                ? ` (${terraJob.lastExtract.lines.length} fila(s))`
+                : ""}
+            </p>
+            {terraFeedbackError && !terraFeedbackModalOpen && (
+              <p className="mb-2 text-xs text-red-600 dark:text-red-400">
+                {terraFeedbackError}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={terraFeedbackBusy}
+                onClick={() => void handleTerraFeedbackOk(orderId)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {terraFeedbackBusy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                Sí, correcta
+              </button>
+              <button
+                type="button"
+                disabled={terraFeedbackBusy}
+                onClick={() => {
+                  setTerraFeedbackError(null);
+                  setTerraFeedbackModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-amber-950 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Reportar error
+              </button>
+              <button
+                type="button"
+                disabled={terraFeedbackBusy}
+                onClick={() => dismissTerraFeedback(orderId)}
+                className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-slate-500 hover:underline disabled:opacity-50"
+              >
+                Ahora no
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!terraJob.busy &&
+          !terraJob.feedbackPending &&
+          terraJob.lastExtract?.extractMode === "refsBultosOnly" &&
+          Date.now() - terraJob.lastExtract.at < 30 * 60 * 1000 && (
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                disabled={terraFeedbackBusy}
+                onClick={() => {
+                  setTerraFeedbackError(null);
+                  setTerraFeedbackModalOpen(true);
+                }}
+                className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 hover:underline dark:text-amber-400"
+              >
+                Reportar error de extracción
+              </button>
+            </div>
+          )}
 
         <section className="mb-3 overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <div className="flex flex-col lg:flex-row lg:items-stretch">
@@ -3336,11 +3619,64 @@ export function CollectionOrderModule({
         </div>
 
         <div className="table-scroll-hint flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-[0_12px_34px_-20px_rgba(79,70,229,0.45)] dark:border-indigo-900/45 dark:bg-slate-900">
+          {selectedLineCount > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-red-100 bg-red-50/90 px-3 py-2 dark:border-red-900/40 dark:bg-red-950/30">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-red-800 dark:text-red-200">
+                {selectedLineCount} línea
+                {selectedLineCount === 1 ? "" : "s"} seleccionada
+                {selectedLineCount === 1 ? "" : "s"}
+              </span>
+              <button
+                type="button"
+                onClick={deleteSelectedRows}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white hover:bg-red-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Eliminar seleccionadas
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedLineIds({})}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 hover:underline"
+              >
+                Quitar selección
+              </button>
+            </div>
+          )}
           <div className="table-scroll-host min-h-0 flex-1 overflow-auto">
             <table className="w-full min-w-[1320px] border-collapse text-center text-sm">
               <thead className="sticky top-0 z-10 border-b border-indigo-200 bg-gradient-to-r from-white via-indigo-50/70 to-sky-50/70 text-[9px] font-black uppercase tracking-widest text-slate-600 shadow-sm backdrop-blur-sm dark:border-indigo-900/40 dark:from-slate-800 dark:via-indigo-950/25 dark:to-slate-800 dark:text-slate-300">
                 <tr>
-                  <th className="px-2 py-2">#</th>
+                  <th className="px-2 py-2">
+                    <div className="inline-flex flex-col items-center gap-0.5">
+                      <input
+                        type="checkbox"
+                        checked={allLinesSelected}
+                        disabled={e.lines.length === 0}
+                        onChange={() => {
+                          if (allLinesSelected) {
+                            setSelectedLineIds({});
+                            return;
+                          }
+                          const next: Record<string, boolean> = {};
+                          for (const row of e.lines) next[row.id] = true;
+                          setSelectedLineIds(next);
+                        }}
+                        title={
+                          allLinesSelected
+                            ? "Deseleccionar todas"
+                            : "Seleccionar todas las referencias"
+                        }
+                        aria-label={
+                          allLinesSelected
+                            ? "Deseleccionar todas las líneas"
+                            : "Seleccionar todas las líneas"
+                        }
+                        className="h-3.5 w-3.5 cursor-pointer accent-indigo-600 disabled:opacity-40"
+                      />
+                      <span>#</span>
+                    </div>
+                  </th>
                   <th className="px-2 py-2">Referencia</th>
                   <th className="px-2 py-2">Descripción</th>
                   <th className="px-2 py-2">Bultos</th>
@@ -3414,13 +3750,29 @@ export function CollectionOrderModule({
                     <tr
                       key={row.id}
                       className={`transition-colors hover:bg-sky-50/70 dark:hover:bg-sky-900/20 ${
-                        isReempaque
-                          ? "border-l-[3px] border-l-violet-400 bg-violet-50/40 dark:bg-violet-950/20"
-                          : "odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/40"
+                        selectedLineIds[row.id]
+                          ? "bg-indigo-50/80 dark:bg-indigo-950/30"
+                          : isReempaque
+                            ? "border-l-[3px] border-l-violet-400 bg-violet-50/40 dark:bg-violet-950/20"
+                            : "odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/40"
                       }`}
                     >
                       <td className="px-2 py-1 text-center">
-                        <div className="inline-flex items-center justify-center gap-1">
+                        <div className="inline-flex items-center justify-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedLineIds[row.id] === true}
+                            onChange={() => {
+                              setSelectedLineIds((prev) => {
+                                const next = { ...prev };
+                                if (next[row.id]) delete next[row.id];
+                                else next[row.id] = true;
+                                return next;
+                              });
+                            }}
+                            aria-label={`Seleccionar línea ${idx + 1}`}
+                            className="h-3.5 w-3.5 cursor-pointer accent-indigo-600"
+                          />
                           <span className="text-slate-400">{idx + 1}</span>
                           {isReempaque ? (
                             <Recycle
@@ -3863,6 +4215,27 @@ export function CollectionOrderModule({
             model,
           });
         }}
+      />
+
+      <TerraExtractFeedbackModal
+        open={terraFeedbackModalOpen}
+        orderLabel={
+          String(e.numero ?? "").trim() || `#${e.id.slice(0, 8)}`
+        }
+        initialFiles={
+          terraExtractFilesRef.current[orderId] &&
+          Date.now() - terraExtractFilesRef.current[orderId]!.at <
+            30 * 60 * 1000
+            ? terraExtractFilesRef.current[orderId]!.files
+            : []
+        }
+        busy={terraFeedbackBusy}
+        error={terraFeedbackError}
+        onCancel={() => {
+          setTerraFeedbackModalOpen(false);
+          setTerraFeedbackError(null);
+        }}
+        onSubmit={(input) => void handleTerraFeedbackReportSubmit(input)}
       />
 
       <DeleteRaConfirmModal

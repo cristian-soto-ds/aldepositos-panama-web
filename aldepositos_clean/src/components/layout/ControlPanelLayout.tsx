@@ -20,6 +20,7 @@ import {
   Camera,
   Images,
   ScanBarcode,
+  MessageSquareWarning,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogoMark } from "@/components/brand/BrandLogoMark";
@@ -71,6 +72,7 @@ export function ControlPanelLayout({
     can("dashboard") ||
     can("reports") ||
     can("photo-reports") ||
+    can("terra-cases") ||
     can("inventory-leaderboard") ||
     can("inventory-control") ||
     (showOptionsModule && can("options"));
@@ -289,6 +291,17 @@ export function ControlPanelLayout({
               active={currentView === "photo-reports"}
               onClick={() => {
                 setCurrentView("photo-reports");
+                setSidebarOpen(false);
+              }}
+            />
+          )}
+          {can("terra-cases") && (
+            <NavItem
+              icon={<NavIcon Icon={MessageSquareWarning} />}
+              text="Casos Terra"
+              active={currentView === "terra-cases"}
+              onClick={() => {
+                setCurrentView("terra-cases");
                 setSidebarOpen(false);
               }}
             />

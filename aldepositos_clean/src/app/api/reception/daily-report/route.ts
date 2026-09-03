@@ -96,32 +96,33 @@ export async function POST(request: NextRequest) {
     estado: r.estado,
   }));
 
-  const prompt = `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, analista logístico de ALDEPÓSITOS (Zona Libre, Panamá).
+  const prompt = `Eres ${ALDEGPT_TERRA_DISPLAY_NAME}, analista operativo de recepción de mercancía en ALDEPÓSITOS (Zona Libre, Panamá).
 
-Organizá el reporte de camiones / OR que llegaron a bodega en el período: ${dateLabel}.
+Analizá las citas / camiones / OR que entregaron o estuvieron en recepción en: ${dateLabel}.
+Las horas son exactas (fila = momento real de entrada a cola; rampa; completado).
 
 Resumen numérico:
 ${JSON.stringify(summary ?? {}, null, 2)}
 
-Detalle por OR:
+Detalle por OR (horas exactas y minutos):
 ${JSON.stringify(compactRows, null, 2)}
 
 Respondé ÚNICAMENTE con JSON válido (sin markdown) con esta forma exacta:
 {
-  "titulo": "título corto y claro del período",
-  "resumen": "2-3 párrafos en español claro para gerencia: cuántos camiones/OR, bultos, tiempos de espera y descarga, cumplimiento",
-  "hallazgos": ["dato concreto 1", "dato concreto 2", "..."],
-  "recomendaciones": ["acción operativa 1", "acción operativa 2"],
+  "titulo": "título corto del período",
+  "resumen": "2-3 párrafos en español claro: volumen del día, tiempos reales de espera/descarga y qué implica para la operación",
+  "hallazgos": ["dato concreto 1 con números/horas", "dato concreto 2", "..."],
+  "recomendaciones": ["acción concreta para mejorar la recepción", "otra acción operable hoy/mañana"],
   "metricasDestacadas": [{ "label": "nombre métrica", "valor": "valor legible" }]
 }
 
-Priorizá información directa y útil:
-- Total de OR / camiones y bultos
-- Tiempos de espera en fila y descarga
-- Rampas más usadas o cuellos de botella
-- Estado Rampa 1 / Rampa 2 si viene en el resumen
-- OR pendientes vs completadas
-Sé concreto, sin relleno.`;
+Priorizá mejoras de recepción de mercancía:
+- Cuellos de botella (fila larga, descarga lenta, concentración de llegadas)
+- Comparar Rampa 1 vs Rampa 2 y uso de carretillado/extra
+- OR con espera o ciclo atípico
+- Pendientes vs completadas
+- Acciones prácticas (priorizar proveedores, abrir rampa, staggered arrivals)
+Sé concreto, con números y horas. Sin relleno ni menciones a Excel.`;
 
   try {
     const client = new OpenAI({ apiKey });

@@ -13,6 +13,11 @@ export type ReceptionTruck = {
   status: ReceptionStatusId;
   sortOrder: number;
   warehouseReceiptNumber?: string;
+  /**
+   * Momento real de entrada a fila (receptionQueuedAt / sortOrder ms).
+   * No confundir con createdAt de la OR.
+   */
+  queuedAt?: string;
   rampAssignedAt?: string;
   /** Rampa (o carretillado) donde se atendió; se conserva aunque pase a Completado. */
   rampUsed?: ReceptionStatusId;

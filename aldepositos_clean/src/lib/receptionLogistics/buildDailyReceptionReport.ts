@@ -14,6 +14,11 @@ import {
   isGroupedReceptionTruck,
   receptionOrderIds,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import {
+  diffReceptionMinutes,
+  formatReceptionClock,
+  resolveQueuedAt,
+} from "@/lib/receptionLogistics/receptionTiming";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 
 export type { ReceptionReportFilter } from "@/lib/receptionLogistics/receptionReportFilter";
@@ -44,6 +49,7 @@ export type DailyReceptionReportRow = {
   reciboAlmacen: string;
   notas: string;
   createdAtIso: string;
+  queuedAtIso: string;
   statusId: ReceptionStatusId;
 };
 
@@ -63,26 +69,6 @@ export type DailyReceptionReportSummary = {
 function parseOrNumero(plate: string): string {
   const match = /^OR\s*#\s*(.+)$/i.exec(plate.trim());
   return match ? match[1].trim() : plate.trim();
-}
-
-function formatTime(iso: string | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString("es-PA", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-}
-
-function diffMinutes(startIso: string | undefined, endIso: string | undefined): number | null {
-  if (!startIso || !endIso) return null;
-  const a = Date.parse(startIso);
-  const b = Date.parse(endIso);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
-  return Math.round((b - a) / 60_000);
 }
 
 function rampLabel(status: ReceptionStatusId): string {
@@ -109,7 +95,7 @@ function resolveFilterDateIso(
   truck: ReceptionTruck,
   dateField: ReceptionReportFilter["dateField"],
 ): string | undefined {
-  if (dateField === "arrival") return truck.createdAt;
+  if (dateField === "arrival") return resolveQueuedAt(truck) ?? truck.createdAt;
   return resolveCompletedAt(truck);
 }
 
@@ -145,6 +131,11 @@ export function buildDailyReceptionReport(
   filter: ReceptionReportFilter = defaultTodayReportFilter(),
 ): { rows: DailyReceptionReportRow[]; summary: DailyReceptionReportSummary } {
   const arrivalMs = (t: ReceptionTruck): number => {
+    const queued = resolveQueuedAt(t);
+    if (queued) {
+      const q = Date.parse(queued);
+      if (Number.isFinite(q)) return q;
+    }
     const c = Date.parse(t.createdAt);
     if (Number.isFinite(c)) return c;
     return Number.isFinite(t.sortOrder) ? t.sortOrder : 0;
@@ -155,10 +146,11 @@ export function buildDailyReceptionReport(
     .sort((a, b) => arrivalMs(a) - arrivalMs(b));
 
   const rows: DailyReceptionReportRow[] = filteredOr.map((t, i) => {
+    const queuedAt = resolveQueuedAt(t);
     const completedAt = resolveCompletedAt(t);
-    const minutosEnFila = diffMinutes(t.createdAt, t.rampAssignedAt);
-    const minutosDescarga = diffMinutes(t.rampAssignedAt, completedAt);
-    const minutosTotal = diffMinutes(t.createdAt, completedAt);
+    const minutosEnFila = diffReceptionMinutes(queuedAt, t.rampAssignedAt);
+    const minutosDescarga = diffReceptionMinutes(t.rampAssignedAt, completedAt);
+    const minutosTotal = diffReceptionMinutes(queuedAt, completedAt);
     const orNumero =
       isGroupedReceptionTruck(t) && t.orderNumeros?.length
         ? t.orderNumeros.map((n) => `#${n}`).join(" · ")
@@ -173,15 +165,16 @@ export function buildDailyReceptionReport(
       bultos: t.expectedBultos,
       estado: RECEPTION_STATUS_LABELS[t.status],
       rampa: rampLabel(t.rampUsed ?? t.status),
-      horaLlegada: formatTime(t.createdAt),
-      horaRampa: formatTime(t.rampAssignedAt),
-      horaCompletado: formatTime(completedAt),
+      horaLlegada: formatReceptionClock(queuedAt),
+      horaRampa: formatReceptionClock(t.rampAssignedAt),
+      horaCompletado: formatReceptionClock(completedAt),
       minutosEnFila,
       minutosDescarga,
       minutosTotal,
       reciboAlmacen: t.warehouseReceiptNumber?.trim() ?? "",
       notas: t.driverName?.trim() ? `Conductor: ${t.driverName}` : "",
       createdAtIso: t.createdAt,
+      queuedAtIso: queuedAt ?? "",
       statusId: t.status,
     };
   });

@@ -134,6 +134,13 @@ const ControlCargaModule = dynamic(
     ),
   { loading: () => <PanelModuleLoader /> },
 );
+const TerraExtractCasesModule = dynamic(
+  () =>
+    import("@/components/control-panel/TerraExtractCasesModule").then(
+      (m) => m.TerraExtractCasesModule,
+    ),
+  { loading: () => <PanelModuleLoader /> },
+);
 
 /** Vistas donde la tabla debe usar toda la altura del main (scroll solo dentro del módulo). */
 const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
@@ -145,6 +152,7 @@ const FULL_HEIGHT_INVENTORY_VIEWS = new Set([
   "reports",
   "photo-record",
   "photo-reports",
+  "terra-cases",
   "control-carga",
 ]);
 
@@ -770,6 +778,8 @@ function PanelPageInner() {
             userDisplayName={userDisplayName}
           />
         )}
+
+        {visibleView === "terra-cases" && <TerraExtractCasesModule />}
 
         {visibleView === "inventory-leaderboard" && (
           <InventoryLeaderboardModule

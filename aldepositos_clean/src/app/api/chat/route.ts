@@ -15,6 +15,7 @@ import {
   parseAldeGptTerraModelPayload,
   toRefsBultosOnlyTerraLines,
 } from "@/lib/aldeGptTerraDocumentExtract";
+import { fetchLearningBlockForTerraPrompt } from "@/lib/terraLearningNotes";
 
 export const runtime = "nodejs";
 /** Pro + high/max puede tardar más en packing lists grandes. */
@@ -316,12 +317,28 @@ export async function POST(request: NextRequest) {
       ? promptRaw
       : `${promptRaw}\n\nResponde en JSON con las claves reply y lines.`;
 
-    const instructions =
+    let instructions =
       files.length === 0
         ? generalInstructions(modelKey)
         : extractMode === "refsBultosOnly"
           ? ALDEGPT_TERRA_REFS_BULTOS_INSTRUCTIONS
           : ALDEGPT_TERRA_DOCUMENT_INSTRUCTIONS;
+
+    // Solo en extract documental: inyectar reglas aprendidas (vacío = sin cambio).
+    if (files.length > 0) {
+      try {
+        const learningBlock = await fetchLearningBlockForTerraPrompt(
+          auth.url,
+          auth.anonKey,
+          auth.token,
+        );
+        if (learningBlock.trim()) {
+          instructions = `${instructions}\n\n${learningBlock}`;
+        }
+      } catch (e) {
+        console.warn("[api/chat] learning block skipped:", e);
+      }
+    }
 
     const input: ResponseInputItem[] =
       files.length === 0

@@ -96,6 +96,8 @@ import {
 import {
   aldeGptTerraLineToImportInput,
   collectionLineDedupeKey,
+  consolidateTerraLinesByReferencia,
+  finalizeAldeGptTerraLines,
   ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
   type AldeGptTerraLine,
 } from "@/lib/aldeGptTerraDocumentExtract";
@@ -2170,7 +2172,8 @@ export function CollectionOrderModule({
    * u abriste otra orden, como AldeGpt Terra).
    */
   const applyTerraLinesForOrderId = useCallback(
-    (targetOrderId: string, incoming: AldeGptTerraLine[]) => {
+    (targetOrderId: string, incomingRaw: AldeGptTerraLine[]) => {
+      const incoming = consolidateTerraLinesByReferencia(incomingRaw);
       const useful = incoming.filter((row) => {
         const ref = String(row.referencia ?? "").trim();
         const desc = String(row.descripcion ?? "").trim();
@@ -2220,14 +2223,10 @@ export function CollectionOrderModule({
             parseFloat(String(mapped.bultos ?? "").replace(",", ".")) || 0,
           ),
         );
-        const pesoNum = Math.max(
-          parseFloat(String(mapped.pesoPorBulto ?? "").replace(",", ".")) || 0,
-          parseFloat(String(mapped.pesoTotalKg ?? "").replace(",", ".")) || 0,
-        );
+        // Reempaque = flag Terra o sin bultos (Tango puede traer peso > 0).
         const isReempaque =
-          (mapped.reempaque === true || bultosNum <= 0) &&
-          bultosNum <= 0 &&
-          pesoNum <= 0;
+          mapped.reempaque === true ||
+          (mapped.reempaque !== false && bultosNum <= 0);
 
         const imported = normalizeCollectionOrderLineFromImport({
           referencia: mapped.referencia,
@@ -2519,7 +2518,9 @@ export function CollectionOrderModule({
         ): Promise<{ reply: string; lines: AldeGptTerraLine[] }> => {
           let all = [...initial.lines];
           const replies = [initial.reply].filter(Boolean);
-          if (all.length < 35) {
+          // Siempre intentar continuaciones: facturas NASA multipágina
+          // (50–80+ refs) a menudo se cortan aunque la 1ª pasada traiga < 35.
+          if (all.length === 0) {
             return { reply: replies.join("\n"), lines: all };
           }
           const seen = () =>
@@ -2537,7 +2538,7 @@ export function CollectionOrderModule({
               ),
             );
           let keys = seen();
-          for (let c = 0; c < 5; c++) {
+          for (let c = 0; c < 8; c++) {
             const last = all[all.length - 1];
             const lastRef =
               String(last?.referencia ?? "").trim() || "(sin ref)";
@@ -2546,6 +2547,10 @@ export function CollectionOrderModule({
               `Ya extraje ${all.length} filas; la última referencia fue "${lastRef}". ` +
               `Lee TODAS las páginas y extrae SOLO las filas de producto que FALTAN después de esa. ` +
               `Incluye reempaques (misma ref con Bts/# BLTO vacío → bultos=0, reempaque=true). ` +
+              `FACTURA NASA: referencia=NASA Referencia, bultos=Cartons MTR (NO Cant.). ` +
+              `PACKING KING CARGO: referencia=CÓDIGO OEM, bultos=(fin−inicio+1) del CTNS# (1-23→23). ` +
+              `CTNS compartido: KW-M180BT=1 y DMH-Z5150BT=0; envía ctns exacto. ` +
+              `PACKING BASH CORP: referencia=Artículo completo (une líneas: PL-88801-BGE MIC); bultos=columna Bultos (NO Empaque ni Cantidad). ` +
               `NO repitas filas ya extraídas. Si ya terminaste el documento, responde {"reply":"completo","lines":[]}. ` +
               `Responde en JSON.`;
             const more = await requestOne(contPrompt, file);
@@ -2568,7 +2573,7 @@ export function CollectionOrderModule({
             all = all.concat(fresh);
             keys = seen();
             if (more.reply) replies.push(more.reply);
-            if (fresh.length < 5) break;
+            if (fresh.length < 3) break;
           }
           return { reply: replies.join("\n"), lines: all };
         };
@@ -2601,6 +2606,7 @@ export function CollectionOrderModule({
           }
         }
 
+        extracted = finalizeAldeGptTerraLines(extracted);
         applyTerraLinesForOrderId(targetOrderId, extracted);
         const reply =
           parts.filter(Boolean).join("\n\n") ||

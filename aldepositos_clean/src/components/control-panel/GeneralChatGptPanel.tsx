@@ -29,6 +29,7 @@ import {
 } from "@/lib/aldeGptTerraBrand";
 import {
   ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
+  consolidateTerraLinesByReferencia,
   type AldeGptTerraLine,
 } from "@/lib/aldeGptTerraDocumentExtract";
 import { supabase } from "@/lib/supabase";
@@ -556,6 +557,8 @@ export function GeneralChatGptPanel({
             ? `Se extrajeron ${extracted.length} fila(s) de ${files.length} documento(s).`
             : "");
       }
+
+      extracted = consolidateTerraLinesByReferencia(extracted);
 
       setLastLines(parentAlreadyApplied ? [] : extracted);
 

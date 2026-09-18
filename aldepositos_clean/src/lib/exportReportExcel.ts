@@ -269,12 +269,17 @@ function buildDetailedRow(
   const bultos = parseFloat(String(row.bultos ?? 0)) || 0;
   const undPerBulto = parseFloat(String(row.unidadesPorBulto ?? 0)) || 0;
   const pesoPorBulto = parseFloat(String(row.pesoPorBulto ?? 0)) || 0;
+  const pesoTotalDoc = parseFloat(String(row.pesoTotalKg ?? 0)) || 0;
   const l = parseFloat(String(row.l ?? 0)) || 0;
   const w = parseFloat(String(row.w ?? 0)) || 0;
   const h = parseFloat(String(row.h ?? 0)) || 0;
   const isReempaque = row.reempaque === true;
   const cbmPorBulto = cubicajeM3FromDims(l, w, h, 1, isReempaque);
   const cubicajeTotal = reportLineTotalCbm(row);
+  const pesoTotal =
+    pesoTotalDoc > 0
+      ? Number(pesoTotalDoc.toFixed(2))
+      : Number((bultos * pesoPorBulto).toFixed(2));
 
   return [
     idx + 1,
@@ -284,7 +289,7 @@ function buildDetailedRow(
     undPerBulto,
     bultos * undPerBulto,
     Number(pesoPorBulto.toFixed(2)),
-    Number((bultos * pesoPorBulto).toFixed(2)),
+    pesoTotal,
     row.reempaque ? "SI" : "-",
     l,
     w,

@@ -48,6 +48,26 @@ function parseNum(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Peso total de línea para CSV/Excel.
+ * Prioriza `pesoTotalKg` de factura (tras consolidar reempaques) para no
+ * reconstruir 36.57×7=255.99 cuando el total real es 255.94.
+ */
+export function pesoTotalKgForInventarioExport(
+  row: Record<string, unknown>,
+  bultos: number,
+  pesoPorPiezas: number,
+): number {
+  const fromDoc = parseNum(row.pesoTotalKg);
+  if (fromDoc > 0) {
+    return roundMeasureNearest(fromDoc);
+  }
+  if (bultos > 0 && pesoPorPiezas > 0) {
+    return roundMeasureNearest(bultos * pesoPorPiezas);
+  }
+  return 0;
+}
+
 /** Números para CSV: vacío o inválido → 0 */
 export function csvNum(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "0";
@@ -144,7 +164,7 @@ function buildLineCells(
     pesoPorPiezas = parseNum(row.weight);
   }
 
-  const pesoTotal = bultos * pesoPorPiezas;
+  const pesoTotal = pesoTotalKgForInventarioExport(row, bultos, pesoPorPiezas);
   const vol = volumenM3ForRow(row, bultos, l, w, h, reempaque);
 
   return [
@@ -157,7 +177,8 @@ function buildLineCells(
     csvMeasureNum(h),
     csvMeasureNum(w),
     csvMeasureNum(pesoPorPiezas),
-    csvMeasureNum(pesoTotal),
+    // Total de factura: nearest (no round-up) para no inflar 255.94 → 255.99.
+    csvNum(pesoTotal),
     csvMeasureNum(vol),
     CSV_UNIDAD_FIJA,
     CSV_TIPO_EMBALAJE_FIJO,
@@ -189,7 +210,7 @@ export function buildInventarioExcelRowValues(
     pesoPorPiezas = parseNum(row.weight);
   }
 
-  const pesoTotal = roundUpMeasure(bultos * pesoPorPiezas);
+  const pesoTotal = pesoTotalKgForInventarioExport(row, bultos, pesoPorPiezas);
   const vol = volumenM3ForRow(row, bultos, l, w, h, reempaque);
 
   const numeroCell: string | number = (() => {

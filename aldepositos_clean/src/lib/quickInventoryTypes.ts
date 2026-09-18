@@ -9,6 +9,8 @@ export type QuickMeasureRow = {
   bultos?: string | number;
   unidadesPorBulto?: string | number;
   pesoPorBulto?: string | number;
+  /** Peso total de línea (kg) de factura; manda sobre bultos × peso/b al exportar. */
+  pesoTotalKg?: string | number;
   l?: string | number;
   w?: string | number;
   h?: string | number;
@@ -456,6 +458,7 @@ const MERGE_ROW_KEYS = [
   "bultos",
   "unidadesPorBulto",
   "pesoPorBulto",
+  "pesoTotalKg",
   "l",
   "w",
   "h",

@@ -37,7 +37,11 @@ export type FetchTasksOptions = {
   includeMeasureData?: boolean;
 };
 
-type TasksListRow = { payload: unknown };
+type TasksListRow = {
+  id?: string;
+  payload: unknown;
+  updated_at?: string;
+};
 
 function mapTaskRows(rows: TasksListRow[], includeMeasureData: boolean): Task[] {
   const tasks = rows
@@ -47,50 +51,79 @@ function mapTaskRows(rows: TasksListRow[], includeMeasureData: boolean): Task[] 
   return includeMeasureData ? tasks : tasks.map(toListTask);
 }
 
+/** PostgREST/Supabase corta en ~1000 filas; hay que paginar. */
+const TASKS_PAGE_SIZE = 1000;
+
 /** null = aún no probado; false = migracion 014 no aplicada; true = OK */
 let tasksListRpcAvailable: boolean | null = null;
 
 /**
  * Lista vía RPC `fetch_tasks_list` (sin measureData en red cuando slim).
  * Si la migración 014 aún no está aplicada, cae al select clásico.
+ * Pagina con `.range` para no perder RAs (Completados viejos, etc.).
  */
 async function fetchTasksViaRpc(
   includeMeasureData: boolean,
 ): Promise<Task[] | null> {
   if (tasksListRpcAvailable === false) return null;
 
-  const { data, error } = await supabase.rpc("fetch_tasks_list", {
-    p_include_measure: includeMeasureData,
-  });
-  if (error) {
-    const code = String((error as { code?: string }).code ?? "");
-    const msg = String(error.message ?? "").toLowerCase();
-    if (
-      code === "PGRST202" ||
-      code === "42883" ||
-      msg.includes("fetch_tasks_list") ||
-      msg.includes("could not find the function") ||
-      msg.includes("function public.fetch_tasks_list")
-    ) {
-      tasksListRpcAvailable = false;
-      return null;
+  const allRows: TasksListRow[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + TASKS_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .rpc("fetch_tasks_list", {
+        p_include_measure: includeMeasureData,
+      })
+      .range(from, to);
+
+    if (error) {
+      const code = String((error as { code?: string }).code ?? "");
+      const msg = String(error.message ?? "").toLowerCase();
+      if (
+        code === "PGRST202" ||
+        code === "42883" ||
+        msg.includes("fetch_tasks_list") ||
+        msg.includes("could not find the function") ||
+        msg.includes("function public.fetch_tasks_list")
+      ) {
+        tasksListRpcAvailable = false;
+        return null;
+      }
+      throw error;
     }
-    throw error;
+
+    const chunk = (data ?? []) as TasksListRow[];
+    allRows.push(...chunk);
+    if (chunk.length < TASKS_PAGE_SIZE) break;
+    from += TASKS_PAGE_SIZE;
+    if (from > 500_000) break;
   }
+
   tasksListRpcAvailable = true;
-  return mapTaskRows((data ?? []) as TasksListRow[], includeMeasureData);
+  return mapTaskRows(allRows, includeMeasureData);
 }
 
 async function fetchTasksViaSelect(
   includeMeasureData: boolean,
 ): Promise<Task[]> {
-  const { data, error } = await supabase
-    .from("tasks")
-    .select("id, payload, updated_at")
-    .order("updated_at", { ascending: false });
-
-  if (error) throw error;
-  return mapTaskRows((data ?? []) as TasksListRow[], includeMeasureData);
+  const allRows: TasksListRow[] = [];
+  let from = 0;
+  for (;;) {
+    const to = from + TASKS_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("id, payload, updated_at")
+      .order("updated_at", { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+    const chunk = (data ?? []) as TasksListRow[];
+    allRows.push(...chunk);
+    if (chunk.length < TASKS_PAGE_SIZE) break;
+    from += TASKS_PAGE_SIZE;
+    if (from > 500_000) break;
+  }
+  return mapTaskRows(allRows, includeMeasureData);
 }
 
 /**

@@ -78,7 +78,6 @@ export function TerraExtractCasesModule() {
     try {
       const rows = await listTerraExtractCases({
         status: tab === "all" ? "all" : tab,
-        limit: 100,
       });
       // Solo casos con error: nunca mostrar extracciones marcadas como correctas.
       const errorOnly = rows.filter((r) => r.status !== "ok");
@@ -180,9 +179,9 @@ export function TerraExtractCasesModule() {
             </button>
           </div>
           <p className="mt-1 max-w-2xl text-xs text-slate-500 dark:text-slate-400">
-            Solo casos con error de extracción: documentos, notas y reglas para
-            mejorar las próximas lecturas. Las extracciones correctas no se
-            listan aquí.
+            Archivo permanente de errores de extracción (todo el equipo).
+            Documentos, notas y reglas para mejorar las próximas lecturas. Las
+            extracciones correctas no se listan aquí.
           </p>
         </header>
 

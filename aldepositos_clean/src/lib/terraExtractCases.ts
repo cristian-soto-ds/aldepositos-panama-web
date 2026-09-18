@@ -12,7 +12,7 @@ export type TerraExtractCaseStatus = "ok" | "failed" | "resolved";
 
 export type TerraExtractCase = {
   id: string;
-  user_id: string;
+  user_id: string | null;
   collection_order_id: string | null;
   order_numero: string | null;
   proveedor: string | null;
@@ -72,20 +72,37 @@ export async function listTerraExtractCases(opts?: {
   status?: TerraExtractCaseStatus | "all";
   limit?: number;
 }): Promise<TerraExtractCase[]> {
-  const limit = opts?.limit ?? 80;
-  let q = supabase
-    .from(TERRA_EXTRACT_CASES_TABLE)
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  // Sin techo artificial bajo: el archivo es permanente; paginar hasta traer todos.
+  const pageSize = 500;
+  const hardCap = Math.min(Math.max(opts?.limit ?? 20_000, 1), 20_000);
+  const all: TerraExtractCase[] = [];
+  let from = 0;
 
-  if (opts?.status && opts.status !== "all") {
-    q = q.eq("status", opts.status);
+  for (;;) {
+    const remaining = hardCap - all.length;
+    if (remaining <= 0) break;
+    const size = Math.min(pageSize, remaining);
+    const to = from + size - 1;
+
+    let q = supabase
+      .from(TERRA_EXTRACT_CASES_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(from, to);
+
+    if (opts?.status && opts.status !== "all") {
+      q = q.eq("status", opts.status);
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const chunk = (data ?? []) as TerraExtractCase[];
+    all.push(...chunk);
+    if (chunk.length < size) break;
+    from += size;
   }
 
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as TerraExtractCase[];
+  return all;
 }
 
 async function uploadCaseFiles(
@@ -251,22 +268,9 @@ export async function getTerraExtractCaseSignedUrl(
   return data.signedUrl;
 }
 
-export async function deleteTerraExtractCase(caseId: string): Promise<void> {
-  const { data: row } = await supabase
-    .from(TERRA_EXTRACT_CASES_TABLE)
-    .select("storage_paths")
-    .eq("id", caseId)
-    .maybeSingle();
-
-  const paths = ((row as { storage_paths?: string[] } | null)?.storage_paths ??
-    []) as string[];
-  if (paths.length > 0) {
-    await supabase.storage.from(TERRA_EXTRACT_CASES_BUCKET).remove(paths);
-  }
-
-  const { error } = await supabase
-    .from(TERRA_EXTRACT_CASES_TABLE)
-    .delete()
-    .eq("id", caseId);
-  if (error) throw error;
+export async function deleteTerraExtractCase(_caseId: string): Promise<void> {
+  // Archivo permanente: no se eliminan casos desde la app.
+  throw new Error(
+    "Los casos Terra son permanentes y no se pueden eliminar.",
+  );
 }

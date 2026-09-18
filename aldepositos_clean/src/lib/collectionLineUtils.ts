@@ -179,6 +179,12 @@ export function collectionLinesToDetailedMeasureData(
         : row.pesoPorBulto === "" || row.pesoPorBulto === undefined
           ? ""
           : row.pesoPorBulto,
+      // Total de factura: no se debe reconstruir como bultos × peso/b redondeado.
+      pesoTotalKg: isReempaque
+        ? ""
+        : row.pesoTotalKg === "" || row.pesoTotalKg === undefined
+          ? ""
+          : row.pesoTotalKg,
       l: isReempaque ? "" : (row.l ?? ""),
       w: isReempaque ? "" : (row.w ?? ""),
       h: isReempaque ? "" : (row.h ?? ""),
@@ -226,7 +232,7 @@ export function collectionLinesToQuickMeasureData(
 export function stripDetailedMeasureRow(
   row: Record<string, unknown>,
 ): Record<string, unknown> {
-  return normalizeMeasureFieldsOnRow({
+  const normalized: Record<string, unknown> = normalizeMeasureFieldsOnRow({
     id: row.id,
     referencia: row.referencia ?? "",
     descripcion: row.descripcion ?? "",
@@ -243,6 +249,18 @@ export function stripDetailedMeasureRow(
     referenciasContenedor: row.referenciasContenedor ?? "",
     referenciaContenedora: row.referenciaContenedora ?? "",
   });
+  // Conservar total de factura sin round-up (el export lo usa como fuente de verdad).
+  const pesoTot = String(row.pesoTotalKg ?? "").trim();
+  if (pesoTot) {
+    normalized.pesoTotalKg = preserveDocumentNumber(pesoTot);
+  }
+  // Si hay total de factura, mantener peso/b preciso (no round-up a 2 dec → 36.57×7=255.99).
+  const b = parseN(normalized.bultos);
+  const total = parseN(normalized.pesoTotalKg);
+  if (total > 0 && b > 0) {
+    normalized.pesoPorBulto = formatWeightPrecise(total / b);
+  }
+  return normalized;
 }
 
 export function sanitizeMeasureDataForTarget(

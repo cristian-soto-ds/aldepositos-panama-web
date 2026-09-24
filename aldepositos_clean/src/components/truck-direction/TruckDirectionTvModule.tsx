@@ -42,8 +42,29 @@ function rampDensity(count: number): ReceptionCardDensity {
   return "normal";
 }
 
-const TV_QUEUE_SCROLL_PX_PER_SEC = 28;
-const TV_QUEUE_SCROLL_PAUSE_MS = 2600;
+/** Pausa arriba y abajo cuando la fila no cabe en la columna. */
+const TV_QUEUE_SCROLL_PAUSE_MS = 2800;
+/**
+ * Si hay overflow, la ida no tarda más de ~7 s.
+ * Mínimo 96 px/s: a 28 px/s el paso por frame es < 1 px y el scroll casi no se mueve.
+ */
+const TV_QUEUE_OVERFLOW_MIN_PX_PER_SEC = 96;
+const TV_QUEUE_OVERFLOW_ONE_WAY_SEC = 7;
+
+/** Solo acelera cuando la lista no cabe. Si cabe, pxPerSec queda en 0. */
+function tvQueueScrollMotion(overflowPx: number): {
+  pauseMs: number;
+  pxPerSec: number;
+} {
+  if (overflowPx <= 6) {
+    return { pauseMs: TV_QUEUE_SCROLL_PAUSE_MS, pxPerSec: 0 };
+  }
+  const paced = overflowPx / TV_QUEUE_OVERFLOW_ONE_WAY_SEC;
+  return {
+    pauseMs: TV_QUEUE_SCROLL_PAUSE_MS,
+    pxPerSec: Math.max(TV_QUEUE_OVERFLOW_MIN_PX_PER_SEC, paced),
+  };
+}
 
 /**
  * Columna con scroll automático suave cuando hay más pedidos de los que caben.
@@ -72,9 +93,12 @@ function TvAutoScrollQueueList({
     let raf = 0;
     let lastTs = 0;
     let cancelled = false;
+    // Posición en float: scrollTop entero se come pasos de < 1 px y la lista no avanza.
+    let pos = el.scrollTop;
 
     const onUserScrollIntent = () => {
       userPausedUntil.current = performance.now() + 5000;
+      pos = el.scrollTop;
     };
     el.addEventListener("wheel", onUserScrollIntent, { passive: true });
     el.addEventListener("touchstart", onUserScrollIntent, { passive: true });
@@ -82,24 +106,25 @@ function TvAutoScrollQueueList({
 
     const tick = (ts: number) => {
       if (cancelled) return;
-      const max = el.scrollHeight - el.clientHeight;
+      const max = Math.max(0, el.scrollHeight - el.clientHeight);
+      const motion = tvQueueScrollMotion(max);
 
-      if (max > 6 && ts >= userPausedUntil.current) {
-        if (ts >= pauseUntil) {
-          const dt = lastTs ? Math.min(48, ts - lastTs) : 16;
-          const step = (TV_QUEUE_SCROLL_PX_PER_SEC * dt) / 1000;
-          el.scrollTop += dir * step;
+      if (motion.pxPerSec > 0 && ts >= userPausedUntil.current && ts >= pauseUntil) {
+        const dt = lastTs ? Math.min(48, ts - lastTs) : 16;
+        pos += dir * ((motion.pxPerSec * dt) / 1000);
 
-          if (dir === 1 && el.scrollTop >= max - 1) {
-            el.scrollTop = max;
-            dir = -1;
-            pauseUntil = ts + TV_QUEUE_SCROLL_PAUSE_MS;
-          } else if (dir === -1 && el.scrollTop <= 1) {
-            el.scrollTop = 0;
-            dir = 1;
-            pauseUntil = ts + TV_QUEUE_SCROLL_PAUSE_MS;
-          }
+        if (dir === 1 && pos >= max - 0.5) {
+          pos = max;
+          dir = -1;
+          pauseUntil = ts + motion.pauseMs;
+        } else if (dir === -1 && pos <= 0.5) {
+          pos = 0;
+          dir = 1;
+          pauseUntil = ts + motion.pauseMs;
         }
+        el.scrollTop = pos;
+      } else if (ts < userPausedUntil.current) {
+        pos = el.scrollTop;
       }
 
       lastTs = ts;
@@ -109,6 +134,7 @@ function TvAutoScrollQueueList({
     // Esperar layout antes del primer movimiento.
     const startId = window.setTimeout(() => {
       if (cancelled) return;
+      pos = 0;
       el.scrollTop = 0;
       raf = requestAnimationFrame(tick);
     }, 120);

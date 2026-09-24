@@ -43,7 +43,7 @@ function rampDensity(count: number): ReceptionCardDensity {
 }
 
 /** Pausa arriba y abajo cuando la fila no cabe en la columna. */
-const TV_QUEUE_SCROLL_PAUSE_MS = 2800;
+const TV_QUEUE_SCROLL_PAUSE_MS = 3800;
 /**
  * Si hay overflow, la ida no tarda más de ~7 s.
  * Mínimo 96 px/s: a 28 px/s el paso por frame es < 1 px y el scroll casi no se mueve.

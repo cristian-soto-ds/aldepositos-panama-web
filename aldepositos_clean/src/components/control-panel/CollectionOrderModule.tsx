@@ -18,6 +18,11 @@ import {
   AlertTriangle,
   ChevronRight,
   CheckSquare,
+  CircleOff,
+  MinusSquare,
+  Search,
+  Square,
+  X,
 } from "lucide-react";
 import type { Task } from "@/lib/types/task";
 import type { CollectionOrder, CollectionOrderLine } from "@/lib/types/collectionOrder";
@@ -30,6 +35,8 @@ import {
   insertCollectionOrder,
   isCollectionOrderInBodega,
   parseCollectionOrderNumber,
+  pickCollectionOrderListOwnedFields,
+  rememberDeletedCollectionOrder,
   sortCollectionOrdersByNumero,
   updateCollectionOrder,
   unlinkCollectionOrderFromRas,
@@ -47,6 +54,8 @@ import {
   sanitizeMeasureTyping,
 } from "@/lib/measureDecimals";
 import { CollectionOrderListTabs } from "@/components/control-panel/CollectionOrderListTabs";
+import { CollectionOrderListSearch } from "@/components/control-panel/CollectionOrderListSearch";
+import { filterCollectionOrdersBySearch } from "@/lib/collectionOrderListSearch";
 import { DeleteRaConfirmModal } from "@/components/modals/DeleteRaConfirmModal";
 import { TerraExtractFeedbackModal } from "@/components/modals/TerraExtractFeedbackModal";
 import { createTerraExtractCase } from "@/lib/terraExtractCases";
@@ -101,7 +110,14 @@ import {
   ALDEGPT_TERRA_REFS_BULTOS_PROMPT,
   type AldeGptTerraLine,
 } from "@/lib/aldeGptTerraDocumentExtract";
-import { TransferCollectionToRaModal } from "@/components/modals/TransferCollectionToRaModal";
+import {
+  TransferCollectionToRaModal,
+  type TransferCollectionTarget,
+  type WaitingRaTarget,
+} from "@/components/modals/TransferCollectionToRaModal";
+import { useContainerLoads } from "@/hooks/useContainerLoads";
+import { normalizeContainerLoadRa } from "@/lib/containerLoadItems";
+import { compareContainerLoadWorkOrder } from "@/lib/containerLoadStatus";
 import { ImportCollectionOrdersHtmModal } from "@/components/modals/ImportCollectionOrdersHtmModal";
 import {
   HtmImportResultModal,
@@ -116,7 +132,10 @@ import {
   sanitizeMeasureDataForTarget,
   unidadesTotalesFromLine,
 } from "@/lib/collectionLineUtils";
-import { mergeCollectionOrderIntoTask } from "@/lib/collectionOrderToTask";
+import {
+  emptyManualRaTaskFields,
+  mergeCollectionOrderIntoTask,
+} from "@/lib/collectionOrderToTask";
 import {
   normalizeCollectionOrderFields,
   reconcileCollectionOrder,
@@ -485,6 +504,11 @@ type CollectionOrderModuleProps = {
     task: Task,
     options?: { skipRemote?: boolean; allowEmptyMeasureData?: boolean },
   ) => void | Promise<void>;
+  /**
+   * Crea el RA (si no existe) para pasarle una OR; devuelve el RA guardado
+   * o el que ya existía con ese número.
+   */
+  onCreateTask?: (draft: Task) => Promise<Task>;
   userEmail: string | null;
   /** Nombre visible en el panel para el asistente IA (opcional). */
   userDisplayName?: string | null;
@@ -493,11 +517,15 @@ type CollectionOrderModuleProps = {
 export function CollectionOrderModule({
   tasks,
   onUpdateTask,
+  onCreateTask,
   userEmail,
   userDisplayName = null,
 }: CollectionOrderModuleProps) {
   const { orders, setOrders, reloadOrders, ordersLoading, ordersReloadError } =
     useSupabaseCollectionOrders({ enabled: !!userEmail, userKey: userEmail });
+  const { loads: containerLoads } = useContainerLoads({
+    enabled: !!userEmail && typeof onCreateTask === "function",
+  });
 
   const [editing, setEditing] = useState<CollectionOrder | null>(null);
   const [htmImportOpen, setHtmImportOpen] = useState(false);
@@ -573,6 +601,7 @@ export function CollectionOrderModule({
   /** Los checkboxes solo aparecen tras pulsar «Seleccionar». */
   const [listSelectMode, setListSelectMode] = useState(false);
   const [listTab, setListTab] = useState<CollectionOrderListTab>("general");
+  const [listSearch, setListSearch] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<CollectionOrderDeleteConfirm | null>(
     null,
   );
@@ -604,6 +633,7 @@ export function CollectionOrderModule({
 
   const markOrderDeleted = useCallback((id: string) => {
     deletedOrderIdsRef.current.add(id);
+    rememberDeletedCollectionOrder(id);
     const prevTimer = deletedTombstoneTimersRef.current.get(id);
     if (prevTimer) clearTimeout(prevTimer);
     const t = setTimeout(() => {
@@ -678,10 +708,10 @@ export function CollectionOrderModule({
             expectedCbm: remote.expectedCbm,
             numero: remote.numero,
             status: remote.status,
-            receptionStatus: remote.receptionStatus,
             linkedRaNumbers: remote.linkedRaNumbers,
             updatedAt: remote.updatedAt,
           }),
+      ...pickCollectionOrderListOwnedFields(remote),
       lines: mergedLines,
       id: current.id,
     };
@@ -693,7 +723,9 @@ export function CollectionOrderModule({
         serverBaselineLinesRef.current = JSON.parse(
           JSON.stringify(remoteLines),
         ) as CollectionOrderLine[];
-        lastSavedOrderHashRef.current = JSON.stringify(remote);
+        // Hash del editor (no del remoto): jsonb reordena claves y el editor
+        // parecería sucio → autosave en bucle con cada eco.
+        lastSavedOrderHashRef.current = localHash;
       }
       pendingRemoteOrderRef.current = null;
       return;
@@ -718,7 +750,9 @@ export function CollectionOrderModule({
     prevEditingIdRef.current = id;
     const remote = id ? orders.find((o) => o.id === id) : null;
     lastRemoteOrderHashRef.current = remote ? JSON.stringify(remote.lines) : "";
-    lastSavedOrderHashRef.current = remote ? JSON.stringify(remote) : "";
+    lastSavedOrderHashRef.current = remote
+      ? JSON.stringify(editingRef.current?.id === id ? editingRef.current : remote)
+      : "";
     lastLivePublishedHashRef.current = "";
     serverBaselineLinesRef.current = remote
       ? (JSON.parse(JSON.stringify(remote.lines)) as CollectionOrderLine[])
@@ -1148,6 +1182,7 @@ export function CollectionOrderModule({
       }
       const payload: CollectionOrder = {
         ...normalizedOrder,
+        ...(listRemote ? pickCollectionOrderListOwnedFields(listRemote) : {}),
         lines: linesForSave,
         numero,
         updatedAt: new Date().toISOString(),
@@ -1386,6 +1421,9 @@ export function CollectionOrderModule({
         if (!latest) return;
         if (deletedOrderIdsRef.current.has(latest.id)) return;
         if (extractBusyOrderIdsRef.current.has(latest.id)) return;
+        // Sin cambios desde el último guardado: cada save renueva updatedAt y
+        // re-dispararía este efecto en bucle (PATCH cada ~2 s mientras esté abierta).
+        if (JSON.stringify(latest) === lastSavedOrderHashRef.current) return;
         // Una sola escritura en vuelo: si hay save activo, reintenta al terminar.
         if (isOrderSavingRef.current) {
           saveGenerationRef.current += 1; // invalida el save viejo al completar
@@ -1396,7 +1434,8 @@ export function CollectionOrderModule({
               again &&
               !isOrderSavingRef.current &&
               !deletedOrderIdsRef.current.has(again.id) &&
-              !extractBusyOrderIdsRef.current.has(again.id)
+              !extractBusyOrderIdsRef.current.has(again.id) &&
+              JSON.stringify(again) !== lastSavedOrderHashRef.current
             ) {
               void persistOrder({ order: again, showAlerts: false });
             }
@@ -1918,10 +1957,60 @@ export function CollectionOrderModule({
     });
   }, [tasks, editing, orders]);
 
-  const transferTargetsExcluded =
-    tasks.length > 0 && tasksEligibleForCollectionTransfer.length === 0;
+  /** RA de cargues abiertos que todavía no existen en el sistema (esperando OR). */
+  const waitingRaTargets = useMemo<WaitingRaTarget[]>(() => {
+    if (!onCreateTask) return [];
+    const existing = new Set(tasks.map((t) => normalizeContainerLoadRa(t.ra)));
+    const seen = new Set<string>();
+    const out: WaitingRaTarget[] = [];
+    const openLoads = containerLoads
+      .filter((l) => l.status === "open")
+      .sort(compareContainerLoadWorkOrder);
+    for (const load of openLoads) {
+      for (const item of load.items) {
+        if (item.noInventoryRequired) continue;
+        const key = normalizeContainerLoadRa(item.ra);
+        if (!key || existing.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ ra: key, loadName: load.name });
+      }
+    }
+    return out;
+  }, [containerLoads, tasks, onCreateTask]);
 
-  const confirmTransfer = async (taskId: string, merge: "append" | "replace") => {
+  const transferTargetsExcluded =
+    tasks.length > 0 &&
+    tasksEligibleForCollectionTransfer.length === 0 &&
+    waitingRaTargets.length === 0;
+
+  const resolveTransferTask = async (
+    target: TransferCollectionTarget,
+  ): Promise<Task | null> => {
+    if (target.kind === "task") {
+      return tasks.find((t) => t.id === target.taskId) ?? null;
+    }
+    if (!onCreateTask) return null;
+    // Solo el número de RA: el resto lo trae la OR al vincularse.
+    const draft: Task = {
+      id: generateId(),
+      ra: target.ra,
+      ...emptyManualRaTaskFields(),
+      type: "quick",
+      currentBultos: 0,
+      status: "pending",
+      measureData: [],
+      weightMode: "no_weight",
+      manualTotalWeight: 0,
+      createdByEmail: userEmail?.toLowerCase() || undefined,
+      createdByName: userDisplayName || undefined,
+    };
+    return onCreateTask(draft);
+  };
+
+  const confirmTransfer = async (
+    target: TransferCollectionTarget,
+    merge: "append" | "replace",
+  ) => {
     if (!editing) return;
     const bodegaBlock = collectionOrderTransferBlockedReason(editing);
     if (bodegaBlock) {
@@ -1941,7 +2030,22 @@ export function CollectionOrderModule({
       alert("No hay líneas con datos para enviar.");
       return;
     }
-    const task = tasks.find((t) => t.id === taskId);
+    if (transferBusy) return;
+    let task: Task | null;
+    setTransferBusy(true);
+    try {
+      task = await resolveTransferTask(target);
+    } catch (e) {
+      console.error(e);
+      alert(
+        e instanceof Error && e.message
+          ? e.message
+          : "No se pudo crear el RA en el sistema. Revisa la conexión.",
+      );
+      return;
+    } finally {
+      setTransferBusy(false);
+    }
     if (!task) {
        
       alert("RA no encontrado.");
@@ -2650,7 +2754,52 @@ export function CollectionOrderModule({
     const warehouseCount = countOrdersForCollectionListTab(orders, "warehouse");
     const linkedRaCount = countOrdersForCollectionListTab(orders, "linkedRa");
     const noInventoryCount = countOrdersForCollectionListTab(orders, "noInventory");
-    const displayedListOrders = ordersForCollectionListTab(orders, listTab);
+    const tabListOrders = ordersForCollectionListTab(orders, listTab);
+    const listSearchActive = listSearch.trim().length > 0;
+    const displayedListOrders = filterCollectionOrdersBySearch(
+      tabListOrders,
+      listSearch,
+    );
+    /** Otras pestañas con coincidencias, para sugerir cuando aquí no hay resultados. */
+    const listSearchOtherTabs: Array<{
+      tab: CollectionOrderListTab;
+      label: string;
+      count: number;
+    }> = listSearchActive
+      ? (
+          [
+            { tab: "general", label: "En recepción" },
+            { tab: "warehouse", label: "En bodega" },
+            { tab: "linkedRa", label: "Con RA" },
+            { tab: "noInventory", label: "Sin inventario" },
+          ] as const
+        )
+          .filter((t) => t.tab !== listTab)
+          .map((t) => ({
+            ...t,
+            count: filterCollectionOrdersBySearch(
+              ordersForCollectionListTab(orders, t.tab),
+              listSearch,
+            ).length,
+          }))
+          .filter((t) => t.count > 0)
+      : [];
+    const changeListSearch = (value: string) => {
+      setListSearch(value);
+      // Las acciones en lote solo deben tocar lo que se ve.
+      if (listSelectMode) {
+        const visible = new Set(
+          filterCollectionOrdersBySearch(tabListOrders, value).map((o) => o.id),
+        );
+        setSelectedOrderIds((prev) => {
+          const next: Record<string, boolean> = {};
+          for (const id of Object.keys(prev)) {
+            if (prev[id] && visible.has(id)) next[id] = true;
+          }
+          return next;
+        });
+      }
+    };
     const listSelectedCount = displayedListOrders.filter(
       (o) => selectedOrderIds[o.id] === true,
     ).length;
@@ -2746,6 +2895,34 @@ export function CollectionOrderModule({
           linkedRaCount={linkedRaCount}
           noInventoryCount={noInventoryCount}
           onChange={setListTab}
+          trailing={
+            !ordersLoading && orders.length > 0 ? (
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <CollectionOrderListSearch
+                  value={listSearch}
+                  onChange={changeListSearch}
+                />
+                {displayedListOrders.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      listSelectMode ? exitListSelectMode() : setListSelectMode(true)
+                    }
+                    aria-pressed={listSelectMode}
+                    title={listSelectMode ? "Salir de selección" : "Seleccionar órdenes"}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold transition sm:h-9 sm:px-3 ${
+                      listSelectMode
+                        ? "border-indigo-500 bg-indigo-600 text-white shadow-sm hover:bg-indigo-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    <CheckSquare className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className="hidden lg:inline">Seleccionar</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null
+          }
         />
 
         {ordersReloadError ? (
@@ -2763,6 +2940,50 @@ export function CollectionOrderModule({
               No hay órdenes aún. Creá una para empezar.
             </p>
           </div>
+        ) : displayedListOrders.length === 0 && listSearchActive ? (
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-10 text-center dark:border-slate-700 dark:bg-slate-900">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400 dark:bg-slate-800">
+              <Search className="h-5 w-5" aria-hidden />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                Sin resultados para «{listSearch.trim()}»
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Probá con el número de OR, proveedor, cliente, marca o una referencia.
+              </p>
+            </div>
+            {listSearchOtherTabs.length > 0 ? (
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Hay coincidencias en:
+                </span>
+                {listSearchOtherTabs.map((t) => (
+                  <button
+                    key={t.tab}
+                    type="button"
+                    onClick={() => {
+                      exitListSelectMode();
+                      setListTab(t.tab);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-950/40 dark:text-indigo-200"
+                  >
+                    {t.label}
+                    <span className="rounded-full bg-white px-1.5 text-[10px] tabular-nums text-indigo-600 dark:bg-indigo-900/60 dark:text-indigo-200">
+                      {t.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => changeListSearch("")}
+              className="text-xs font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              Limpiar búsqueda
+            </button>
+          </div>
         ) : displayedListOrders.length === 0 ? (
           <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white p-10 text-center dark:border-slate-700 dark:bg-slate-900">
             <p className="font-bold text-slate-500 dark:text-slate-400">
@@ -2777,87 +2998,137 @@ export function CollectionOrderModule({
           </div>
         ) : (
           <>
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-600 dark:bg-slate-900">
-              {!listSelectMode ? (
-                <button
-                  type="button"
-                  onClick={() => setListSelectMode(true)}
-                  className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-indigo-900 shadow-sm hover:bg-indigo-100 dark:border-indigo-500/50 dark:bg-indigo-950/40 dark:text-indigo-100 dark:hover:bg-indigo-950/60"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <CheckSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Seleccionar
-                  </span>
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={exitListSelectMode}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
+            {listSelectMode ? (
+              (() => {
+                const allVisibleSelected =
+                  displayedListOrders.length > 0 &&
+                  listSelectedCount === displayedListOrders.length;
+                const someSelected = listSelectedCount > 0 && !allVisibleSelected;
+                const none = listSelectedCount === 0;
+                const actionBtn =
+                  "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white disabled:pointer-events-none disabled:opacity-35";
+                return (
+                  <div
+                    role="toolbar"
+                    aria-label="Acciones de selección"
+                    className="mb-2 flex shrink-0 items-center gap-1 rounded-xl bg-[#16263F] px-1.5 py-1.5 text-white shadow-lg shadow-slate-900/15 ring-1 ring-white/10 dark:bg-slate-800"
                   >
-                    Cancelar selección
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleListSelectAll}
-                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    {displayedListOrders.length > 0 &&
-                    displayedListOrders.every((o) => selectedOrderIds[o.id] === true)
-                      ? "Quitar selección"
-                      : "Seleccionar todo"}
-                  </button>
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                    Seleccionadas: {listSelectedCount}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={listSelectedCount === 0}
-                    onClick={() => void downloadSelectedListMagaya()}
-                    title="Un solo Excel Magaya (hoja «Magaya»): órdenes en bloques con color alternado."
-                    className="rounded-xl border-2 border-amber-400/80 bg-gradient-to-r from-amber-100 to-orange-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-950 shadow-sm hover:from-amber-200 hover:to-orange-100 disabled:opacity-40 dark:border-amber-500/40 dark:from-amber-950/50 dark:to-orange-950/30 dark:text-amber-100 dark:hover:from-amber-900/60 dark:hover:to-orange-950/40"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      Magaya
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={listSelectedCount === 0}
-                    onClick={() => void downloadSelectedListInventarioExcel()}
-                    title="Mismas columnas que «Descargar CSV» en cada orden (detallado). Archivo Excel con franjas de color suaves por orden; el formato .csv no puede llevar colores."
-                    className="rounded-xl border-2 border-cyan-400/80 bg-cyan-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-cyan-900 shadow-sm hover:bg-cyan-100 disabled:opacity-40 dark:border-cyan-500/50 dark:bg-cyan-950/35 dark:text-cyan-100 dark:hover:bg-cyan-950/55"
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      Inventario
-                    </span>
-                  </button>
-                  {listTab === "warehouse" ? (
                     <button
                       type="button"
-                      disabled={listSelectedCount === 0}
-                      onClick={moveSelectedToNoInventory}
-                      title="Mueve las OR seleccionadas a la pestaña Sin inventario (ya procesadas fuera del flujo de RA)."
-                      className="rounded-xl border-2 border-slate-400/70 bg-slate-100 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-800 shadow-sm hover:bg-slate-200 disabled:opacity-40 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                      onClick={exitListSelectMode}
+                      title="Salir de selección"
+                      aria-label="Salir de selección"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-300 transition hover:bg-white/10 hover:text-white"
                     >
-                      Pasar a sin inventario
+                      <X className="h-4 w-4" aria-hidden />
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    disabled={listSelectedCount === 0}
-                    onClick={() => requestDeleteSelectedOrders()}
-                    className="ml-auto rounded-xl border-2 border-red-200 bg-red-50 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 shadow-sm hover:bg-red-100 disabled:opacity-40 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60"
-                  >
-                    Eliminar seleccionadas
-                  </button>
-                </>
-              )}
-            </div>
+                    <button
+                      type="button"
+                      onClick={toggleListSelectAll}
+                      title={allVisibleSelected ? "Quitar selección" : "Seleccionar todo"}
+                      className="inline-flex h-8 items-center gap-2 rounded-md px-2 text-xs font-semibold text-white transition hover:bg-white/10"
+                    >
+                      {allVisibleSelected ? (
+                        <CheckSquare className="h-4 w-4 text-indigo-300" aria-hidden />
+                      ) : someSelected ? (
+                        <MinusSquare className="h-4 w-4 text-indigo-300" aria-hidden />
+                      ) : (
+                        <Square className="h-4 w-4 text-slate-400" aria-hidden />
+                      )}
+                      <span className="tabular-nums">
+                        {none ? (
+                          <span className="text-slate-300">Seleccionar todo</span>
+                        ) : (
+                          <>
+                            {listSelectedCount}
+                            <span className="font-normal text-slate-400">
+                              {" "}
+                              de {displayedListOrders.length}
+                            </span>
+                          </>
+                        )}
+                      </span>
+                    </button>
 
+                    <div className="ml-auto flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        disabled={none}
+                        onClick={() => void downloadSelectedListMagaya()}
+                        title="Un solo Excel Magaya (hoja «Magaya»): órdenes en bloques con color alternado."
+                        className={actionBtn}
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-amber-300" aria-hidden />
+                        <span className="hidden sm:inline">Magaya</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={none}
+                        onClick={() => void downloadSelectedListInventarioExcel()}
+                        title="Mismas columnas que «Descargar CSV» en cada orden (detallado). Archivo Excel con franjas de color suaves por orden; el formato .csv no puede llevar colores."
+                        className={actionBtn}
+                      >
+                        <FileSpreadsheet className="h-4 w-4 text-cyan-300" aria-hidden />
+                        <span className="hidden sm:inline">Inventario</span>
+                      </button>
+                      {listTab === "warehouse" ? (
+                        <button
+                          type="button"
+                          disabled={none}
+                          onClick={moveSelectedToNoInventory}
+                          title="Mueve las OR seleccionadas a la pestaña Sin inventario (ya procesadas fuera del flujo de RA)."
+                          className={actionBtn}
+                        >
+                          <CircleOff className="h-4 w-4 text-slate-300" aria-hidden />
+                          <span className="hidden md:inline">Sin inventario</span>
+                        </button>
+                      ) : null}
+                      <span className="mx-1 h-5 w-px bg-white/15" aria-hidden />
+                      <button
+                        type="button"
+                        disabled={none}
+                        onClick={() => requestDeleteSelectedOrders()}
+                        title="Eliminar seleccionadas"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-red-300 transition hover:bg-red-500/15 hover:text-red-200 disabled:pointer-events-none disabled:opacity-35"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">Eliminar</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : null}
+
+            {listSearchActive ? (
+              <p className="mb-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">
+                  {displayedListOrders.length}
+                </span>{" "}
+                {displayedListOrders.length === 1 ? "resultado" : "resultados"} de{" "}
+                <span className="tabular-nums">{tabListOrders.length}</span>
+                {listSearchOtherTabs.length > 0 ? (
+                  <>
+                    {" · también en "}
+                    {listSearchOtherTabs.map((t, i) => (
+                      <React.Fragment key={t.tab}>
+                        {i > 0 ? ", " : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            exitListSelectMode();
+                            setListTab(t.tab);
+                          }}
+                          className="font-semibold text-indigo-600 hover:underline dark:text-indigo-300"
+                        >
+                          {t.label} ({t.count})
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
             {displayedListOrders.map((o) => {
               const terraJob = terraJobByOrderId[o.id];
@@ -4199,11 +4470,12 @@ export function CollectionOrderModule({
       <TransferCollectionToRaModal
         open={transferOpen}
         tasks={tasksEligibleForCollectionTransfer}
+        waitingRas={waitingRaTargets}
         lineCount={transferLinesCount}
         busy={transferBusy}
         noEligibleTargets={transferTargetsExcluded}
         onCancel={() => setTransferOpen(false)}
-        onConfirm={(taskId, merge) => void confirmTransfer(taskId, merge)}
+        onConfirm={(target, merge) => void confirmTransfer(target, merge)}
       />
 
       <GeneralChatGptPanel

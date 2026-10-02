@@ -12,7 +12,9 @@ import { Clock3, Maximize2, Minimize2, Package, Radio, X } from "lucide-react";
 import logoAldepositos from "@/assets/brand/logo-aldepositos.png";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import {
+  compareReceptionQueue,
   RECEPTION_COPY,
+  RECEPTION_PRIORITY_THEME,
   RECEPTION_STATUS,
   RECEPTION_STATUS_LABELS,
   type ReceptionStatusId,
@@ -67,8 +69,9 @@ function tvQueueScrollMotion(overflowPx: number): {
 }
 
 /**
- * Columna con scroll automático suave cuando hay más pedidos de los que caben.
- * Usa flex + min-h-0 (no absolute) para que la altura del viewport sea real.
+ * Columna con desplazamiento automático cuando hay más pedidos de los que caben.
+ * Se mueve con transform (compositor/GPU) en vez de scrollTop: scrollTop repinta
+ * toda la columna en cada frame y en TVs en pantalla completa se traba.
  */
 function TvAutoScrollQueueList({
   children,
@@ -81,79 +84,124 @@ function TvAutoScrollQueueList({
   itemCount: number;
   autoScroll?: boolean;
 }) {
+  const viewportRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const userPausedUntil = useRef(0);
 
   useEffect(() => {
-    const el = listRef.current;
-    if (!el || !autoScroll || itemCount < 2) return;
+    const viewport = viewportRef.current;
+    const list = listRef.current;
+    if (!viewport || !list) return;
 
+    let pos = 0;
+    let max = 0;
     let dir: 1 | -1 = 1;
     let pauseUntil = performance.now() + TV_QUEUE_SCROLL_PAUSE_MS;
+    let userPausedUntil = 0;
     let raf = 0;
     let lastTs = 0;
     let cancelled = false;
-    // Posición en float: scrollTop entero se come pasos de < 1 px y la lista no avanza.
-    let pos = el.scrollTop;
 
-    const onUserScrollIntent = () => {
-      userPausedUntil.current = performance.now() + 5000;
-      pos = el.scrollTop;
+    const apply = () => {
+      list.style.transform = `translate3d(0, ${-pos}px, 0)`;
     };
-    el.addEventListener("wheel", onUserScrollIntent, { passive: true });
-    el.addEventListener("touchstart", onUserScrollIntent, { passive: true });
-    el.addEventListener("pointerdown", onUserScrollIntent, { passive: true });
+
+    // Medir solo cuando cambia el tamaño: leer scrollHeight en cada frame fuerza layout.
+    const measure = () => {
+      max = Math.max(0, list.offsetHeight - viewport.clientHeight);
+      if (pos > max) pos = max;
+      if (max <= 6) pos = 0;
+      apply();
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(viewport);
+    ro.observe(list);
+    measure();
+
+    const onWheel = (e: WheelEvent) => {
+      if (max <= 6) return;
+      e.preventDefault();
+      userPausedUntil = performance.now() + 5000;
+      pos = Math.min(max, Math.max(0, pos + e.deltaY));
+      apply();
+    };
+
+    let dragStartY: number | null = null;
+    let dragStartPos = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      if (max <= 6) return;
+      dragStartY = e.clientY;
+      dragStartPos = pos;
+      userPausedUntil = performance.now() + 5000;
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (dragStartY == null) return;
+      userPausedUntil = performance.now() + 5000;
+      pos = Math.min(max, Math.max(0, dragStartPos - (e.clientY - dragStartY)));
+      apply();
+    };
+    const onPointerUp = () => {
+      dragStartY = null;
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
 
     const tick = (ts: number) => {
       if (cancelled) return;
-      const max = Math.max(0, el.scrollHeight - el.clientHeight);
       const motion = tvQueueScrollMotion(max);
 
-      if (motion.pxPerSec > 0 && ts >= userPausedUntil.current && ts >= pauseUntil) {
-        const dt = lastTs ? Math.min(48, ts - lastTs) : 16;
+      if (
+        motion.pxPerSec > 0 &&
+        ts >= userPausedUntil &&
+        ts >= pauseUntil
+      ) {
+        // dt real (con tope) para que la velocidad no "frene" cuando la TV pierde un frame.
+        const dt = lastTs ? Math.min(100, ts - lastTs) : 16;
         pos += dir * ((motion.pxPerSec * dt) / 1000);
 
-        if (dir === 1 && pos >= max - 0.5) {
+        if (dir === 1 && pos >= max) {
           pos = max;
           dir = -1;
           pauseUntil = ts + motion.pauseMs;
-        } else if (dir === -1 && pos <= 0.5) {
+        } else if (dir === -1 && pos <= 0) {
           pos = 0;
           dir = 1;
           pauseUntil = ts + motion.pauseMs;
         }
-        el.scrollTop = pos;
-      } else if (ts < userPausedUntil.current) {
-        pos = el.scrollTop;
+        apply();
       }
 
       lastTs = ts;
       raf = requestAnimationFrame(tick);
     };
 
-    // Esperar layout antes del primer movimiento.
-    const startId = window.setTimeout(() => {
-      if (cancelled) return;
-      pos = 0;
-      el.scrollTop = 0;
+    if (autoScroll && itemCount >= 2) {
       raf = requestAnimationFrame(tick);
-    }, 120);
+    }
 
     return () => {
       cancelled = true;
-      window.clearTimeout(startId);
       cancelAnimationFrame(raf);
-      el.removeEventListener("wheel", onUserScrollIntent);
-      el.removeEventListener("touchstart", onUserScrollIntent);
-      el.removeEventListener("pointerdown", onUserScrollIntent);
+      ro.disconnect();
+      viewport.removeEventListener("wheel", onWheel);
+      viewport.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
     };
   }, [autoScroll, itemCount]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={viewportRef}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    >
       <ul
         ref={listRef}
-        className={`custom-scrollbar flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain ${className ?? ""}`}
+        className={`flex min-w-0 shrink-0 flex-col will-change-transform [backface-visibility:hidden] ${className ?? ""}`}
       >
         {children}
         {/* Espacio extra para que el último pedido no quede cortado al fondo. */}
@@ -173,6 +221,7 @@ const TV_BASE_COLUMNS: ReceptionStatusId[] = [
 const TV_OPTIONAL_COLUMNS: ReceptionStatusId[] = [
   RECEPTION_STATUS.RAMPA_EXTRA,
   RECEPTION_STATUS.CARRETILLADO,
+  RECEPTION_STATUS.PARCIAL,
 ];
 
 const TV_ALL_COLUMNS: ReceptionStatusId[] = [
@@ -237,6 +286,15 @@ const TV_COLUMN_UI: Record<
     stripe: "from-violet-400 to-violet-600",
     emptyIcon: "text-violet-300",
   },
+  PARCIAL: {
+    headerGradient: "from-pink-500 via-pink-600 to-pink-700",
+    headerGlow: "shadow-pink-200/80",
+    panelBg: "bg-pink-50/80",
+    panelBorder: "border-pink-200",
+    countBg: "bg-white/25 text-white",
+    stripe: "from-pink-400 to-pink-600",
+    emptyIcon: "text-pink-300",
+  },
   COMPLETADO: {
     headerGradient: "from-emerald-600 to-emerald-800",
     headerGlow: "shadow-emerald-200/80",
@@ -262,19 +320,31 @@ function TruckTvCard({
   zebra?: boolean;
 }) {
   const isDense = density === "dense";
+  const isPriority = truck.priority === true;
+  const surface = isPriority
+    ? RECEPTION_PRIORITY_THEME.cardBg
+    : isDense && zebra
+      ? "bg-slate-50/90"
+      : "bg-white";
   return (
     <li
-      className={`group relative shrink-0 overflow-hidden border border-slate-200/90 ring-1 ring-slate-100 transition duration-150 hover:bg-slate-50/80 ${
+      className={`group relative shrink-0 overflow-hidden border transition duration-150 ${surface} ${
+        isPriority
+          ? RECEPTION_PRIORITY_THEME.cardRing
+          : "border-slate-200/90 shadow-md ring-1 ring-slate-100 hover:bg-slate-50/80"
+      } ${
         isDense
-          ? `rounded-lg px-2.5 py-2 shadow-sm ${zebra ? "bg-slate-50/90" : "bg-white"}`
+          ? "rounded-lg py-2 pr-2.5 pl-3"
           : density === "compact"
-            ? "rounded-xl bg-white px-3 py-2.5 shadow-md"
-            : "rounded-2xl bg-white px-4 py-4 shadow-md md:px-5 md:py-5"
+            ? "rounded-xl px-3 py-2.5"
+            : "rounded-2xl px-4 py-4 md:px-5 md:py-5"
       }`}
     >
-      {!isDense ? (
+      {!isDense || isPriority ? (
         <span
-          className={`pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-b ${stripeClass}`}
+          className={`pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-b ${
+            isDense ? "w-1" : "w-1.5"
+          } ${isPriority ? RECEPTION_PRIORITY_THEME.stripe : stripeClass}`}
           aria-hidden
         />
       ) : null}
@@ -318,7 +388,9 @@ function KanbanColumn({ statusId, trucks, rampOccupancy }: KanbanColumnProps) {
   const isDense = density === "dense";
   const columnSubtitle = isQueueColumn
     ? "Esperando rampa"
-    : rampRetiroOccupied && trucks.length === 0
+    : statusId === RECEPTION_STATUS.PARCIAL
+      ? "Esperando el resto"
+      : rampRetiroOccupied && trucks.length === 0
       ? RAMP_OCCUPANCY_COPY.occupiedRetiroLong
       : rampRetiroOccupied
         ? RAMP_OCCUPANCY_COPY.operatorBadge
@@ -504,6 +576,7 @@ export function TruckDirectionTvModule({
       RAMPA_2: [],
       RAMPA_EXTRA: [],
       CARRETILLADO: [],
+      PARCIAL: [],
       COMPLETADO: [],
     };
 
@@ -512,7 +585,10 @@ export function TruckDirectionTvModule({
         .filter((t) => t.status === statusId)
         .sort((a, b) => {
           if (statusId === RECEPTION_STATUS.EN_FILA) {
-            return a.sortOrder - b.sortOrder;
+            return compareReceptionQueue(a, b);
+          }
+          if (statusId === RECEPTION_STATUS.PARCIAL) {
+            return a.updatedAt.localeCompare(b.updatedAt);
           }
           const ta = a.rampAssignedAt ?? a.updatedAt;
           const tb = b.rampAssignedAt ?? b.updatedAt;
@@ -652,7 +728,9 @@ export function TruckDirectionTvModule({
       ) : (
         <div
           className={`relative z-10 grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 md:gap-4 md:p-5 ${
-            visibleColumns.length >= 5
+            visibleColumns.length >= 6
+              ? "md:grid-cols-6"
+              : visibleColumns.length === 5
               ? "md:grid-cols-5"
               : visibleColumns.length === 4
                 ? "md:grid-cols-4"

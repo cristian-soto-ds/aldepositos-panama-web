@@ -116,6 +116,11 @@ function RampStatusCard({
           }`}
         >
           {statusLabel}
+          {since ? (
+            <span className="ml-1 text-[10px] font-semibold text-orange-100">
+              · desde {since}
+            </span>
+          ) : null}
         </span>
       </span>
 
@@ -170,20 +175,28 @@ export function RampOccupancyControls({
   return (
     <section className="rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 shrink-0">
-          <h3 className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-slate-100">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-              <PackageX className="h-3.5 w-3.5" aria-hidden />
-            </span>
-            {RAMP_OCCUPANCY_COPY.sectionTitle}
-            <span className="hidden items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 sm:inline-flex">
-              <Monitor className="h-3 w-3" aria-hidden />
-              TV
-            </span>
-          </h3>
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+            <PackageX className="h-4 w-4" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-slate-100">
+              {RAMP_OCCUPANCY_COPY.sectionTitle}
+              <span
+                className="hidden items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 sm:inline-flex"
+                title="Este estado también se muestra en la pantalla TV"
+              >
+                <Monitor className="h-3 w-3" aria-hidden />
+                Se ve en TV
+              </span>
+            </h3>
+            <p className="mt-0.5 hidden text-[11px] text-slate-500 dark:text-slate-400 sm:block">
+              Tocá una rampa si está ocupada por un retiro de mercancía.
+            </p>
+          </div>
         </div>
 
-        <div className="flex w-full gap-2 sm:w-auto sm:max-w-sm">
+        <div className="flex w-full gap-2 sm:w-auto sm:max-w-md">
           {RAMP_OCCUPANCY_RAMPS.map((rampId) => {
             const entry = occupancy[rampId];
             return (

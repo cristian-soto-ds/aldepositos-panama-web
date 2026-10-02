@@ -9,7 +9,9 @@ import {
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import {
+  applyPartialDeliveryToOrder,
   buildGroupReceptionTruck,
+  closePartialDelivery,
   collectionOrderToReceptionTruck,
   isReceptionGroupTruckId,
   mergeCollectionOrdersIntoTrucks,
@@ -31,6 +33,26 @@ import {
   subscribeReceptionLive,
 } from "@/lib/receptionLogistics/receptionLiveSync";
 import { RECEPTION_SORT_EPOCH_MIN } from "@/lib/receptionLogistics/receptionTiming";
+
+/** Quita todos los campos de recepción (fila, grupo, prioridad, parcial). */
+export function stripReceptionFields(order: CollectionOrder): CollectionOrder {
+  const {
+    receptionStatus: _s,
+    receptionGroupId: _g,
+    receptionQueuedAt: _q,
+    receptionPriority: _p,
+    receptionPriorityAt: _pa,
+    receptionReceivedBultos: _r,
+    receptionPartialHistory: _h,
+    ...rest
+  } = order;
+  return rest;
+}
+
+function stripPriorityFields(order: CollectionOrder): CollectionOrder {
+  const { receptionPriority: _p, receptionPriorityAt: _pa, ...rest } = order;
+  return rest;
+}
 
 function findLocalTruck(id: string): ReceptionTruck | null {
   return readLocalSnapshot().trucks.find((t) => t.id === id) ?? null;
@@ -209,8 +231,12 @@ async function syncReceptionStatusToCollectionOrder(
           return;
         }
         const now = new Date().toISOString();
+        const base =
+          status === RECEPTION_STATUS.COMPLETADO
+            ? closePartialDelivery(order)
+            : order;
         const next: CollectionOrder = {
-          ...order,
+          ...base,
           receptionStatus: status,
           receptionQueuedAt: order.receptionQueuedAt || now,
           updatedAt: now,
@@ -407,14 +433,8 @@ export async function removeOrderFromReceptionGroup(
   if (!order?.receptionGroupId) {
     // Sin grupo: clear normal
     if (!order?.receptionStatus) return;
-    const {
-      receptionStatus: _s,
-      receptionGroupId: _g,
-      receptionQueuedAt: _q,
-      ...rest
-    } = order;
     const payload: CollectionOrder = {
-      ...rest,
+      ...stripReceptionFields(order),
       updatedAt: new Date().toISOString(),
     };
     await updateCollectionOrder(payload);
@@ -425,14 +445,8 @@ export async function removeOrderFromReceptionGroup(
   const groupId = order.receptionGroupId;
   const groupTruck = await findTruckPreferLocal(groupId);
 
-  const {
-    receptionStatus: _s,
-    receptionGroupId: _g,
-    receptionQueuedAt: _q,
-    ...rest
-  } = order;
   const cleared: CollectionOrder = {
-    ...rest,
+    ...stripReceptionFields(order),
     updatedAt: new Date().toISOString(),
   };
   await updateCollectionOrder(cleared);
@@ -637,6 +651,12 @@ export async function updateReceptionTruckStatus(
         ? generateWarehouseReceiptNumber(prev.plate)
         : prev.warehouseReceiptNumber,
   };
+  // Completar cierra la entrega parcial: la tarjeta vuelve a mostrar el total.
+  if (status === RECEPTION_STATUS.COMPLETADO && prev.totalBultos != null) {
+    next.expectedBultos = prev.totalBultos;
+    delete next.receivedBultos;
+    delete next.totalBultos;
+  }
 
   // Persistencia + broadcast inmediato (los demás ven el movimiento al instante).
   await upsertReceptionTruck(next);
@@ -729,7 +749,9 @@ export async function setCollectionOrderReceptionStatus(
 
   // OR suelta
   const payload: CollectionOrder = {
-    ...order,
+    ...(status === RECEPTION_STATUS.COMPLETADO
+      ? closePartialDelivery(order)
+      : order),
     receptionStatus: status,
     receptionQueuedAt: order.receptionQueuedAt || now,
     updatedAt: now,
@@ -760,27 +782,46 @@ async function completeSingleOrderFromReceptionGroup(
   order: CollectionOrder,
   opts: { issueReceipt: boolean; now: string },
 ): Promise<CollectionOrder[]> {
-  const groupId = order.receptionGroupId!;
   const { issueReceipt, now } = opts;
 
-  const {
-    receptionGroupId: _g,
-    ...withoutGroup
-  } = order;
+  const { receptionGroupId: _g, ...withoutGroup } = closePartialDelivery(order);
   const completed: CollectionOrder = {
     ...withoutGroup,
     receptionStatus: RECEPTION_STATUS.COMPLETADO,
     receptionQueuedAt: order.receptionQueuedAt || now,
     updatedAt: now,
   };
-  await updateCollectionOrder(completed);
+  const result = await detachOrderFromReceptionGroup(order, completed, now);
+
+  if (issueReceipt) {
+    const truckId = receptionTruckIdForCollectionOrder(completed.id);
+    await updateReceptionTruckStatus(truckId, RECEPTION_STATUS.COMPLETADO, {
+      issueReceipt: true,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Saca una OR de su camión agrupado (guardando `detached`, ya sin groupId)
+ * y reacomoda el resto: grupo reconstruido, tarjeta suelta o camión eliminado.
+ * Devuelve [detached, ...OR hermanas modificadas].
+ */
+async function detachOrderFromReceptionGroup(
+  order: CollectionOrder,
+  detached: CollectionOrder,
+  now: string,
+): Promise<CollectionOrder[]> {
+  const groupId = order.receptionGroupId!;
+  await updateCollectionOrder(detached);
 
   const siblings = (
     await fetchCollectionOrdersByReceptionGroupId(groupId)
   ).filter((o) => o.id !== order.id);
 
   const existingGroup = await findTruckPreferLocal(groupId);
-  const result: CollectionOrder[] = [completed];
+  const result: CollectionOrder[] = [detached];
 
   if (siblings.length === 0) {
     await removeReceptionTruckById(groupId);
@@ -811,16 +852,146 @@ async function completeSingleOrderFromReceptionGroup(
     }
   }
 
-  await syncCollectionOrderToReceptionQueue(completed);
+  await syncCollectionOrderToReceptionQueue(detached);
+  return result;
+}
 
-  if (issueReceipt) {
-    const truckId = receptionTruckIdForCollectionOrder(completed.id);
-    await updateReceptionTruckStatus(truckId, RECEPTION_STATUS.COMPLETADO, {
-      issueReceipt: true,
-    });
+/**
+ * Activa / quita la prioridad del camión de esta OR.
+ * En camión agrupado aplica a todas sus OR. Si la OR aún no estaba en
+ * recepción, entra a la fila (prioridad implica estar esperando rampa).
+ */
+export async function setCollectionOrderReceptionPriority(
+  orderId: string,
+  on: boolean,
+): Promise<CollectionOrder[]> {
+  const order = await fetchCollectionOrderById(orderId);
+  if (!order) throw new Error("No se encontró la orden de recolección.");
+
+  const now = new Date().toISOString();
+  const apply = (o: CollectionOrder): CollectionOrder =>
+    on
+      ? {
+          ...o,
+          receptionPriority: true,
+          receptionPriorityAt: o.receptionPriorityAt || now,
+          receptionStatus: o.receptionStatus ?? RECEPTION_STATUS.EN_FILA,
+          receptionQueuedAt: o.receptionQueuedAt || now,
+          updatedAt: now,
+        }
+      : { ...stripPriorityFields(o), updatedAt: now };
+
+  if (order.receptionGroupId) {
+    const groupId = order.receptionGroupId;
+    const byId = new Map<string, CollectionOrder>();
+    for (const o of await fetchCollectionOrdersByReceptionGroupId(groupId)) {
+      byId.set(o.id, o);
+    }
+    byId.set(order.id, order);
+    const updated = Array.from(byId.values()).map(apply);
+    await Promise.all(updated.map((o) => updateCollectionOrder(o)));
+
+    const existing = await findTruckPreferLocal(groupId);
+    const truck = buildGroupReceptionTruck(updated, existing, { groupId });
+    if (truck) await upsertReceptionTruck(truck);
+    return updated;
   }
 
-  return result;
+  const payload = apply(order);
+  await updateCollectionOrder(payload);
+  await syncCollectionOrderToReceptionQueue(payload);
+  return [payload];
+}
+
+/**
+ * Registra una entrega incompleta: suma los bultos que llegaron y deja la OR
+ * en PARCIAL con lo pendiente. Si con esto se completa el total, la marca Listo.
+ * En camión agrupado la OR se separa (el resto del camión sigue su curso).
+ */
+export async function markCollectionOrderPartialDelivery(
+  orderId: string,
+  arrivedBultos: number,
+): Promise<CollectionOrder[]> {
+  const order = await fetchCollectionOrderById(orderId);
+  if (!order) throw new Error("No se encontró la orden de recolección.");
+
+  const now = new Date().toISOString();
+  const applied = applyPartialDeliveryToOrder(order, arrivedBultos, now);
+
+  if (applied.completed) {
+    await updateCollectionOrder(applied.order);
+    return setCollectionOrderReceptionStatus(
+      orderId,
+      RECEPTION_STATUS.COMPLETADO,
+    );
+  }
+
+  const partial: CollectionOrder = {
+    ...stripPriorityFields(applied.order),
+    receptionStatus: RECEPTION_STATUS.PARCIAL,
+    receptionQueuedAt: order.receptionQueuedAt || now,
+  };
+
+  if (order.receptionGroupId) {
+    const groupTruck = await findTruckPreferLocal(order.receptionGroupId);
+    const { receptionGroupId: _g, ...detached } = partial;
+    const result = await detachOrderFromReceptionGroup(order, detached, now);
+    // Conservar en la tarjeta suelta la rampa / recibo del camión original.
+    const soloId = receptionTruckIdForCollectionOrder(order.id);
+    const solo = findLocalTruck(soloId);
+    if (solo && groupTruck) {
+      await upsertReceptionTruck({
+        ...solo,
+        rampAssignedAt: groupTruck.rampAssignedAt ?? solo.rampAssignedAt,
+        rampUsed: groupTruck.rampUsed ?? solo.rampUsed,
+        warehouseReceiptNumber:
+          groupTruck.warehouseReceiptNumber ?? solo.warehouseReceiptNumber,
+      });
+    }
+    return result;
+  }
+
+  await updateCollectionOrder(partial);
+  await syncCollectionOrderToReceptionQueue(partial);
+  return [partial];
+}
+
+/**
+ * Llegó el resto de una entrega parcial: la OR vuelve a la fila (al final,
+ * como un camión nuevo) mostrando solo los bultos pendientes.
+ */
+export async function resumePartialDelivery(
+  orderId: string,
+): Promise<CollectionOrder[]> {
+  const order = await fetchCollectionOrderById(orderId);
+  if (!order) throw new Error("No se encontró la orden de recolección.");
+
+  const now = new Date().toISOString();
+  const payload: CollectionOrder = {
+    ...order,
+    receptionStatus: RECEPTION_STATUS.EN_FILA,
+    receptionQueuedAt: now,
+    updatedAt: now,
+  };
+  await updateCollectionOrder(payload);
+
+  // Nueva visita: no heredar hora de rampa / recibo de la entrega anterior.
+  const truckId = receptionTruckIdForCollectionOrder(order.id);
+  const prev = await findTruckPreferLocal(truckId);
+  const fresh: ReceptionTruck | null = prev
+    ? {
+        ...prev,
+        queuedAt: undefined,
+        sortOrder: 0,
+        rampAssignedAt: undefined,
+        rampUsed: undefined,
+        completedAt: undefined,
+        warehouseReceiptNumber: undefined,
+      }
+    : null;
+  const truck = collectionOrderToReceptionTruck(payload, fresh);
+  if (truck) await upsertReceptionTruck(truck);
+  return [payload];
 }
 
 /** Consistencia de respaldo; los movimientos van por Realtime/broadcast. */

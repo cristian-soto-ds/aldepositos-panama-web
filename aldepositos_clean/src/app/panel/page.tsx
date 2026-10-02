@@ -10,6 +10,8 @@ import {
   updateTask,
   deleteTaskById,
   fetchTaskById,
+  findTaskIdByRa,
+  isDuplicateRaError,
 } from "@/lib/supabase";
 import { saveRaInventorySnapshotAfterPersist } from "@/lib/raInventorySnapshots";
 import { useSupabaseTasks } from "@/hooks/useSupabaseTasks";
@@ -580,9 +582,54 @@ function PanelPageInner() {
     });
   }, []);
 
-  const handleSaveManualTask = async (taskData: Task) => {
+  /** Crea un RA para pasarle una OR; si el número ya existe devuelve ese RA. */
+  const handleCreateTaskForOrder = useCallback(
+    async (draft: Task): Promise<Task> => {
+      const raKey = String(draft.ra ?? "").trim().toUpperCase();
+      const local = tasks.find(
+        (t) => String(t.ra ?? "").trim().toUpperCase() === raKey,
+      );
+      if (local) return local;
+      const adoptExisting = async (): Promise<Task | null> => {
+        const existingId = await findTaskIdByRa(String(draft.ra ?? ""));
+        if (!existingId) return null;
+        const full = await fetchTaskById(existingId);
+        if (!full) return null;
+        setTasks((prev) => (prev.some((t) => t.id === full.id) ? prev : [...prev, full]));
+        return full;
+      };
+      const existing = await adoptExisting();
+      if (existing) return existing;
+      const base: Task = {
+        ...draft,
+        date: draft.date || new Date().toISOString().split("T")[0]!,
+        dispatched: draft.dispatched ?? false,
+        containerDraft: draft.containerDraft ?? false,
+      };
+      try {
+        await insertTask(base);
+      } catch (e) {
+        if (isDuplicateRaError(e)) {
+          const raced = await adoptExisting();
+          if (raced) return raced;
+        }
+        throw e;
+      }
+      setTasks((prev) => (prev.some((t) => t.id === base.id) ? prev : [...prev, base]));
+      return base;
+    },
+    [setTasks, tasks],
+  );
+
+  const handleSaveManualTask = async (taskData: Task): Promise<void> => {
     const today = new Date().toISOString().split("T")[0]!;
     const exists = tasks.some((t) => t.id === taskData.id);
+    const duplicateAlert = () => {
+      // eslint-disable-next-line no-alert
+      alert(
+        `⚠️ El RA ${taskData.ra} ya existe en el sistema (ingresado, en proceso o en contenedor).`,
+      );
+    };
     const duplicatedRA = tasks.some(
       (t) =>
         t.id !== taskData.id &&
@@ -590,10 +637,7 @@ function PanelPageInner() {
           String(taskData.ra || "").trim().toUpperCase(),
     );
     if (duplicatedRA) {
-      // eslint-disable-next-line no-alert
-      alert(
-        `⚠️ El RA ${taskData.ra} ya existe en el sistema (ingresado, en proceso o en contenedor).`,
-      );
+      duplicateAlert();
       return;
     }
     const base: Task = {
@@ -603,6 +647,13 @@ function PanelPageInner() {
       containerDraft: taskData.containerDraft ?? false,
     };
     try {
+      // La lista local puede no tener aún un RA recién creado por otro usuario.
+      const existingId = await findTaskIdByRa(String(base.ra ?? ""), base.id);
+      if (existingId) {
+        duplicateAlert();
+        void reloadTasks();
+        return;
+      }
       if (exists) {
         await updateTask(base);
       } else {
@@ -612,11 +663,17 @@ function PanelPageInner() {
         if (exists) {
           return prev.map((t) => (t.id === taskData.id ? base : t));
         }
+        if (prev.some((t) => t.id === base.id)) return prev;
         return [...prev, base];
       });
       closeManualModal();
     } catch (e) {
       console.error(e);
+      if (isDuplicateRaError(e)) {
+        duplicateAlert();
+        void reloadTasks();
+        return;
+      }
       // eslint-disable-next-line no-alert
       alert("No se pudo guardar el RA en Supabase.");
     }
@@ -706,6 +763,7 @@ function PanelPageInner() {
             userEmail={userEmail}
             userAvatarSrc={sidebarAvatarUrl}
             preferences={preferences}
+            onNavigate={setCurrentViewGuarded}
           />
         )}
 
@@ -737,6 +795,7 @@ function PanelPageInner() {
             <CollectionOrderModule
               tasks={tasks}
               onUpdateTask={handleUpdateTask}
+              onCreateTask={handleCreateTaskForOrder}
               userEmail={userEmail}
               userDisplayName={userDisplayName}
             />

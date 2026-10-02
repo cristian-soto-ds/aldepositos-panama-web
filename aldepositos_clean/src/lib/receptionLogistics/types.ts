@@ -31,6 +31,15 @@ export type ReceptionTruck = {
   orderNumeros?: string[];
   /** Desglose por OR: número + bultos + consignatario (tarjeta camión). */
   orderLines?: Array<{ numero: string; bultos: number; cliente?: string }>;
+  /** Camión prioritario (primero en la fila). */
+  priority?: boolean;
+  priorityAt?: string;
+  /**
+   * Entrega parcial: bultos ya recibidos y total original.
+   * En ese caso `expectedBultos` = pendiente por entregar.
+   */
+  receivedBultos?: number;
+  totalBultos?: number;
   source?: "collection_order" | "import";
   createdAt: string;
   updatedAt: string;

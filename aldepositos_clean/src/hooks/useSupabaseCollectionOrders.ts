@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSharedWorkPresenceTabId } from "@/lib/panelPresence";
 import {
   isForeignLiveUpdate,
@@ -10,7 +10,9 @@ import {
   collectionOrdersListFingerprint,
   fetchCollectionOrders,
   fetchCollectionOrdersForReceptionist,
+  mergeCollectionOrdersSnapshot,
   patchCollectionOrdersList,
+  rememberDeletedCollectionOrder,
   slimCollectionOrderForReceptionist,
   subscribeCollectionOrdersRealtime,
   type CollectionOrderRealtimeChange,
@@ -40,25 +42,43 @@ export function useSupabaseCollectionOrders({
   const [loading, setLoading] = useState(true);
   const [reloadError, setReloadError] = useState<string | null>(null);
   const slim = mode === "receptionist";
+  /** Último cambio realtime por OR (ms locales): el snapshot no lo pisa. */
+  const realtimeTouchedAtRef = useRef<Map<string, number>>(new Map());
+  const reloadInFlightRef = useRef<Promise<void> | null>(null);
+  const reloadQueuedRef = useRef(false);
+  const configGenerationRef = useRef(0);
 
-  const reload = useCallback(async () => {
+  const reloadOnce = useCallback(async () => {
     if (!enabled) {
       setOrders([]);
       setReloadError(null);
       setLoading(false);
       return;
     }
+    const generation = configGenerationRef.current;
+    const startedAt = Date.now();
     try {
       const list = slim
         ? await fetchCollectionOrdersForReceptionist()
         : await fetchCollectionOrders();
+      if (generation !== configGenerationRef.current) return;
       setReloadError(null);
-      setOrders((prev) =>
-        collectionOrdersListFingerprint(prev) ===
-        collectionOrdersListFingerprint(list)
+      const touched = realtimeTouchedAtRef.current;
+      setOrders((prev) => {
+        const merged = mergeCollectionOrdersSnapshot({
+          prev,
+          snapshot: list,
+          snapshotStartedAt: startedAt,
+          touchedSince: (id) => (touched.get(id) ?? 0) >= startedAt,
+        });
+        return collectionOrdersListFingerprint(prev) ===
+          collectionOrdersListFingerprint(merged)
           ? prev
-          : list,
-      );
+          : merged;
+      });
+      for (const [id, at] of touched) {
+        if (at < startedAt) touched.delete(id);
+      }
     } catch (e) {
       console.error(e);
       // No vaciar la lista: un fallo de red no debe “borrar” las OR de la UI.
@@ -72,8 +92,38 @@ export function useSupabaseCollectionOrders({
     }
   }, [enabled, slim]);
 
+  const reloadOnceRef = useRef(reloadOnce);
+  reloadOnceRef.current = reloadOnce;
+
+  useEffect(() => {
+    configGenerationRef.current += 1;
+  }, [enabled, slim]);
+
+  /** Un solo reload a la vez; pedidos durante uno en curso se agrupan en otro al terminar. */
+  const reload = useCallback((): Promise<void> => {
+    if (reloadInFlightRef.current) {
+      reloadQueuedRef.current = true;
+      return reloadInFlightRef.current;
+    }
+    const run = async () => {
+      do {
+        reloadQueuedRef.current = false;
+        await reloadOnceRef.current();
+      } while (reloadQueuedRef.current);
+    };
+    const p = run().finally(() => {
+      reloadInFlightRef.current = null;
+    });
+    reloadInFlightRef.current = p;
+    return p;
+  }, []);
+
   const applyRealtimeChange = useCallback(
     (change: CollectionOrderRealtimeChange) => {
+      realtimeTouchedAtRef.current.set(change.id, Date.now());
+      if (change.eventType === "DELETE") {
+        rememberDeletedCollectionOrder(change.id);
+      }
       const normalized: CollectionOrderRealtimeChange =
         slim && change.order
           ? {
@@ -91,7 +141,7 @@ export function useSupabaseCollectionOrders({
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+  }, [reload, enabled, slim]);
 
   useEffect(() => {
     if (!enabled) return;

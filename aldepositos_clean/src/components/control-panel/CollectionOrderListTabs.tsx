@@ -11,10 +11,12 @@ type CollectionOrderListTabsProps = {
   linkedRaCount: number;
   noInventoryCount: number;
   onChange: (tab: CollectionOrderListTab) => void;
+  /** Acción compacta alineada a la derecha de las pestañas (ej. «Seleccionar»). */
+  trailing?: React.ReactNode;
 };
 
 const tabBase =
-  "inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-1.5 text-[9px] font-black uppercase tracking-wide transition sm:flex-none sm:gap-2 sm:rounded-xl sm:px-4 sm:py-2.5 sm:text-[10px] sm:tracking-widest";
+  "inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-1.5 text-[9px] font-black uppercase tracking-wide transition sm:flex-initial sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2.5 sm:text-[10px] sm:tracking-wider";
 
 export function CollectionOrderListTabs({
   active,
@@ -23,9 +25,11 @@ export function CollectionOrderListTabs({
   linkedRaCount,
   noInventoryCount,
   onChange,
+  trailing,
 }: CollectionOrderListTabsProps) {
   return (
-    <div className="mb-2 grid grid-cols-4 gap-1 sm:mb-4 sm:flex sm:flex-wrap sm:gap-2">
+    <div className="mb-2 flex items-center gap-2 sm:mb-4">
+    <div className="grid min-w-0 flex-1 grid-cols-4 gap-1 sm:flex sm:flex-nowrap sm:gap-2">
       <button
         type="button"
         onClick={() => onChange("general")}
@@ -104,6 +108,8 @@ export function CollectionOrderListTabs({
           {noInventoryCount}
         </span>
       </button>
+    </div>
+    {trailing ? <div className="shrink-0">{trailing}</div> : null}
     </div>
   );
 }

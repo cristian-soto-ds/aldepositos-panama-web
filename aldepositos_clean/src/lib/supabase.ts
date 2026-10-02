@@ -174,6 +174,38 @@ export async function fetchTaskRow(id: string): Promise<TaskRowMeta | null> {
 }
 
 /**
+ * Busca en la BD (no en el estado local) otro RA con el mismo número.
+ * El estado del panel puede estar desactualizado si otro usuario acaba de crearlo.
+ */
+export async function findTaskIdByRa(
+  ra: string,
+  excludeId?: string,
+): Promise<string | null> {
+  const target = String(ra ?? "").trim();
+  if (!target) return null;
+  const pattern = target.replace(/[\\%_]/g, (c) => `\\${c}`);
+  let query = supabase
+    .from("tasks")
+    .select("id")
+    .ilike("payload->>ra", pattern)
+    .limit(1);
+  if (excludeId) query = query.neq("id", excludeId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data?.[0]?.id ?? null;
+}
+
+/** Violación del índice único `tasks_ra_unique_idx` (RA repetido). */
+export function isDuplicateRaError(error: unknown): boolean {
+  const e = error as { code?: string; message?: string } | null;
+  if (!e) return false;
+  return (
+    e.code === "23505" &&
+    String(e.message ?? "").includes("tasks_ra_unique_idx")
+  );
+}
+
+/**
  * Crea una fila nueva (RA nuevo).
  */
 export async function insertTask(task: Task): Promise<void> {

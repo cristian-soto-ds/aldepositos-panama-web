@@ -27,6 +27,8 @@ export const RECEPTION_STATUS = {
   RAMPA_2: "RAMPA_2",
   RAMPA_EXTRA: "RAMPA_EXTRA",
   CARRETILLADO: "CARRETILLADO",
+  /** Entrega incompleta: faltan bultos que el proveedor trae después. */
+  PARCIAL: "PARCIAL",
   COMPLETADO: "COMPLETADO",
 } as const;
 
@@ -40,6 +42,7 @@ export const RECEPTION_STATUS_LABELS: Record<ReceptionStatusId, string> = {
   RAMPA_2: "Rampa 2",
   RAMPA_EXTRA: "Rampa Extra",
   CARRETILLADO: "Carretillado",
+  PARCIAL: "Parcial / Pendiente",
   COMPLETADO: "Completado",
 };
 
@@ -50,6 +53,15 @@ export const RECEPTION_STATUS_LABELS: Record<ReceptionStatusId, string> = {
 export const RECEPTION_OPTIONAL_STATUS: ReceptionStatusId[] = [
   RECEPTION_STATUS.RAMPA_EXTRA,
   RECEPTION_STATUS.CARRETILLADO,
+  RECEPTION_STATUS.PARCIAL,
+];
+
+/**
+ * Estados que solo se asignan desde Recepcionista (requieren datos extra,
+ * p. ej. bultos recibidos): no se permite arrastrarlos en el tablero.
+ */
+export const RECEPTION_NO_DROP_STATUS: ReceptionStatusId[] = [
+  RECEPTION_STATUS.PARCIAL,
 ];
 
 /**
@@ -85,8 +97,45 @@ export const RECEPTION_KANBAN_COLUMNS: ReceptionStatusId[] = [
   RECEPTION_STATUS.RAMPA_2,
   RECEPTION_STATUS.RAMPA_EXTRA,
   RECEPTION_STATUS.CARRETILLADO,
+  RECEPTION_STATUS.PARCIAL,
   RECEPTION_STATUS.COMPLETADO,
 ];
+
+/**
+ * Orden de la fila: prioritarios primero (por hora de prioridad),
+ * luego FIFO por sortOrder (hora real de entrada a fila).
+ */
+export function compareReceptionQueue(
+  a: { priority?: boolean; priorityAt?: string; sortOrder: number },
+  b: { priority?: boolean; priorityAt?: string; sortOrder: number },
+): number {
+  const pa = a.priority === true ? 0 : 1;
+  const pb = b.priority === true ? 0 : 1;
+  if (pa !== pb) return pa - pb;
+  if (pa === 0) {
+    const ta = Date.parse(a.priorityAt ?? "") || 0;
+    const tb = Date.parse(b.priorityAt ?? "") || 0;
+    if (ta !== tb) return ta - tb;
+  }
+  return a.sortOrder - b.sortOrder;
+}
+
+/** Tema de la etiqueta / borde «Prioridad». */
+export const RECEPTION_PRIORITY_THEME = {
+  badge:
+    "border-red-700/30 bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-sm shadow-red-600/30 ring-1 ring-inset ring-white/15",
+  /** Borde + sombra suave (el `!` gana al borde del tema de la columna). */
+  cardRing:
+    "border-red-300! ring-1 ring-red-200/80 shadow-[0_8px_22px_-12px_rgba(220,38,38,0.55)] dark:border-red-700/70! dark:ring-red-900/50",
+  cardBg:
+    "bg-gradient-to-r from-red-50 via-white to-white dark:from-red-950/40 dark:via-slate-900 dark:to-slate-900",
+  stripe: "from-red-500 to-rose-700",
+  queueBadge: "border-red-700 bg-gradient-to-b from-red-500 to-red-700",
+  actionIdle:
+    "border-2 border-red-200 bg-red-50 text-red-700 hover:border-red-400 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50",
+  actionActive:
+    "border-2 border-red-700 bg-red-600 text-white shadow-md ring-2 ring-red-300/70 ring-offset-1 dark:ring-offset-slate-900",
+};
 
 /**
  * Estados visibles en la Pantalla TV (solo lectura).
@@ -98,6 +147,7 @@ export const RECEPTION_TV_STATUS_IDS: ReceptionStatusId[] = [
   RECEPTION_STATUS.RAMPA_2,
   RECEPTION_STATUS.RAMPA_EXTRA,
   RECEPTION_STATUS.CARRETILLADO,
+  RECEPTION_STATUS.PARCIAL,
 ];
 
 /** Título agrupado en TV para todas las rampas. */
@@ -158,6 +208,16 @@ export const RECEPTION_COLUMN_THEME: Record<
       "border-2 border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-100 dark:hover:bg-violet-900/50",
     actionActive:
       "border-2 border-violet-600 bg-violet-500 text-white shadow-md ring-2 ring-violet-300/70 ring-offset-1 dark:ring-offset-slate-900",
+  },
+  PARCIAL: {
+    header: "bg-pink-600 text-white border-pink-500",
+    card: "bg-pink-50 border-pink-200 text-pink-950 dark:bg-pink-950/45 dark:border-pink-700/55 dark:text-pink-50",
+    badge: "bg-pink-100 text-pink-800 border-pink-200 dark:bg-pink-900/75 dark:text-pink-100 dark:border-pink-700/50",
+    stripe: "from-pink-400 to-pink-600",
+    actionIdle:
+      "border-2 border-pink-300 bg-pink-50 text-pink-900 hover:border-pink-400 hover:bg-pink-100 dark:border-pink-700 dark:bg-pink-950/40 dark:text-pink-100 dark:hover:bg-pink-900/50",
+    actionActive:
+      "border-2 border-pink-600 bg-pink-500 text-white shadow-md ring-2 ring-pink-300/70 ring-offset-1 dark:ring-offset-slate-900",
   },
   COMPLETADO: {
     header: "bg-emerald-700 text-white border-emerald-600",

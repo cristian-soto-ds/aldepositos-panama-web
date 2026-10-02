@@ -192,6 +192,100 @@ export function upsertCollectionOrderInList(
   ]);
 }
 
+/**
+ * Campos que cambian desde la lista (Sin inventario) o Recepción, nunca desde el
+ * editor de la OR. El editor debe tomarlos de la lista al guardar para no
+ * revertir cambios hechos por otros mientras la OR está abierta.
+ */
+const COLLECTION_ORDER_LIST_OWNED_KEYS = [
+  "sinInventario",
+  "receptionStatus",
+  "receptionGroupId",
+  "receptionQueuedAt",
+  "receptionPriority",
+  "receptionPriorityAt",
+  "receptionReceivedBultos",
+  "receptionPartialHistory",
+] as const satisfies readonly (keyof CollectionOrder)[];
+
+export function pickCollectionOrderListOwnedFields(
+  order: CollectionOrder,
+): Partial<CollectionOrder> {
+  const out: Record<string, unknown> = {};
+  for (const key of COLLECTION_ORDER_LIST_OWNED_KEYS) {
+    out[key] = order[key];
+  }
+  return out as Partial<CollectionOrder>;
+}
+
+const RECENTLY_DELETED_TTL_MS = 5 * 60_000;
+const recentlyDeletedCollectionOrderIds = new Map<string, number>();
+
+/** Un reload lento (snapshot previo al borrado) no debe resucitar la OR en UI. */
+export function rememberDeletedCollectionOrder(id: string): void {
+  if (!id) return;
+  recentlyDeletedCollectionOrderIds.set(id, Date.now());
+}
+
+export function forgetDeletedCollectionOrder(id: string): void {
+  recentlyDeletedCollectionOrderIds.delete(id);
+}
+
+export function isCollectionOrderRecentlyDeleted(id: string): boolean {
+  const at = recentlyDeletedCollectionOrderIds.get(id);
+  if (at == null) return false;
+  if (Date.now() - at > RECENTLY_DELETED_TTL_MS) {
+    recentlyDeletedCollectionOrderIds.delete(id);
+    return false;
+  }
+  return true;
+}
+
+function orderUpdatedAtMs(order: CollectionOrder | undefined): number {
+  const t = Date.parse(String(order?.updatedAt ?? ""));
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Aplica un snapshot de reload sin pisar cambios hechos después de que el
+ * reload arrancó (borrados, Sin inventario, guardados, ecos realtime).
+ */
+export function mergeCollectionOrdersSnapshot(params: {
+  prev: CollectionOrder[];
+  snapshot: CollectionOrder[];
+  snapshotStartedAt: number;
+  touchedSince: (id: string) => boolean;
+}): CollectionOrder[] {
+  const { prev, snapshot, snapshotStartedAt, touchedSince } = params;
+  // Margen para relojes del mismo equipo entre setState y el inicio del fetch.
+  const freshFrom = snapshotStartedAt - 5_000;
+  const prevById = new Map(prev.map((o) => [o.id, o]));
+  const snapshotIds = new Set<string>();
+  const out: CollectionOrder[] = [];
+  for (const remote of snapshot) {
+    snapshotIds.add(remote.id);
+    if (isCollectionOrderRecentlyDeleted(remote.id)) continue;
+    const local = prevById.get(remote.id);
+    if (local) {
+      const localMs = orderUpdatedAtMs(local);
+      const keepLocal =
+        touchedSince(remote.id) ||
+        (localMs >= freshFrom && localMs > orderUpdatedAtMs(remote));
+      out.push(keepLocal ? local : remote);
+    } else if (!touchedSince(remote.id)) {
+      out.push(remote);
+    }
+  }
+  for (const local of prev) {
+    if (snapshotIds.has(local.id)) continue;
+    if (isCollectionOrderRecentlyDeleted(local.id)) continue;
+    if (touchedSince(local.id) || orderUpdatedAtMs(local) >= freshFrom) {
+      out.push(local);
+    }
+  }
+  return sortCollectionOrdersByNumero(out);
+}
+
 export async function fetchCollectionOrders(): Promise<CollectionOrder[]> {
   // PostgREST/Supabase trunca en 1000 filas por defecto; con >1000 OR el reload
   // “borra” altas recientes de la UI aunque existan en BD.
@@ -422,20 +516,26 @@ export async function updateCollectionOrder(order: CollectionOrder): Promise<voi
 }
 
 export async function deleteCollectionOrderById(id: string): Promise<void> {
-  const { data, error } = await supabase
-    .from("collection_orders")
-    .delete()
-    .eq("id", id)
-    .select("id");
-  if (error) throw error;
-  // RLS a veces “tiene éxito” sin borrar filas: verificar.
-  if (!data || data.length === 0) {
-    const still = await fetchCollectionOrderById(id);
-    if (still) {
-      throw new Error(
-        "No se pudo eliminar la orden (sin permiso o la fila sigue en la base).",
-      );
+  rememberDeletedCollectionOrder(id);
+  try {
+    const { data, error } = await supabase
+      .from("collection_orders")
+      .delete()
+      .eq("id", id)
+      .select("id");
+    if (error) throw error;
+    // RLS a veces “tiene éxito” sin borrar filas: verificar.
+    if (!data || data.length === 0) {
+      const still = await fetchCollectionOrderById(id);
+      if (still) {
+        throw new Error(
+          "No se pudo eliminar la orden (sin permiso o la fila sigue en la base).",
+        );
+      }
     }
+  } catch (e) {
+    forgetDeletedCollectionOrder(id);
+    throw e;
   }
 }
 
@@ -495,6 +595,7 @@ export function patchCollectionOrdersList(
     return prev.filter((o) => o.id !== change.id);
   }
   if (!change.order) return null;
+  if (isCollectionOrderRecentlyDeleted(change.id)) return prev;
   const exists = prev.some((o) => o.id === change.id);
   if (change.eventType === "INSERT" && !exists) {
     return sortCollectionOrdersByNumero([...prev, change.order]);

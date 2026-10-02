@@ -35,6 +35,10 @@ export type RaTaskCardProps = {
   showManageActions?: boolean;
   /** Admin: envía un RA completado a la pestaña Rectificación. */
   onSendToRectification?: (task: Task) => void;
+  /** Pinta en verde los RA completados (vista de cargue). */
+  completedTone?: boolean;
+  /** No se puede abrir (p. ej. inventariador sobre un RA completado). */
+  disabled?: boolean;
 };
 
 function LastUpdatedLabel({
@@ -68,6 +72,8 @@ function RaTaskCardInner({
   onToggleContainerPriority,
   showManageActions = true,
   onSendToRectification,
+  completedTone = false,
+  disabled = false,
 }: RaTaskCardProps) {
   const activeInventariador = resolveActiveInventoryOperatorLabel(t, liveWorkers);
   const palletLiveLabels = liveWorkers
@@ -116,20 +122,29 @@ function RaTaskCardInner({
 
   const isRectification =
     viewMode === "rectification" || t.status === "rectification";
+  const isCompletedTone = completedTone && t.status === "completed";
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(t)}
+      role={disabled ? undefined : "button"}
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
+      onClick={() => {
+        if (!disabled) onSelect(t);
+      }}
       onKeyDown={(e) => {
+        if (disabled) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect(t);
         }
       }}
-      className={`group flex cursor-pointer flex-col gap-1.5 rounded-xl border px-3 py-2.5 shadow-sm transition-all hover:shadow-md sm:gap-2 sm:rounded-xl sm:p-4 ${
-        isRectification
+      className={`group flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 shadow-sm transition-all sm:gap-2 sm:rounded-xl sm:p-4 ${
+        disabled ? "cursor-default" : "cursor-pointer hover:shadow-md"
+      } ${
+        isCompletedTone
+          ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+          : isRectification
           ? "border-amber-300 bg-amber-50 ring-1 ring-amber-200/80 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/25 dark:ring-amber-900/40 dark:hover:border-amber-700"
           : isContainerPriority || viewMode === "priority"
           ? "border-red-300 bg-red-50 ring-1 ring-red-200/80 hover:border-red-400 dark:border-red-800 dark:bg-red-950/25 dark:ring-red-900/40 dark:hover:border-red-700"
@@ -369,9 +384,11 @@ function RaTaskCardInner({
               </button>
             </>
           ) : null}
-          <span className="flex items-center justify-center rounded-lg bg-slate-50 p-1.5 text-slate-400 group-hover:text-blue-500 dark:bg-slate-800/60">
-            <ArrowRight className="h-4 w-4" />
-          </span>
+          {disabled ? null : (
+            <span className="flex items-center justify-center rounded-lg bg-slate-50 p-1.5 text-slate-400 group-hover:text-blue-500 dark:bg-slate-800/60">
+              <ArrowRight className="h-4 w-4" />
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -399,6 +416,8 @@ export const RaTaskCard = memo(RaTaskCardInner, (prev, next) => {
     prev.onToggleContainerPriority === next.onToggleContainerPriority &&
     prev.showManageActions === next.showManageActions &&
     prev.onSendToRectification === next.onSendToRectification &&
+    prev.completedTone === next.completedTone &&
+    prev.disabled === next.disabled &&
     liveWorkersKey(prev.liveWorkers) === liveWorkersKey(next.liveWorkers)
   );
 });

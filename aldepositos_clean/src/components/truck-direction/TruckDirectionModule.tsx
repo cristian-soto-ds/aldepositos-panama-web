@@ -15,9 +15,12 @@ import {
 } from "lucide-react";
 import { useReceptionQueue } from "@/hooks/useReceptionQueue";
 import {
+  compareReceptionQueue,
   RECEPTION_COPY,
   RECEPTION_KANBAN_COLUMNS,
+  RECEPTION_NO_DROP_STATUS,
   RECEPTION_OPTIONAL_STATUS,
+  RECEPTION_PRIORITY_THEME,
   RECEPTION_RECEIPT_ON_STATUS,
   RECEPTION_COLUMN_THEME,
   RECEPTION_STATUS,
@@ -44,6 +47,9 @@ import {
   isRampOccupancyRampId,
   RAMP_OCCUPANCY_COPY,
 } from "@/lib/receptionLogistics/rampOccupancy";
+
+const RECEPTION_PARTIAL_BOARD_HINT =
+  "Las entregas parciales se registran desde el módulo Recepcionista (botones «Parcial» y «Llegó el resto»).";
 
 function queueDensity(count: number): ReceptionCardDensity {
   if (count >= 6) return "dense";
@@ -108,12 +114,13 @@ export function TruckDirectionModule() {
       RAMPA_2: [],
       RAMPA_EXTRA: [],
       CARRETILLADO: [],
+      PARCIAL: [],
       COMPLETADO: [],
     };
     for (const col of RECEPTION_KANBAN_COLUMNS) {
       map[col] = filtered
         .filter((t) => t.status === col)
-        .sort((a, b) => a.sortOrder - b.sortOrder);
+        .sort(compareReceptionQueue);
     }
     map.COMPLETADO = filterCompletedTrucks(
       map.COMPLETADO,
@@ -145,6 +152,14 @@ export function TruckDirectionModule() {
 
       const truck = trucks.find((t) => t.id === id);
       if (!truck || truck.status === status) return;
+      // Parcial se registra (y se reanuda) desde Recepcionista: requiere bultos.
+      if (
+        RECEPTION_NO_DROP_STATUS.includes(status) ||
+        RECEPTION_NO_DROP_STATUS.includes(truck.status)
+      ) {
+        alert(RECEPTION_PARTIAL_BOARD_HINT);
+        return;
+      }
 
       const needsReceipt = RECEPTION_RECEIPT_ON_STATUS.includes(status);
       setMoveBusy(id);
@@ -314,17 +329,30 @@ export function TruckDirectionModule() {
                           />
                         </li>
                       ) : null}
-                      {list.map((truck, index) => (
+                      {list.map((truck, index) => {
+                      const lockedOnBoard = RECEPTION_NO_DROP_STATUS.includes(
+                        truck.status,
+                      );
+                      return (
                       <li
                         key={truck.id}
-                        draggable={moveBusy !== truck.id}
+                        draggable={moveBusy !== truck.id && !lockedOnBoard}
+                        title={lockedOnBoard ? RECEPTION_PARTIAL_BOARD_HINT : undefined}
                         onDragStart={() => {
                           dragTruckId.current = truck.id;
                         }}
                         onDragEnd={() => {
                           dragTruckId.current = null;
                         }}
-                        className={`reception-kanban-card cursor-grab border active:cursor-grabbing ${theme.card} ${
+                        className={`reception-kanban-card border ${
+                          lockedOnBoard
+                            ? "cursor-default"
+                            : "cursor-grab active:cursor-grabbing"
+                        } ${theme.card} ${
+                          truck.priority
+                            ? `${RECEPTION_PRIORITY_THEME.cardRing} ${RECEPTION_PRIORITY_THEME.cardBg}`
+                            : ""
+                        } ${
                           isDenseQueue
                             ? "rounded-lg px-2 py-1.5 shadow-none ring-0"
                             : density === "compact"
@@ -335,11 +363,13 @@ export function TruckDirectionModule() {
                         <div
                           className={`flex items-center gap-1.5 ${isDenseQueue ? "" : "items-start gap-2"}`}
                         >
-                          <GripVertical
-                            className={`shrink-0 text-slate-300 dark:text-slate-500 ${
-                              isDenseQueue ? "h-3.5 w-3.5" : "mt-1 h-4 w-4"
-                            }`}
-                          />
+                          {lockedOnBoard ? null : (
+                            <GripVertical
+                              className={`shrink-0 text-slate-300 dark:text-slate-500 ${
+                                isDenseQueue ? "h-3.5 w-3.5" : "mt-1 h-4 w-4"
+                              }`}
+                            />
+                          )}
                           <div className="min-w-0 flex-1">
                             <ReceptionKanbanCardContent
                               truck={truck}
@@ -349,8 +379,13 @@ export function TruckDirectionModule() {
                             />
                           </div>
                         </div>
+                        {lockedOnBoard ? null : (
                         <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2 dark:border-slate-700 sm:hidden">
-                          {RECEPTION_KANBAN_COLUMNS.filter((s) => s !== truck.status).map(
+                          {RECEPTION_KANBAN_COLUMNS.filter(
+                            (s) =>
+                              s !== truck.status &&
+                              !RECEPTION_NO_DROP_STATUS.includes(s),
+                          ).map(
                             (target) => (
                               <button
                                 key={target}
@@ -366,8 +401,10 @@ export function TruckDirectionModule() {
                             ),
                           )}
                         </div>
+                        )}
                       </li>
-                    ))}
+                      );
+                    })}
                     </>
                   )}
                 </ul>

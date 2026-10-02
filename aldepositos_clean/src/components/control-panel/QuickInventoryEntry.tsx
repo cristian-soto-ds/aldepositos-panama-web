@@ -24,6 +24,16 @@ import {
   X,
 } from "lucide-react";
 import { RaTaskCard } from "@/components/control-panel/RaTaskCard";
+import {
+  ContainerLoadsTab,
+  type RenderContainerLoadTaskCard,
+} from "@/components/control-panel/ContainerLoadsTab";
+import { useContainerLoads } from "@/hooks/useContainerLoads";
+import {
+  buildTasksByRa,
+  inventoryTabForTask,
+  raKeysInOpenContainerLoads,
+} from "@/lib/containerLoadStatus";
 import { InventariadorModePicker, type ModePickerPreviewRow, type InventariadorModeSelectOptions } from "@/components/control-panel/InventariadorModePicker";
 import { useAllowKeyboardMeasures } from "@/hooks/useAllowKeyboardMeasures";
 import { useSharedNow } from "@/hooks/useSharedNow";
@@ -786,8 +796,35 @@ export function QuickInventoryEntry({
   const isInventariadorRef = useRef(isInventariador);
   isInventariadorRef.current = isInventariador;
   const [viewMode, setViewMode] = useState<
-    "pending" | "completed" | "priority" | "rectification"
+    "pending" | "completed" | "priority" | "rectification" | "containerLoads"
   >("pending");
+  const {
+    loads: containerLoads,
+    setLoads: setContainerLoads,
+    loading: containerLoadsLoading,
+    error: containerLoadsError,
+  } = useContainerLoads();
+  const [selectedContainerLoadId, setSelectedContainerLoadId] = useState<
+    string | null
+  >(null);
+  const openContainerLoadRaKeys = useMemo(
+    () => raKeysInOpenContainerLoads(containerLoads),
+    [containerLoads],
+  );
+  const quickInventoryTasks = useMemo(
+    () => tasks.filter(isQuickInventoryTask),
+    [tasks],
+  );
+  /** RA de cargues abiertos que aún no están inventariados (badge de la pestaña). */
+  const containerLoadSummaryCount = useMemo(() => {
+    if (openContainerLoadRaKeys.size === 0) return 0;
+    const byRa = buildTasksByRa(quickInventoryTasks);
+    let n = 0;
+    for (const key of openContainerLoadRaKeys) {
+      if (byRa.get(key)?.status !== "completed") n += 1;
+    }
+    return n;
+  }, [openContainerLoadRaKeys, quickInventoryTasks]);
   const [listVisibleCount, setListVisibleCount] = useState(RA_LIST_PAGE_SIZE);
   const sharedNowMs = useSharedNow(30_000);
   const { presenceByRa, presenceList } = useInventoryPresenceByRa();
@@ -814,36 +851,16 @@ export function QuickInventoryEntry({
   }, [isInventariador, viewMode]);
 
   const moduleTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => {
-      if (!isQuickInventoryTask(t)) return false;
-      if (viewMode === "completed") {
-        return t.status === "completed";
-      }
-      if (viewMode === "rectification") {
-        return t.status === "rectification";
-      }
-      if (viewMode === "priority") {
-        return (
-          (t.status === "pending" ||
-            t.status === "in_progress" ||
-            t.status === "paused") &&
-          (t.containerDraft === true || t.dispatched === true)
-        );
-      }
-      return (
-        (t.status === "pending" ||
-          t.status === "in_progress" ||
-          t.status === "paused") &&
-        !t.containerDraft &&
-        !t.dispatched
-      );
-    });
+    if (viewMode === "containerLoads") return [];
+    const filtered = quickInventoryTasks.filter(
+      (t) => inventoryTabForTask(t, openContainerLoadRaKeys) === viewMode,
+    );
     return [...filtered].sort((a, b) =>
       String(a.ra ?? "").localeCompare(String(b.ra ?? ""), undefined, {
         numeric: true,
       }),
     );
-  }, [tasks, viewMode]);
+  }, [quickInventoryTasks, viewMode, openContainerLoadRaKeys]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [leavePromptOpen, setLeavePromptOpen] = useState(false);
@@ -1274,31 +1291,16 @@ export function QuickInventoryEntry({
     let priority = 0;
     let completed = 0;
     let rectification = 0;
-    for (const t of tasks) {
-      if (!isQuickInventoryTask(t)) continue;
-      if (t.status === "completed") {
-        completed += 1;
-        continue;
-      }
-      if (t.status === "rectification") {
-        rectification += 1;
-        continue;
-      }
-      if (
-        t.status !== "pending" &&
-        t.status !== "in_progress" &&
-        t.status !== "paused"
-      ) {
-        continue;
-      }
-      if (t.containerDraft === true || t.dispatched === true) {
-        priority += 1;
-      } else {
-        pending += 1;
-      }
+    for (const t of quickInventoryTasks) {
+      const tab = inventoryTabForTask(t, openContainerLoadRaKeys);
+      if (tab === "completed") completed += 1;
+      else if (tab === "rectification") rectification += 1;
+      else if (tab === "priority") priority += 1;
+      else if (tab === "pending") pending += 1;
     }
-    return { pending, priority, completed, rectification };
-  }, [tasks]);
+    const containerLoads = containerLoadSummaryCount;
+    return { pending, priority, completed, rectification, containerLoads };
+  }, [quickInventoryTasks, openContainerLoadRaKeys, containerLoadSummaryCount]);
 
   const providerOptions = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1488,6 +1490,44 @@ export function QuickInventoryEntry({
       }
     },
     [onUpdateTask],
+  );
+
+  const onEditContainerLoadCard = useCallback(
+    (task: Task) => {
+      if (task.status === "completed" || task.status === "rectification") {
+        selectTaskRef.current(task);
+      } else {
+        openEditModal(task);
+      }
+    },
+    [openEditModal],
+  );
+
+  const renderContainerLoadTaskCard = useCallback<RenderContainerLoadTaskCard>(
+    (task, { viewMode: cardMode, disabled }) => (
+      <RaTaskCard
+        task={task}
+        viewMode={cardMode}
+        liveWorkers={liveOperatorsForRa(presenceByRa, task.ra)}
+        nowMs={sharedNowMs}
+        onSelect={onSelectRaCard}
+        onEdit={onEditContainerLoadCard}
+        onDelete={onDeleteTask}
+        showManageActions={!isInventariador}
+        onSendToRectification={isInventariador ? undefined : onSendToRectification}
+        completedTone
+        disabled={disabled}
+      />
+    ),
+    [
+      presenceByRa,
+      sharedNowMs,
+      onSelectRaCard,
+      onEditContainerLoadCard,
+      onDeleteTask,
+      isInventariador,
+      onSendToRectification,
+    ],
   );
 
   const calculateTotals = () => {
@@ -3473,7 +3513,7 @@ export function QuickInventoryEntry({
 
             <div
               className={`grid gap-0.5 rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 dark:border-slate-600 dark:bg-slate-800/50 sm:gap-1 sm:rounded-xl sm:p-1 ${
-                isInventariador ? "grid-cols-3" : "grid-cols-4"
+                isInventariador ? "grid-cols-4" : "grid-cols-5"
               }`}
             >
               <button
@@ -3516,12 +3556,11 @@ export function QuickInventoryEntry({
                 }`}
                 title={
                   inventoryTabCounts.priority > 0
-                    ? `${inventoryTabCounts.priority} inventario(s) en prioridad contenedor`
-                    : "Prioridad contenedor"
+                    ? `${inventoryTabCounts.priority} inventario(s) en prioridad`
+                    : "Prioridad"
                 }
               >
-                <span className="sm:hidden">Prioridad</span>
-                <span className="hidden sm:inline">Prioridad contenedor</span>
+                <span>Prioridad</span>
                 {inventoryTabCounts.priority > 0 ? (
                   <span
                     className={`rounded-full px-1 py-px text-[9px] font-black tabular-nums sm:px-1.5 sm:text-[10px] ${
@@ -3531,6 +3570,41 @@ export function QuickInventoryEntry({
                     }`}
                   >
                     {inventoryTabCounts.priority}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewMode("containerLoads");
+                  clearListFilters();
+                }}
+                className={`inline-flex items-center justify-center gap-1 rounded-md px-1 py-1.5 text-[10px] font-semibold transition-all sm:gap-1.5 sm:rounded-lg sm:px-4 sm:py-2.5 sm:text-xs ${
+                  viewMode === "containerLoads"
+                    ? "bg-[#16263F] text-white shadow-sm dark:bg-blue-600"
+                    : inventoryTabCounts.containerLoads > 0
+                      ? "bg-indigo-50 text-[#16263F] ring-1 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-200 dark:ring-indigo-900/50"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+                title={
+                  inventoryTabCounts.containerLoads > 0
+                    ? `${inventoryTabCounts.containerLoads} RA de cargues abiertos sin inventariar`
+                    : "Cargues de Contenedores"
+                }
+              >
+                <span className="whitespace-nowrap xl:hidden">Cargues</span>
+                <span className="hidden whitespace-nowrap xl:inline">
+                  Cargues de Contenedores
+                </span>
+                {inventoryTabCounts.containerLoads > 0 ? (
+                  <span
+                    className={`rounded-full px-1 py-px text-[9px] font-black tabular-nums sm:px-1.5 sm:text-[10px] ${
+                      viewMode === "containerLoads"
+                        ? "bg-white text-[#16263F]"
+                        : "bg-[#16263F] text-white"
+                    }`}
+                  >
+                    {inventoryTabCounts.containerLoads}
                   </span>
                 ) : null}
               </button>
@@ -3596,7 +3670,7 @@ export function QuickInventoryEntry({
               </button>
             </div>
 
-            {totalModuleTasks > 0 && (
+            {totalModuleTasks > 0 && viewMode !== "containerLoads" && (
               <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
                 <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3">
                   <label className="sr-only" htmlFor="quick-list-filter-field">
@@ -3695,6 +3769,20 @@ export function QuickInventoryEntry({
           </div>
 
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden pb-[max(6rem,calc(env(safe-area-inset-bottom,0px)+4.5rem))] sm:pb-20">
+            {viewMode === "containerLoads" ? (
+              <ContainerLoadsTab
+                tasks={quickInventoryTasks}
+                loads={containerLoads}
+                setLoads={setContainerLoads}
+                loading={containerLoadsLoading}
+                error={containerLoadsError}
+                canManage={!isInventariador}
+                userEmail={presenceUserKey}
+                renderTaskCard={renderContainerLoadTaskCard}
+                selectedLoadId={selectedContainerLoadId}
+                onSelectLoad={setSelectedContainerLoadId}
+              />
+            ) : (
             <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
               {displayedTasks.length === 0 ? (
                 <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center font-bold text-slate-400 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500 md:p-16">
@@ -3747,6 +3835,7 @@ export function QuickInventoryEntry({
                 </>
               )}
             </div>
+            )}
           </div>
         </div>
       </div>

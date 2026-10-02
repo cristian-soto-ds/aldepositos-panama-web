@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { RECEPTION_STATUS } from "@/lib/receptionLogistics/config";
 import {
+  RECEPTION_STATUS,
+  compareReceptionQueue,
+} from "@/lib/receptionLogistics/config";
+import {
+  applyPartialDeliveryToOrder,
   buildGroupReceptionTruck,
+  closePartialDelivery,
+  collectionOrderToReceptionTruck,
   mergeCollectionOrdersIntoTrucks,
+  orderHasOpenPartialDelivery,
+  orderPendingBultos,
   receptionOrderIds,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
@@ -188,5 +196,195 @@ describe("reception OR truck grouping", () => {
     const merged = mergeCollectionOrdersIntoTrucks([manual], orders);
     expect(merged.some((t) => t.id === "manual-1")).toBe(true);
     expect(merged.some((t) => t.id === "or-co-solo")).toBe(true);
+  });
+});
+
+describe("reception priority", () => {
+  it("prioridad va primero en la fila aunque haya llegado después", () => {
+    const orders = [
+      makeOrder({
+        id: "early",
+        numero: "1",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionQueuedAt: "2026-08-05T08:00:00.000Z",
+      }),
+      makeOrder({
+        id: "vip",
+        numero: "2",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionQueuedAt: "2026-08-05T11:00:00.000Z",
+        receptionPriority: true,
+        receptionPriorityAt: "2026-08-05T11:01:00.000Z",
+      }),
+      makeOrder({
+        id: "mid",
+        numero: "3",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionQueuedAt: "2026-08-05T09:00:00.000Z",
+      }),
+    ];
+    const sorted = mergeCollectionOrdersIntoTrucks([], orders).sort(
+      compareReceptionQueue,
+    );
+    expect(sorted.map((t) => t.id)).toEqual([
+      "or-co-vip",
+      "or-co-early",
+      "or-co-mid",
+    ]);
+    expect(sorted[0]!.priority).toBe(true);
+    expect(sorted[1]!.priority).toBeUndefined();
+  });
+
+  it("varias prioridades: la marcada antes va primero", () => {
+    const a = {
+      priority: true,
+      priorityAt: "2026-08-05T10:30:00.000Z",
+      sortOrder: 1,
+    };
+    const b = {
+      priority: true,
+      priorityAt: "2026-08-05T10:00:00.000Z",
+      sortOrder: 2,
+    };
+    expect([a, b].sort(compareReceptionQueue)[0]).toBe(b);
+  });
+
+  it("camión agrupado es prioridad si alguna de sus OR lo es", () => {
+    const orders = [
+      makeOrder({
+        id: "a",
+        numero: "1",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-prio",
+      }),
+      makeOrder({
+        id: "b",
+        numero: "2",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-prio",
+        receptionPriority: true,
+        receptionPriorityAt: "2026-08-05T10:00:00.000Z",
+      }),
+    ];
+    const truck = buildGroupReceptionTruck(orders, null, {
+      groupId: "or-grp-prio",
+    });
+    expect(truck?.priority).toBe(true);
+    expect(truck?.priorityAt).toBe("2026-08-05T10:00:00.000Z");
+  });
+});
+
+describe("reception partial delivery", () => {
+  const now1 = "2026-08-05T10:00:00.000Z";
+  const now2 = "2026-08-05T15:00:00.000Z";
+
+  it("100 esperados, llegan 80: faltan 20", () => {
+    const order = makeOrder({
+      id: "p",
+      numero: "77",
+      expectedBultos: 100,
+      receptionStatus: RECEPTION_STATUS.RAMPA_1,
+    });
+    const { order: next, completed } = applyPartialDeliveryToOrder(
+      order,
+      80,
+      now1,
+    );
+    expect(completed).toBe(false);
+    expect(next.receptionReceivedBultos).toBe(80);
+    expect(orderHasOpenPartialDelivery(next)).toBe(true);
+    expect(orderPendingBultos(next)).toBe(20);
+
+    const truck = collectionOrderToReceptionTruck({
+      ...next,
+      receptionStatus: RECEPTION_STATUS.PARCIAL,
+    });
+    expect(truck?.expectedBultos).toBe(20);
+    expect(truck?.receivedBultos).toBe(80);
+    expect(truck?.totalBultos).toBe(100);
+    expect(truck?.orderLines?.[0]?.bultos).toBe(20);
+  });
+
+  it("dos parciales se acumulan y la segunda completa el total", () => {
+    const order = makeOrder({
+      id: "p",
+      expectedBultos: 100,
+      receptionStatus: RECEPTION_STATUS.EN_FILA,
+    });
+    const first = applyPartialDeliveryToOrder(order, 60, now1);
+    expect(first.completed).toBe(false);
+    expect(orderPendingBultos(first.order)).toBe(40);
+
+    const second = applyPartialDeliveryToOrder(first.order, 25, now2);
+    expect(second.completed).toBe(false);
+    expect(second.order.receptionReceivedBultos).toBe(85);
+    expect(orderPendingBultos(second.order)).toBe(15);
+    expect(second.order.receptionPartialHistory).toEqual([
+      { at: now1, bultos: 60 },
+      { at: now2, bultos: 25 },
+    ]);
+
+    const third = applyPartialDeliveryToOrder(second.order, 50, now2);
+    expect(third.completed).toBe(true);
+    expect(third.order.receptionReceivedBultos).toBe(100);
+    expect(orderHasOpenPartialDelivery(third.order)).toBe(false);
+  });
+
+  it("rechaza cantidades inválidas", () => {
+    const order = makeOrder({ id: "p", expectedBultos: 10 });
+    expect(() => applyPartialDeliveryToOrder(order, 0, now1)).toThrow();
+    expect(() =>
+      applyPartialDeliveryToOrder(
+        makeOrder({ id: "z", lines: [] }),
+        5,
+        now1,
+      ),
+    ).toThrow();
+  });
+
+  it("al marcar Listo se cierra la parcial y la tarjeta vuelve al total", () => {
+    const order = makeOrder({
+      id: "p",
+      expectedBultos: 100,
+      receptionStatus: RECEPTION_STATUS.EN_FILA,
+    });
+    const partial = applyPartialDeliveryToOrder(order, 80, now1).order;
+    const closed = closePartialDelivery({
+      ...partial,
+      receptionStatus: RECEPTION_STATUS.COMPLETADO,
+    });
+    expect(closed.receptionReceivedBultos).toBe(100);
+    expect(orderHasOpenPartialDelivery(closed)).toBe(false);
+
+    const truck = collectionOrderToReceptionTruck(closed);
+    expect(truck?.expectedBultos).toBe(100);
+    expect(truck?.receivedBultos).toBeUndefined();
+    expect(truck?.totalBultos).toBeUndefined();
+  });
+
+  it("en grupo, la tarjeta suma recibido/total solo si hay parcial abierta", () => {
+    const orders = [
+      makeOrder({
+        id: "a",
+        numero: "1",
+        expectedBultos: 50,
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-part",
+        receptionReceivedBultos: 30,
+      }),
+      makeOrder({
+        id: "b",
+        numero: "2",
+        expectedBultos: 20,
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: "or-grp-part",
+      }),
+    ];
+    const truck = buildGroupReceptionTruck(orders, null, {
+      groupId: "or-grp-part",
+    });
+    expect(truck?.expectedBultos).toBe(40);
+    expect(truck?.receivedBultos).toBe(30);
+    expect(truck?.totalBultos).toBe(70);
   });
 });

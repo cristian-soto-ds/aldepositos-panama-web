@@ -7,15 +7,36 @@ import { formatRaFieldLabel } from "@/lib/collectionOrderToTask";
 
 export type TransferCollectionMergeMode = "append" | "replace";
 
+/** RA de un cargue abierto que todavía no existe en el sistema (esperando OR). */
+export type WaitingRaTarget = {
+  ra: string;
+  loadName: string;
+};
+
+export type TransferCollectionTarget =
+  | { kind: "task"; taskId: string }
+  | { kind: "waiting"; ra: string };
+
 type TransferCollectionToRaModalProps = {
   open: boolean;
   tasks: Task[];
+  /** Se crean en el sistema al confirmar. */
+  waitingRas?: WaitingRaTarget[];
   lineCount: number;
   busy?: boolean;
   /** Hay RA en el panel pero ninguno admite otra orden de recolección */
   noEligibleTargets?: boolean;
   onCancel: () => void;
-  onConfirm: (taskId: string, merge: TransferCollectionMergeMode) => void;
+  onConfirm: (target: TransferCollectionTarget, merge: TransferCollectionMergeMode) => void;
+};
+
+type Entry = {
+  key: string;
+  ra: string;
+  subtitle: string;
+  searchText: string;
+  waitingLoad?: string;
+  target: TransferCollectionTarget;
 };
 
 function raDisplayLabel(ra: string | undefined): string {
@@ -29,51 +50,53 @@ function raDisplayLabel(ra: string | undefined): string {
 export function TransferCollectionToRaModal({
   open,
   tasks,
+  waitingRas = [],
   lineCount,
   busy = false,
   noEligibleTargets = false,
   onCancel,
   onConfirm,
 }: TransferCollectionToRaModalProps) {
-  const [taskId, setTaskId] = useState("");
+  const [selectedKey, setSelectedKey] = useState("");
   const [merge, setMerge] = useState<TransferCollectionMergeMode>("append");
   const [query, setQuery] = useState("");
 
-  const list = useMemo(
-    () =>
-      [...tasks].sort((a, b) =>
-        String(a.ra ?? "").localeCompare(String(b.ra ?? ""), undefined, {
-          numeric: true,
-        }),
-      ),
-    [tasks],
-  );
+  const list = useMemo<Entry[]>(() => {
+    const fromTasks: Entry[] = tasks.map((t) => ({
+      key: `task:${t.id}`,
+      ra: String(t.ra ?? ""),
+      subtitle: formatRaFieldLabel(t.mainClient),
+      searchText: [t.ra, t.mainClient, t.provider, t.brand].map((v) => String(v ?? "")).join(" "),
+      target: { kind: "task", taskId: t.id },
+    }));
+    const fromLoads: Entry[] = waitingRas.map((w) => ({
+      key: `waiting:${w.ra}`,
+      ra: w.ra,
+      subtitle: "—",
+      searchText: `${w.ra} ${w.loadName}`,
+      waitingLoad: w.loadName,
+      target: { kind: "waiting", ra: w.ra },
+    }));
+    return [...fromLoads, ...fromTasks].sort((a, b) =>
+      a.ra.localeCompare(b.ra, undefined, { numeric: true }),
+    );
+  }, [tasks, waitingRas]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((t) => {
-      const hay = [
-        String(t.ra ?? ""),
-        String(t.mainClient ?? ""),
-        String(t.provider ?? ""),
-        String(t.brand ?? ""),
-      ]
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
+    return list.filter((e) => e.searchText.toLowerCase().includes(q));
   }, [list, query]);
 
   useEffect(() => {
     if (open && list.length > 0) {
-      setTaskId((prev) => {
-        if (prev && list.some((t) => t.id === prev)) return prev;
-        return list[0]!.id;
+      setSelectedKey((prev) => {
+        if (prev && list.some((e) => e.key === prev)) return prev;
+        return list[0]!.key;
       });
     }
     if (!open) {
-      setTaskId("");
+      setSelectedKey("");
       setMerge("append");
       setQuery("");
     }
@@ -90,7 +113,7 @@ export function TransferCollectionToRaModal({
 
   if (!open) return null;
 
-  const selected = list.find((t) => t.id === taskId) ?? null;
+  const selected = list.find((e) => e.key === selectedKey) ?? null;
 
   return (
     <div
@@ -195,17 +218,16 @@ export function TransferCollectionToRaModal({
                       Ningún RA coincide con la búsqueda.
                     </p>
                   ) : (
-                    filtered.map((t) => {
-                      const active = t.id === taskId;
-                      const client = formatRaFieldLabel(t.mainClient);
+                    filtered.map((e) => {
+                      const active = e.key === selectedKey;
                       return (
                         <button
-                          key={t.id}
+                          key={e.key}
                           type="button"
                           role="option"
                           aria-selected={active}
                           disabled={busy}
-                          onClick={() => setTaskId(t.id)}
+                          onClick={() => setSelectedKey(e.key)}
                           className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2.5 text-left transition last:border-b-0 dark:border-slate-700/80 ${
                             active
                               ? "bg-[#16263F] text-white"
@@ -220,7 +242,7 @@ export function TransferCollectionToRaModal({
                                   : "text-[#16263F] dark:text-slate-100"
                               }`}
                             >
-                              RA {raDisplayLabel(t.ra)}
+                              RA {raDisplayLabel(e.ra)}
                             </p>
                             <p
                               className={`truncate text-[11px] font-semibold ${
@@ -229,14 +251,28 @@ export function TransferCollectionToRaModal({
                                   : "text-slate-500 dark:text-slate-400"
                               }`}
                             >
-                              {client}
+                              {e.subtitle}
                             </p>
                           </div>
-                          {active ? (
-                            <span className="shrink-0 rounded-md bg-white/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider">
-                              Elegido
-                            </span>
-                          ) : null}
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            {e.waitingLoad ? (
+                              <span
+                                className={`max-w-[11rem] truncate rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${
+                                  active
+                                    ? "bg-amber-300/25 text-amber-100"
+                                    : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                                }`}
+                                title={`Esperando OR · cargue «${e.waitingLoad}»`}
+                              >
+                                Esperando OR · {e.waitingLoad}
+                              </span>
+                            ) : null}
+                            {active ? (
+                              <span className="rounded-md bg-white/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider">
+                                Elegido
+                              </span>
+                            ) : null}
+                          </div>
                         </button>
                       );
                     })
@@ -250,7 +286,9 @@ export function TransferCollectionToRaModal({
                       RA {raDisplayLabel(selected.ra)}
                     </span>
                     {" · "}
-                    {formatRaFieldLabel(selected.mainClient)}
+                    {selected.waitingLoad
+                      ? `se crea en el sistema y queda en el cargue «${selected.waitingLoad}»`
+                      : selected.subtitle}
                   </p>
                 ) : null}
               </div>
@@ -323,8 +361,10 @@ export function TransferCollectionToRaModal({
           </button>
           <button
             type="button"
-            disabled={busy || list.length === 0 || !taskId}
-            onClick={() => onConfirm(taskId, merge)}
+            disabled={busy || !selected}
+            onClick={() => {
+              if (selected) onConfirm(selected.target, merge);
+            }}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#16263F] py-3 text-xs font-black uppercase tracking-widest text-white shadow-md transition hover:bg-[#0f1a2c] disabled:opacity-50"
           >
             <Send className="h-4 w-4" />

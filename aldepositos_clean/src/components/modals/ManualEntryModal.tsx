@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Edit3, X } from "lucide-react";
 import type { ControlPanelHome } from "@/components/control-panel/ControlPanelHome";
 import { emptyManualRaTaskFields } from "@/lib/collectionOrderToTask";
@@ -9,7 +9,7 @@ type Task = Parameters<typeof ControlPanelHome>[0]["tasks"][number];
 
 type ManualEntryModalProps = {
   onClose: () => void;
-  onSave: (task: Task) => void;
+  onSave: (task: Task) => void | Promise<void>;
   initialData: Task | null;
   defaultModule: "quick" | "detailed";
 };
@@ -63,6 +63,8 @@ export function ManualEntryModal({
   }, [initialData, defaultModule]);
 
   const isEditing = !!initialData;
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const handleChange: React.ChangeEventHandler<
     HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
@@ -71,8 +73,9 @@ export function ManualEntryModal({
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
+  const handleSubmit: React.FormEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
 
     const ra = formData.ra.toString().trim();
     if (!ra) return;
@@ -123,7 +126,14 @@ export function ManualEntryModal({
           };
         })();
 
-    onSave(taskData);
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onSave(taskData);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   return (
@@ -319,9 +329,10 @@ export function ManualEntryModal({
             </button>
             <button
               type="submit"
-              className="flex-1 py-3 bg-[#16263F] text-white font-bold rounded-xl shadow-lg hover:bg-blue-900 transition-colors uppercase text-xs tracking-widest"
+              disabled={saving}
+              className="flex-1 py-3 bg-[#16263F] text-white font-bold rounded-xl shadow-lg hover:bg-blue-900 transition-colors uppercase text-xs tracking-widest disabled:cursor-wait disabled:opacity-60"
             >
-              Guardar RA
+              {saving ? "Guardando…" : "Guardar RA"}
             </button>
           </div>
         </form>

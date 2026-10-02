@@ -83,6 +83,17 @@ export type CollectionOrder = {
    * No se actualiza al pasar a rampa; sirve para orden FIFO.
    */
   receptionQueuedAt?: string;
+  /** Camión prioritario: va primero en la fila (Recepcionista / tablero / TV). */
+  receptionPriority?: boolean;
+  /** Momento en que se marcó prioridad (orden entre varios prioritarios). */
+  receptionPriorityAt?: string;
+  /**
+   * Bultos ya recibidos en entregas parciales (acumulado).
+   * Pendiente = bultos esperados − recibidos.
+   */
+  receptionReceivedBultos?: number;
+  /** Historial de entregas parciales (cada llegada incompleta). */
+  receptionPartialHistory?: Array<{ at: string; bultos: number }>;
   /** RA(s) a los que ya se enviaron medidas */
   linkedRaNumbers?: string[];
   /**

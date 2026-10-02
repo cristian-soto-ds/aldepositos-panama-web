@@ -36,6 +36,102 @@ export function orderBultos(order: CollectionOrder): number {
   return sum;
 }
 
+/** Bultos ya recibidos en entregas parciales (0..total). */
+export function orderReceivedBultos(order: CollectionOrder): number {
+  const total = orderBultos(order);
+  const received = Math.round(Number(order.receptionReceivedBultos) || 0);
+  if (received <= 0) return 0;
+  return total > 0 ? Math.min(received, total) : received;
+}
+
+/** Hay entrega parcial abierta (llegó algo, pero no todo). */
+export function orderHasOpenPartialDelivery(order: CollectionOrder): boolean {
+  const received = orderReceivedBultos(order);
+  return received > 0 && received < orderBultos(order);
+}
+
+/** Bultos que faltan por entregar (si no hay parcial abierta, el total). */
+export function orderPendingBultos(order: CollectionOrder): number {
+  const total = orderBultos(order);
+  if (!orderHasOpenPartialDelivery(order)) return total;
+  return Math.max(0, total - orderReceivedBultos(order));
+}
+
+/**
+ * Suma una entrega parcial a la OR (acumula con parciales anteriores abiertas).
+ * `completed` indica que con esta entrega ya llegó el total.
+ */
+export function applyPartialDeliveryToOrder(
+  order: CollectionOrder,
+  arrivedBultos: number,
+  now: string,
+): { order: CollectionOrder; completed: boolean } {
+  const arrived = Math.round(Number(arrivedBultos) || 0);
+  if (arrived <= 0) {
+    throw new Error("Ingresá cuántos bultos llegaron (mayor que 0).");
+  }
+  const total = orderBultos(order);
+  if (total <= 0) {
+    throw new Error(
+      "La OR no tiene bultos esperados; no se puede registrar una entrega parcial.",
+    );
+  }
+  const prevReceived = orderHasOpenPartialDelivery(order)
+    ? orderReceivedBultos(order)
+    : 0;
+  const received = Math.min(total, prevReceived + arrived);
+  return {
+    order: {
+      ...order,
+      receptionReceivedBultos: received,
+      receptionPartialHistory: [
+        ...(order.receptionPartialHistory ?? []),
+        { at: now, bultos: arrived },
+      ],
+      updatedAt: now,
+    },
+    completed: received >= total,
+  };
+}
+
+/** Al completar: la entrega parcial queda cerrada (recibido = total). */
+export function closePartialDelivery(order: CollectionOrder): CollectionOrder {
+  if (!orderHasOpenPartialDelivery(order)) return order;
+  return { ...order, receptionReceivedBultos: orderBultos(order) };
+}
+
+function earliestPriorityAt(orders: CollectionOrder[]): string | undefined {
+  let best: number | null = null;
+  for (const o of orders) {
+    if (o.receptionPriority !== true) continue;
+    const t = Date.parse(o.receptionPriorityAt || "");
+    if (!Number.isFinite(t)) continue;
+    if (best == null || t < best) best = t;
+  }
+  return best != null ? new Date(best).toISOString() : undefined;
+}
+
+/** Campos de prioridad + parcial de la tarjeta a partir de sus OR. */
+function receptionExtrasFromOrders(
+  orders: CollectionOrder[],
+): Pick<
+  ReceptionTruck,
+  "priority" | "priorityAt" | "receivedBultos" | "totalBultos"
+> {
+  const priority = orders.some((o) => o.receptionPriority === true);
+  const anyPartial = orders.some(orderHasOpenPartialDelivery);
+  return {
+    priority: priority || undefined,
+    priorityAt: priority ? earliestPriorityAt(orders) : undefined,
+    receivedBultos: anyPartial
+      ? orders.reduce((s, o) => s + orderReceivedBultos(o), 0)
+      : undefined,
+    totalBultos: anyPartial
+      ? orders.reduce((s, o) => s + orderBultos(o), 0)
+      : undefined,
+  };
+}
+
 /**
  * Posición en fila (FIFO del recepcionista).
  * Prioridad: receptionQueuedAt de la OR → sortOrder ya sellado en la tarjeta → ahora.
@@ -113,7 +209,7 @@ export function collectionOrderToReceptionTruck(
     provider: order.proveedor?.trim() || "—",
     client: order.cliente?.trim() || "—",
     ra: order.linkedRaNumbers?.[0]?.trim() || `OR-${numero}`,
-    expectedBultos: orderBultos(order),
+    expectedBultos: orderPendingBultos(order),
     notes: order.expedidor?.trim() || order.notes?.trim() || undefined,
     status,
     sortOrder,
@@ -123,10 +219,11 @@ export function collectionOrderToReceptionTruck(
     orderLines: [
       {
         numero,
-        bultos: orderBultos(order),
+        bultos: orderPendingBultos(order),
         cliente: order.cliente?.trim() || undefined,
       },
     ],
+    ...receptionExtrasFromOrders([order]),
     source: "collection_order",
     queuedAt,
     rampAssignedAt: isRamp
@@ -200,7 +297,7 @@ export function buildGroupReceptionTruck(
   const provider = dominantProvider(withStatus);
   const orderLines = withStatus.map((o) => ({
     numero: orderDisplayNumero(o),
-    bultos: orderBultos(o),
+    bultos: orderPendingBultos(o),
     cliente: o.cliente?.trim() || undefined,
   }));
 
@@ -227,7 +324,8 @@ export function buildGroupReceptionTruck(
       .filter(Boolean)
       .slice(0, 3)
       .join(", ") || `GRP-${withStatus.length}`,
-    expectedBultos: withStatus.reduce((s, o) => s + orderBultos(o), 0),
+    expectedBultos: withStatus.reduce((s, o) => s + orderPendingBultos(o), 0),
+    ...receptionExtrasFromOrders(withStatus),
     driverName: undefined,
     notes: withStatus
       .map((o) => o.expedidor?.trim() || o.notes?.trim())

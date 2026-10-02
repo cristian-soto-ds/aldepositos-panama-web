@@ -16,6 +16,13 @@ import {
   toRefsBultosOnlyTerraLines,
 } from "@/lib/aldeGptTerraDocumentExtract";
 import { fetchLearningBlockForTerraPrompt } from "@/lib/terraLearningNotes";
+import {
+  parseTerraContainerLoadPayload,
+  TERRA_CONTAINER_LOAD_INSTRUCTIONS,
+  TERRA_CONTAINER_LOAD_MAX_CHARS,
+} from "@/lib/terraContainerLoadExtract";
+
+type ExtractMode = "full" | "refsBultosOnly" | "containerLoad";
 
 export const runtime = "nodejs";
 /** Pro + high/max puede tardar más en packing lists grandes. */
@@ -148,12 +155,15 @@ function extractReplyText(raw: string): string {
   return reply || String(raw ?? "").trim();
 }
 
-function parseExtractMode(raw: unknown): "full" | "refsBultosOnly" {
+function parseExtractMode(raw: unknown): ExtractMode {
   const v = String(raw ?? "")
     .trim()
     .toLowerCase();
   if (v === "refsbultosonly" || v === "refs_bultos_only" || v === "refs-bultos") {
     return "refsBultosOnly";
+  }
+  if (v === "containerload" || v === "container_load" || v === "container-load") {
+    return "containerLoad";
   }
   return "full";
 }
@@ -162,7 +172,7 @@ async function parseRequest(request: NextRequest): Promise<{
   message: string;
   history: ChatMessage[];
   files: File[];
-  extractMode: "full" | "refsBultosOnly";
+  extractMode: ExtractMode;
   modelKey: AldeGptModelKey;
 }> {
   const contentType = request.headers.get("content-type") ?? "";
@@ -233,7 +243,7 @@ export async function POST(request: NextRequest) {
   let message: string;
   let history: ChatMessage[];
   let files: File[];
-  let extractMode: "full" | "refsBultosOnly";
+  let extractMode: ExtractMode;
   let modelKey: AldeGptModelKey;
   try {
     ({ message, history, files, extractMode, modelKey } =
@@ -243,6 +253,10 @@ export async function POST(request: NextRequest) {
       { error: "No se pudo leer la solicitud." },
       { status: 400 },
     );
+  }
+
+  if (extractMode === "containerLoad") {
+    return handleContainerLoadExtract(apiKey, message, modelKey);
   }
 
   message = message.slice(0, MAX_MESSAGE_CHARS);
@@ -437,6 +451,68 @@ export async function POST(request: NextRequest) {
           /* limpieza best-effort */
         }),
       ),
+    );
+  }
+}
+
+/** Relación de cargue (tabla en texto) → RA ordenados por cargue. */
+async function handleContainerLoadExtract(
+  apiKey: string,
+  tableText: string,
+  modelKey: AldeGptModelKey,
+) {
+  const table = tableText.slice(0, TERRA_CONTAINER_LOAD_MAX_CHARS).trim();
+  if (!table) {
+    return NextResponse.json(
+      { error: "El archivo de cargue está vacío." },
+      { status: 400 },
+    );
+  }
+  const client = new OpenAI({ apiKey });
+  try {
+    const response = await client.responses.create({
+      ...responseOptionsForModel(modelKey),
+      instructions: TERRA_CONTAINER_LOAD_INSTRUCTIONS,
+      input: [
+        {
+          role: "user",
+          content: `Relación de cargue (texto tabulado). Responde en JSON.\n\n${table}`,
+        },
+      ],
+    } as OpenAI.Responses.ResponseCreateParamsNonStreaming);
+    const parsed = parseTerraContainerLoadPayload(String(response.output_text ?? ""));
+    if (parsed.items.length === 0) {
+      return NextResponse.json(
+        {
+          error: `${ALDEGPT_TERRA_DISPLAY_NAME} no encontró RA en el archivo de cargue.`,
+        },
+        { status: 422 },
+      );
+    }
+    return NextResponse.json({
+      reply:
+        parsed.reply ||
+        `Se encontraron ${parsed.items.length} RA en orden de cargue.`,
+      name: parsed.name,
+      items: parsed.items,
+      extractMode: "containerLoad",
+      model: modelKey,
+    });
+  } catch (e) {
+    const status =
+      e && typeof e === "object" && "status" in e
+        ? Number((e as { status?: unknown }).status)
+        : undefined;
+    const msg = e instanceof Error ? e.message : "Error inesperado.";
+    console.error("[api/chat containerLoad]", msg);
+    return NextResponse.json(
+      {
+        error:
+          status === 429
+            ? "Se alcanzó el límite de uso de OpenAI. Espera un momento e inténtalo de nuevo."
+            : msg || `No se pudo analizar el cargue con ${ALDEGPT_TERRA_DISPLAY_NAME}.`,
+      },
+      { status: status && status >= 400 && status < 600 ? status : 502 },
     );
   }
 }

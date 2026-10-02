@@ -1,11 +1,14 @@
 "use client";
 
 import React from "react";
+import { PackageMinus, Zap } from "lucide-react";
 import {
   isCollectionOrderReceptionTruck,
   isGroupedReceptionTruck,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import {
+  RECEPTION_COLUMN_THEME,
+  RECEPTION_PRIORITY_THEME,
   RECEPTION_STATUS,
   isRampReceptionStatus,
 } from "@/lib/receptionLogistics/config";
@@ -197,11 +200,36 @@ export function ReceptionKanbanCardContent({
       : null;
   const singleOr = isCollection && !isUnified && lines.length === 1 ? lines[0]! : null;
 
+  const partialTotal = truck.totalBultos ?? 0;
+  const partialReceived = truck.receivedBultos ?? 0;
+  const hasPartial =
+    partialTotal > 0 && partialReceived > 0 && partialReceived < partialTotal;
+  const isPartialWaiting =
+    hasPartial && truck.status === RECEPTION_STATUS.PARCIAL;
+  const partialPercent = hasPartial
+    ? Math.round((partialReceived / partialTotal) * 100)
+    : 0;
+  const tagSize = isDense
+    ? "gap-1 px-1.5 py-0.5 text-[8px]"
+    : isTv
+      ? "gap-1.5 px-2 py-0.5 text-[10px] md:text-[11px]"
+      : "gap-1 px-1.5 py-0.5 text-[9px]";
+  const tagIconSize = isDense ? "h-2.5 w-2.5" : "h-3 w-3";
+  const partialTextSize = isDense
+    ? "text-[9px]"
+    : isTv
+      ? "text-[11px] md:text-xs"
+      : "text-[10px]";
+
   return (
     <div className="flex min-w-0 items-start gap-2">
       {queuePosition != null ? (
         <div
-          className={`mt-0.5 flex shrink-0 items-center justify-center border border-slate-700 bg-slate-800 font-black tabular-nums leading-none text-white ${queueSize}`}
+          className={`mt-0.5 flex shrink-0 items-center justify-center border font-black tabular-nums leading-none text-white ${
+            truck.priority
+              ? `${RECEPTION_PRIORITY_THEME.queueBadge} shadow-sm shadow-red-600/40`
+              : "border-slate-700 bg-slate-800"
+          } ${queueSize}`}
           title={`Posición ${queuePosition} en fila`}
           aria-label={`Posición ${queuePosition} en fila`}
         >
@@ -212,6 +240,28 @@ export function ReceptionKanbanCardContent({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
+            {truck.priority || (hasPartial && !isPartialWaiting) ? (
+              <div className="mb-1 flex flex-wrap items-center gap-1">
+                {truck.priority ? (
+                  <span
+                    className={`inline-flex items-center rounded-md border font-black uppercase tracking-[0.14em] ${RECEPTION_PRIORITY_THEME.badge} ${tagSize}`}
+                    title="Camión prioritario: pasa primero en la fila"
+                  >
+                    <Zap className={`${tagIconSize} shrink-0 fill-current`} aria-hidden />
+                    Prioridad
+                  </span>
+                ) : null}
+                {hasPartial && !isPartialWaiting ? (
+                  <span
+                    className={`inline-flex items-center rounded-md border font-black uppercase tracking-[0.1em] ${RECEPTION_COLUMN_THEME.PARCIAL.badge} ${tagSize}`}
+                    title={`Resto de una entrega parcial: ${truck.expectedBultos} de ${partialTotal} bultos`}
+                  >
+                    <PackageMinus className={`${tagIconSize} shrink-0`} aria-hidden />
+                    Resto de entrega
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <p className={titleClass} title={providerTitle}>
               {providerTitle}
             </p>
@@ -284,6 +334,41 @@ export function ReceptionKanbanCardContent({
               </div>
             ) : null}
 
+            {isPartialWaiting ? (
+              <div
+                className={`mt-1.5 rounded-lg border border-pink-200 bg-pink-50/80 dark:border-pink-800/60 dark:bg-pink-950/30 ${
+                  isDense ? "px-2 py-1" : "px-2.5 py-1.5"
+                }`}
+                title={`Llegaron ${partialReceived} de ${partialTotal} bultos · faltan ${truck.expectedBultos}`}
+              >
+                <div
+                  className={`flex items-center justify-between gap-2 font-bold tabular-nums ${partialTextSize}`}
+                >
+                  <span className="text-pink-900 dark:text-pink-100">
+                    Llegaron <span className="font-black">{partialReceived}</span> de{" "}
+                    {partialTotal}
+                  </span>
+                  <span className="shrink-0 font-black uppercase tracking-wide text-pink-700 dark:text-pink-300">
+                    Faltan {truck.expectedBultos}
+                  </span>
+                </div>
+                <div
+                  className={`mt-1 overflow-hidden rounded-full bg-pink-200/70 dark:bg-pink-900/60 ${
+                    isDense ? "h-1" : "h-1.5"
+                  }`}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={partialTotal}
+                  aria-valuenow={partialReceived}
+                >
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-pink-500 to-pink-600"
+                    style={{ width: `${partialPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             {secondaryCompanyLabel ? (
               <p
                 className={`mt-0.5 break-words font-medium text-inherit opacity-65 ${OR_SCALE_CLASS[titleScale]}`}
@@ -322,6 +407,11 @@ export function ReceptionKanbanCardContent({
               variant={variant}
               density={density}
               className={bultosBadgeClassName}
+              title={
+                hasPartial
+                  ? `${truck.expectedBultos} bultos pendientes de ${partialTotal}`
+                  : undefined
+              }
             />
           </div>
         </div>
@@ -335,11 +425,13 @@ function BultosPill({
   variant,
   density,
   className = "",
+  title,
 }: {
   count: number;
   variant: "operator" | "tv";
   density: ReceptionCardDensity;
   className?: string;
+  title?: string;
 }) {
   const isDense = density === "dense";
   const isCompact = density === "compact";
@@ -360,7 +452,7 @@ function BultosPill({
             ? "min-w-[2.75rem] px-1.5 py-1"
             : "min-w-[3rem] px-2 py-1"
       }`}
-      title={`${count} bultos en total a entregar`}
+      title={title ?? `${count} bultos en total a entregar`}
     >
       <span className={isDense ? "text-xs" : isCompact ? "text-sm" : "text-base"}>
         {count}

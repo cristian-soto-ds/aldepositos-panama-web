@@ -12,9 +12,18 @@ import {
 import {
   addOrdersToReceptionGroup,
   createReceptionTruckGroup,
+  markCollectionOrderPartialDelivery,
   removeOrderFromReceptionGroup,
+  resumePartialDelivery,
+  setCollectionOrderReceptionPriority,
   setCollectionOrderReceptionStatus,
+  stripReceptionFields,
 } from "@/lib/receptionLogistics/repository";
+import {
+  orderBultos,
+  orderHasOpenPartialDelivery,
+  orderReceivedBultos,
+} from "@/lib/receptionLogistics/syncCollectionOrderReception";
 import { CollectionOrderReceptionistView } from "@/components/control-panel/CollectionOrderReceptionistView";
 import { useRampOccupancy } from "@/hooks/useRampOccupancy";
 
@@ -22,54 +31,51 @@ type ReceptionistModuleProps = {
   userEmail: string | null;
 };
 
+const RECEPTION_FIELD_KEYS = [
+  "receptionStatus",
+  "receptionGroupId",
+  "receptionQueuedAt",
+  "receptionPriority",
+  "receptionPriorityAt",
+  "receptionReceivedBultos",
+  "receptionPartialHistory",
+] as const satisfies readonly (keyof CollectionOrder)[];
+
+type ReceptionFieldKey = (typeof RECEPTION_FIELD_KEYS)[number];
+
 /** Solo campos de recepción — no pisar líneas Magaya (lista slim). */
 function applyReceptionFields(
   base: CollectionOrder,
-  patch: Pick<
-    CollectionOrder,
-    | "receptionStatus"
-    | "receptionGroupId"
-    | "receptionQueuedAt"
-    | "updatedAt"
-  > &
-    Partial<CollectionOrder>,
+  patch: Partial<Pick<CollectionOrder, ReceptionFieldKey | "updatedAt">>,
 ): CollectionOrder {
   const next: CollectionOrder = {
     ...base,
     updatedAt: patch.updatedAt || base.updatedAt,
   };
-  if ("receptionStatus" in patch) {
-    if (patch.receptionStatus === undefined) {
-      delete next.receptionStatus;
-    } else {
-      next.receptionStatus = patch.receptionStatus;
-    }
-  }
-  if ("receptionGroupId" in patch) {
-    if (patch.receptionGroupId === undefined) {
-      delete next.receptionGroupId;
-    } else {
-      next.receptionGroupId = patch.receptionGroupId;
-    }
-  }
-  if ("receptionQueuedAt" in patch) {
-    if (patch.receptionQueuedAt === undefined) {
-      delete next.receptionQueuedAt;
-    } else {
-      next.receptionQueuedAt = patch.receptionQueuedAt;
-    }
+  const target = next as Record<string, unknown>;
+  for (const key of RECEPTION_FIELD_KEYS) {
+    if (!(key in patch)) continue;
+    const value = patch[key];
+    if (value === undefined) delete target[key];
+    else target[key] = value;
   }
   return next;
 }
 
+/** Copia todos los campos de recepción de la OR guardada en el servidor. */
+function mergeReceptionFromServer(
+  base: CollectionOrder,
+  server: CollectionOrder,
+): CollectionOrder {
+  const patch: Partial<Pick<CollectionOrder, ReceptionFieldKey | "updatedAt">> =
+    { updatedAt: server.updatedAt };
+  const p = patch as Record<string, unknown>;
+  for (const key of RECEPTION_FIELD_KEYS) p[key] = server[key];
+  return applyReceptionFields(base, patch);
+}
+
 function clearReceptionFields(order: CollectionOrder, now: string): CollectionOrder {
-  const {
-    receptionStatus: _s,
-    receptionGroupId: _g,
-    receptionQueuedAt: _q,
-    ...rest
-  } = order;
-  return { ...rest, updatedAt: now };
+  return { ...stripReceptionFields(order), updatedAt: now };
 }
 
 export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
@@ -81,6 +87,21 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
     });
   const [receptionBusyId, setReceptionBusyId] = useState<string | null>(null);
   const { occupancy: rampOccupancy, busyRamp, toggleRamp } = useRampOccupancy();
+
+  const mergeServerOrders = useCallback(
+    (updated: CollectionOrder[]) => {
+      const byId = new Map(updated.map((o) => [o.id, o]));
+      setOrders((prev) =>
+        sortCollectionOrdersByNumero(
+          prev.map((o) => {
+            const u = byId.get(o.id);
+            return u ? mergeReceptionFromServer(o, u) : o;
+          }),
+        ),
+      );
+    },
+    [setOrders],
+  );
 
   const handleSetReceptionStatus = useCallback(
     async (orderId: string, status: ReceptionStatusId) => {
@@ -137,32 +158,7 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
         const updated = await setCollectionOrderReceptionStatus(orderId, status, {
           issueReceipt: RECEPTION_RECEIPT_ON_STATUS.includes(status),
         });
-        const byId = new Map(updated.map((o) => [o.id, o]));
-        setOrders((prev) =>
-          sortCollectionOrdersByNumero(
-            prev.map((o) => {
-              const u = byId.get(o.id);
-              if (!u) {
-                // Tras LISTO en grupo, la OR saliente ya no trae groupId.
-                if (
-                  status === RECEPTION_STATUS.COMPLETADO &&
-                  groupId &&
-                  o.receptionGroupId === groupId &&
-                  !updated.some((x) => x.id === o.id)
-                ) {
-                  return o;
-                }
-                return o;
-              }
-              return applyReceptionFields(o, {
-                receptionStatus: u.receptionStatus,
-                receptionGroupId: u.receptionGroupId,
-                receptionQueuedAt: u.receptionQueuedAt,
-                updatedAt: u.updatedAt,
-              });
-            }),
-          ),
-        );
+        mergeServerOrders(updated);
       } catch (e) {
         console.error(e);
         setOrders(prevSnapshot);
@@ -175,7 +171,145 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
         setReceptionBusyId(null);
       }
     },
-    [orders, setOrders],
+    [orders, setOrders, mergeServerOrders],
+  );
+
+  const handleTogglePriority = useCallback(
+    async (orderId: string) => {
+      const order = orders.find((o) => o.id === orderId);
+      if (!order) return;
+      const on = order.receptionPriority !== true;
+      const groupId = order.receptionGroupId;
+      const now = new Date().toISOString();
+      const prevSnapshot = orders;
+
+      setOrders((prev) =>
+        sortCollectionOrdersByNumero(
+          prev.map((o) => {
+            const inTruck = groupId ? o.receptionGroupId === groupId : o.id === orderId;
+            if (!inTruck) return o;
+            return on
+              ? applyReceptionFields(o, {
+                  receptionPriority: true,
+                  receptionPriorityAt: o.receptionPriorityAt || now,
+                  receptionStatus: o.receptionStatus ?? RECEPTION_STATUS.EN_FILA,
+                  receptionQueuedAt: o.receptionQueuedAt || now,
+                  updatedAt: now,
+                })
+              : applyReceptionFields(o, {
+                  receptionPriority: undefined,
+                  receptionPriorityAt: undefined,
+                  updatedAt: now,
+                });
+          }),
+        ),
+      );
+
+      setReceptionBusyId(groupId || orderId);
+      try {
+        mergeServerOrders(await setCollectionOrderReceptionPriority(orderId, on));
+      } catch (e) {
+        console.error(e);
+        setOrders(prevSnapshot);
+        alert(e instanceof Error ? e.message : "No se pudo cambiar la prioridad.");
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders, mergeServerOrders],
+  );
+
+  const handleMarkPartialDelivery = useCallback(
+    async (orderId: string, arrivedBultos: number) => {
+      const order = orders.find((o) => o.id === orderId);
+      if (!order) return;
+      const now = new Date().toISOString();
+      const total = orderBultos(order);
+      const prevReceived = orderHasOpenPartialDelivery(order)
+        ? orderReceivedBultos(order)
+        : 0;
+      const received = Math.min(total, prevReceived + Math.round(arrivedBultos));
+      const prevSnapshot = orders;
+
+      setOrders((prev) =>
+        sortCollectionOrdersByNumero(
+          prev.map((o) =>
+            o.id !== orderId
+              ? o
+              : applyReceptionFields(o, {
+                  receptionStatus:
+                    received >= total
+                      ? RECEPTION_STATUS.COMPLETADO
+                      : RECEPTION_STATUS.PARCIAL,
+                  receptionGroupId: undefined,
+                  receptionPriority: undefined,
+                  receptionPriorityAt: undefined,
+                  receptionReceivedBultos: received,
+                  receptionQueuedAt: o.receptionQueuedAt || now,
+                  updatedAt: now,
+                }),
+          ),
+        ),
+      );
+
+      setReceptionBusyId(order.receptionGroupId || orderId);
+      try {
+        mergeServerOrders(
+          await markCollectionOrderPartialDelivery(orderId, arrivedBultos),
+        );
+      } catch (e) {
+        console.error(e);
+        setOrders(prevSnapshot);
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo registrar la entrega parcial.",
+        );
+        throw e;
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders, mergeServerOrders],
+  );
+
+  const handleResumePartialDelivery = useCallback(
+    async (orderId: string) => {
+      const order = orders.find((o) => o.id === orderId);
+      if (!order) return;
+      const now = new Date().toISOString();
+      const prevSnapshot = orders;
+
+      setOrders((prev) =>
+        sortCollectionOrdersByNumero(
+          prev.map((o) =>
+            o.id !== orderId
+              ? o
+              : applyReceptionFields(o, {
+                  receptionStatus: RECEPTION_STATUS.EN_FILA,
+                  receptionQueuedAt: now,
+                  updatedAt: now,
+                }),
+          ),
+        ),
+      );
+
+      setReceptionBusyId(orderId);
+      try {
+        mergeServerOrders(await resumePartialDelivery(orderId));
+      } catch (e) {
+        console.error(e);
+        setOrders(prevSnapshot);
+        alert(
+          e instanceof Error
+            ? e.message
+            : "No se pudo devolver la OR a la fila.",
+        );
+      } finally {
+        setReceptionBusyId(null);
+      }
+    },
+    [orders, setOrders, mergeServerOrders],
   );
 
   const handleClearReceptionStatus = useCallback(
@@ -316,6 +450,11 @@ export function ReceptionistModule({ userEmail }: ReceptionistModuleProps) {
       }
       onCreateTruckGroup={handleCreateTruckGroup}
       onAddOrdersToTruckGroup={handleAddOrdersToTruckGroup}
+      onTogglePriority={(orderId) => void handleTogglePriority(orderId)}
+      onMarkPartialDelivery={handleMarkPartialDelivery}
+      onResumePartialDelivery={(orderId) =>
+        void handleResumePartialDelivery(orderId)
+      }
     />
   );
 }

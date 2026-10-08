@@ -178,6 +178,26 @@ export function generateWarehouseReceiptNumber(plate: string): string {
   return `${RECEPTION_RECEIPT_PREFIX}${stamp}-${plateSafe || "CAMION"}`;
 }
 
+function truckUpdatedMs(value: string | undefined): number {
+  const ms = Date.parse(value ?? "");
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/** Una lectura en vuelo no debe pisar un movimiento que ya se guardó en local. */
+function preferNewerLocalTrucks(
+  remote: ReceptionTruck[],
+  local: ReceptionTruck[],
+): ReceptionTruck[] {
+  const localById = new Map(local.map((truck) => [truck.id, truck]));
+  return remote.map((truck) => {
+    const fresh = localById.get(truck.id);
+    if (fresh && truckUpdatedMs(fresh.updatedAt) > truckUpdatedMs(truck.updatedAt)) {
+      return fresh;
+    }
+    return truck;
+  });
+}
+
 export async function fetchReceptionTrucks(): Promise<ReceptionTruck[]> {
   const localFallback = readLocalSnapshot().trucks;
 
@@ -186,13 +206,16 @@ export async function fetchReceptionTrucks(): Promise<ReceptionTruck[]> {
     fetchCollectionOrdersForReception(),
   ]);
 
+  const localAfterWait = readLocalSnapshot().trucks;
   let trucks: ReceptionTruck[] =
     trucksResult.status === "fulfilled" ? trucksResult.value : localFallback;
+  trucks = preferNewerLocalTrucks(trucks, localAfterWait);
 
   if (ordersResult.status === "fulfilled") {
     trucks = mergeCollectionOrdersIntoTrucks(trucks, ordersResult.value);
     const nowMs = Date.now();
     trucks = trucks.filter((t) => keepReceptionTruckForBoard(t, nowMs));
+    trucks = preferNewerLocalTrucks(trucks, localAfterWait);
   }
 
   writeLocalSnapshot(trucks);

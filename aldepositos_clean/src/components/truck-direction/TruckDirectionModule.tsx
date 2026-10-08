@@ -25,6 +25,7 @@ import {
   RECEPTION_COLUMN_THEME,
   RECEPTION_STATUS,
   RECEPTION_STATUS_LABELS,
+  isRampReceptionStatus,
   type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
@@ -162,6 +163,26 @@ export function TruckDirectionModule() {
       }
 
       const needsReceipt = RECEPTION_RECEIPT_ON_STATUS.includes(status);
+      const now = new Date().toISOString();
+      const isRamp = isRampReceptionStatus(status);
+      const optimistic: ReceptionTruck = {
+        ...truck,
+        status,
+        updatedAt: now,
+        rampAssignedAt: isRamp ? (truck.rampAssignedAt ?? now) : truck.rampAssignedAt,
+        rampUsed: isRamp ? status : truck.rampUsed,
+        completedAt:
+          status === RECEPTION_STATUS.COMPLETADO
+            ? (truck.completedAt ?? now)
+            : truck.completedAt,
+      };
+      setTrucks((prev) => {
+        const idx = prev.findIndex((item) => item.id === truck.id);
+        if (idx < 0) return [...prev, optimistic];
+        const next = [...prev];
+        next[idx] = optimistic;
+        return next;
+      });
       setMoveBusy(id);
       try {
         const updated = await updateReceptionTruckStatus(id, status, {
@@ -170,12 +191,26 @@ export function TruckDirectionModule() {
         // UI local inmediata (broadcast ya avisa a los demás).
         if (updated) {
           setTrucks((prev) => {
-            const idx = prev.findIndex((t) => t.id === updated.id);
+            const current = prev.find((item) => item.id === updated.id);
+            if (
+              current?.updatedAt &&
+              updated.updatedAt &&
+              current.updatedAt > updated.updatedAt
+            ) {
+              return prev;
+            }
+            const idx = prev.findIndex((item) => item.id === updated.id);
             if (idx < 0) return [...prev, updated];
             const next = [...prev];
             next[idx] = updated;
             return next;
           });
+        } else {
+          setTrucks((prev) =>
+            prev.map((item) =>
+              item.id === truck.id && item.updatedAt === now ? truck : item,
+            ),
+          );
         }
         if (updated?.warehouseReceiptNumber && needsReceipt) {
           printWarehouseReceipt(updated);

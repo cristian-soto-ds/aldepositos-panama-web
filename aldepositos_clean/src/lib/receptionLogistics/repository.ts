@@ -1032,10 +1032,13 @@ export function subscribeReceptionQueue(onSync: () => void): () => void {
     }, RECEPTION_POLL_MS);
   }
 
-  // Realtime + broadcast: avisa para un refetch de consistencia (el parche
-  // inmediato lo aplica useReceptionQueue vía subscribeReceptionLive).
+  // El broadcast ya mueve la tarjeta al instante. Un refetch en ese momento
+  // rearmaría el tablero con OR que todavía están en la columna anterior.
+  // El refetch queda para cuando la fila ya está en Postgres, para cambios
+  // de OR y para el poll de respaldo.
   if (!receptionLiveUnsub) {
-    receptionLiveUnsub = subscribeReceptionLive(() => {
+    receptionLiveUnsub = subscribeReceptionLive((change) => {
+      if (change.kind === "truck" && change.source === "broadcast") return;
       notifyReceptionQueueListeners();
     });
   }

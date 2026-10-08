@@ -336,7 +336,7 @@ export function ReceptionKanbanCardContent({
 
             {isPartialWaiting ? (
               <div
-                className={`mt-1.5 rounded-lg border border-pink-200 bg-pink-50/80 dark:border-pink-800/60 dark:bg-pink-950/30 ${
+                className={`mt-1.5 rounded-lg border border-cyan-200 bg-cyan-50/80 dark:border-cyan-800/60 dark:bg-cyan-950/30 ${
                   isDense ? "px-2 py-1" : "px-2.5 py-1.5"
                 }`}
                 title={`Llegaron ${partialReceived} de ${partialTotal} bultos · faltan ${truck.expectedBultos}`}
@@ -344,16 +344,16 @@ export function ReceptionKanbanCardContent({
                 <div
                   className={`flex items-center justify-between gap-2 font-bold tabular-nums ${partialTextSize}`}
                 >
-                  <span className="text-pink-900 dark:text-pink-100">
+                  <span className="text-cyan-900 dark:text-cyan-100">
                     Llegaron <span className="font-black">{partialReceived}</span> de{" "}
                     {partialTotal}
                   </span>
-                  <span className="shrink-0 font-black uppercase tracking-wide text-pink-700 dark:text-pink-300">
+                  <span className="shrink-0 font-black uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
                     Faltan {truck.expectedBultos}
                   </span>
                 </div>
                 <div
-                  className={`mt-1 overflow-hidden rounded-full bg-pink-200/70 dark:bg-pink-900/60 ${
+                  className={`mt-1 overflow-hidden rounded-full bg-cyan-200/70 dark:bg-cyan-900/60 ${
                     isDense ? "h-1" : "h-1.5"
                   }`}
                   role="progressbar"
@@ -362,7 +362,7 @@ export function ReceptionKanbanCardContent({
                   aria-valuenow={partialReceived}
                 >
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-pink-500 to-pink-600"
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-700"
                     style={{ width: `${partialPercent}%` }}
                   />
                 </div>

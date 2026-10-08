@@ -3,6 +3,7 @@ import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 import {
   RECEPTION_STATUS,
   isRampReceptionStatus,
+  type ReceptionStatusId,
 } from "@/lib/receptionLogistics/config";
 import {
   RECEPTION_SORT_EPOCH_MIN,
@@ -183,6 +184,40 @@ export function isGroupedReceptionTruck(truck: ReceptionTruck): boolean {
   );
 }
 
+function latestIsoMs(values: Array<string | undefined>): number {
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    const ms = Date.parse(value ?? "");
+    if (Number.isFinite(ms) && ms > max) max = ms;
+  }
+  return max;
+}
+
+/**
+ * El kanban guarda el camión antes que las OR. Si otra pantalla rearma
+ * el tablero en esa ventana, receptionStatus de la OR sigue en la columna
+ * anterior: conservar el del camión hasta que la OR lo alcance.
+ * Si la OR es más nueva (cambio desde Recepcionista), manda la OR.
+ */
+function statusFromOrdersUnlessTruckIsAhead(
+  existing: ReceptionTruck | null | undefined,
+  orders: CollectionOrder[],
+  orderStatus: ReceptionStatusId,
+): { status: ReceptionStatusId; preservedAhead: boolean } {
+  if (!existing?.status || existing.status === orderStatus || !existing.updatedAt) {
+    return { status: orderStatus, preservedAhead: false };
+  }
+  const truckMs = Date.parse(existing.updatedAt);
+  if (!Number.isFinite(truckMs)) {
+    return { status: orderStatus, preservedAhead: false };
+  }
+  const orderMs = latestIsoMs(orders.map((order) => order.updatedAt));
+  if (!Number.isFinite(orderMs) || truckMs > orderMs) {
+    return { status: existing.status, preservedAhead: true };
+  }
+  return { status: orderStatus, preservedAhead: false };
+}
+
 export function collectionOrderToReceptionTruck(
   order: CollectionOrder,
   existing?: ReceptionTruck | null,
@@ -193,7 +228,11 @@ export function collectionOrderToReceptionTruck(
 
   const now = new Date().toISOString();
   const numero = orderDisplayNumero(order);
-  const status = order.receptionStatus;
+  const { status, preservedAhead } = statusFromOrdersUnlessTruckIsAhead(
+    existing,
+    [order],
+    order.receptionStatus,
+  );
   const isRamp = isRampReceptionStatus(status);
   const sortOrder = resolveReceptionSortOrder(
     existing,
@@ -239,7 +278,7 @@ export function collectionOrderToReceptionTruck(
         : existing?.completedAt,
     warehouseReceiptNumber: existing?.warehouseReceiptNumber,
     createdAt: existing?.createdAt ?? order.createdAt ?? now,
-    updatedAt: now,
+    updatedAt: preservedAhead && existing?.updatedAt ? existing.updatedAt : now,
   };
 }
 
@@ -290,7 +329,12 @@ export function buildGroupReceptionTruck(
   if (withStatus.length === 0) return null;
 
   const now = new Date().toISOString();
-  const status = withStatus[0]!.receptionStatus!;
+  const orderStatus = withStatus[0]!.receptionStatus!;
+  const { status, preservedAhead } = statusFromOrdersUnlessTruckIsAhead(
+    existing,
+    withStatus,
+    orderStatus,
+  );
   const isRamp = isRampReceptionStatus(status);
   const numeros = withStatus.map(orderDisplayNumero);
   const ids = withStatus.map((o) => o.id);
@@ -354,7 +398,7 @@ export function buildGroupReceptionTruck(
       (earliestCreated != null
         ? new Date(earliestCreated).toISOString()
         : now),
-    updatedAt: now,
+    updatedAt: preservedAhead && existing?.updatedAt ? existing.updatedAt : now,
   };
 }
 

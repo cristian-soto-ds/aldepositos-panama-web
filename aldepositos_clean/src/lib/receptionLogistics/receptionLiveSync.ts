@@ -18,6 +18,8 @@ export type ReceptionTruckLiveChange = {
   id: string;
   truck: ReceptionTruck | null;
   at: number;
+  /** broadcast = aviso al soltar; postgres = fila ya escrita en la tabla. */
+  source?: "broadcast" | "postgres";
 };
 
 export type ReceptionRampLiveChange = {
@@ -35,6 +37,22 @@ type LiveListener = (change: ReceptionLiveChange) => void;
 const listeners = new Set<LiveListener>();
 let channel: RealtimeChannel | null = null;
 let subscribePromise: Promise<void> | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function dropChannel(ch: RealtimeChannel) {
+  if (channel !== ch) return;
+  channel = null;
+  subscribePromise = null;
+  void supabase.removeChannel(ch);
+}
+
+function scheduleChannelRetry() {
+  if (retryTimer != null || listeners.size === 0) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (listeners.size > 0) void ensureChannel();
+  }, 1500);
+}
 
 function isTruck(value: unknown): value is ReceptionTruck {
   return (
@@ -89,6 +107,7 @@ export function parseReceptionPostgresChange(
       id,
       truck: null,
       at: Date.now(),
+      source: "postgres",
     };
   }
 
@@ -100,6 +119,7 @@ export function parseReceptionPostgresChange(
     id,
     truck: truckPayload,
     at: Date.now(),
+    source: "postgres",
   };
 }
 
@@ -132,9 +152,15 @@ function ensureChannel(): Promise<void> {
     );
 
     ch.subscribe((status) => {
-      if (status === "SUBSCRIBED") resolve();
-      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      if (status === "SUBSCRIBED") {
+        resolve();
+        return;
+      }
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
         console.warn(`[reception-live] Realtime ${status}`);
+        dropChannel(ch);
+        scheduleChannelRetry();
+        resolve();
       }
     });
     channel = ch;
@@ -161,6 +187,7 @@ export function publishReceptionTruckLive(
     id,
     truck,
     at: Date.now(),
+    source: "broadcast",
   };
   // Eco local inmediato (otras vistas en la misma pestaña / mismo JS).
   emit(change);

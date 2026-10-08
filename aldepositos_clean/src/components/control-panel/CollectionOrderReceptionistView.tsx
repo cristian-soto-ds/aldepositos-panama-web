@@ -163,11 +163,11 @@ const RECEPTION_ACTION_TONE: Record<ReceptionStatusId, ActionTone> = {
     badge: "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-200",
   },
   PARCIAL: {
-    idle: "hover:border-pink-300 hover:bg-pink-50 hover:text-pink-800 dark:hover:bg-pink-950/40 dark:hover:text-pink-200",
+    idle: "hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-800 dark:hover:bg-cyan-950/40 dark:hover:text-cyan-200",
     active:
-      "border-pink-500 bg-gradient-to-b from-pink-500 to-pink-600 text-white shadow-md shadow-pink-500/35",
-    icon: "text-pink-500",
-    badge: "bg-pink-100 text-pink-700 dark:bg-pink-900/50 dark:text-pink-200",
+      "border-cyan-600 bg-gradient-to-b from-cyan-600 to-cyan-700 text-white shadow-md shadow-cyan-600/35",
+    icon: "text-cyan-600",
+    badge: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200",
   },
   COMPLETADO: {
     idle: "hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-200",
@@ -1506,8 +1506,8 @@ export function CollectionOrderReceptionistView({
               void submitPartial();
             }}
           >
-            <div className="flex items-start gap-3 border-b border-pink-100 bg-gradient-to-r from-pink-50 to-white px-4 py-3 dark:border-pink-900/40 dark:from-pink-950/40 dark:to-slate-900">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-pink-500 to-pink-600 text-white shadow-md shadow-pink-500/30">
+            <div className="flex items-start gap-3 border-b border-cyan-100 bg-gradient-to-r from-cyan-50 to-white px-4 py-3 dark:border-cyan-900/40 dark:from-cyan-950/40 dark:to-slate-900">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-600 to-cyan-700 text-white shadow-md shadow-cyan-600/30">
                 <PackageMinus className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0 flex-1">
@@ -1539,7 +1539,7 @@ export function CollectionOrderReceptionistView({
               {[
                 { label: "Esperados", value: orderDisplayBultos(partialOrder), tone: "text-slate-800 dark:text-slate-100" },
                 { label: "Ya llegaron", value: orderReceivedBultos(partialOrder), tone: "text-emerald-700 dark:text-emerald-300" },
-                { label: "Pendientes", value: partialPending, tone: "text-pink-700 dark:text-pink-300" },
+                { label: "Pendientes", value: partialPending, tone: "text-cyan-700 dark:text-cyan-300" },
               ].map((s) => (
                 <div
                   key={s.label}
@@ -1567,7 +1567,7 @@ export function CollectionOrderReceptionistView({
                       style={{ width: `${(before / total) * 100}%` }}
                     />
                     <div
-                      className="h-full bg-pink-500 transition-all"
+                      className="h-full bg-cyan-600 transition-all"
                       style={{ width: `${(now / total) * 100}%` }}
                     />
                   </div>
@@ -1587,7 +1587,7 @@ export function CollectionOrderReceptionistView({
                   value={partialInput}
                   onChange={(e) => setPartialInput(e.target.value)}
                   placeholder="0"
-                  className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-lg font-black tabular-nums text-slate-900 outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-lg font-black tabular-nums text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
                 />
                 <button
                   type="button"
@@ -1610,7 +1610,7 @@ export function CollectionOrderReceptionistView({
                   Llegó todo: la OR se marcará como Listo.
                 </p>
               ) : (
-                <p className="mt-2 text-xs font-bold text-pink-700 dark:text-pink-300">
+                <p className="mt-2 text-xs font-bold text-cyan-700 dark:text-cyan-300">
                   Faltan {partialPending - partialArrived} bultos. Quedará en «Parcial / Pendiente»
                   hasta que el proveedor traiga el resto.
                 </p>
@@ -1629,7 +1629,7 @@ export function CollectionOrderReceptionistView({
               <button
                 type="submit"
                 disabled={partialBusy || !partialValid}
-                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-pink-600 to-pink-500 px-3.5 py-2.5 text-[11px] font-semibold text-white shadow-md shadow-pink-500/30 transition hover:from-pink-700 hover:to-pink-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-700 to-cyan-600 px-3.5 py-2.5 text-[11px] font-semibold text-white shadow-md shadow-cyan-600/30 transition hover:from-cyan-800 hover:to-cyan-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
                 {partialBusy ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />

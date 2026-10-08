@@ -197,6 +197,71 @@ describe("reception OR truck grouping", () => {
     expect(merged.some((t) => t.id === "manual-1")).toBe(true);
     expect(merged.some((t) => t.id === "or-co-solo")).toBe(true);
   });
+
+  it("keeps the truck column while OR rows are still on the previous status", () => {
+    const groupId = "or-grp-ahead";
+    const orders = [
+      makeOrder({
+        id: "a",
+        numero: "1",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: groupId,
+        updatedAt: "2026-08-05T10:00:00.000Z",
+      }),
+      makeOrder({
+        id: "b",
+        numero: "2",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        receptionGroupId: groupId,
+        updatedAt: "2026-08-05T10:00:00.000Z",
+      }),
+    ];
+    const existing: ReceptionTruck = {
+      id: groupId,
+      plate: "PROV X",
+      provider: "PROV X",
+      client: "AAA",
+      ra: "GRP-2",
+      expectedBultos: 20,
+      status: RECEPTION_STATUS.RAMPA_1,
+      sortOrder: Date.parse("2026-08-05T10:00:00.000Z"),
+      source: "collection_order",
+      rampAssignedAt: "2026-08-05T10:00:05.000Z",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-05T10:00:05.000Z",
+    };
+    const merged = mergeCollectionOrdersIntoTrucks([existing], orders);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.status).toBe(RECEPTION_STATUS.RAMPA_1);
+    expect(merged[0]!.updatedAt).toBe("2026-08-05T10:00:05.000Z");
+  });
+
+  it("follows the OR once it is newer than the truck", () => {
+    const existing: ReceptionTruck = {
+      id: "or-co-solo",
+      plate: "PROV X",
+      provider: "PROV X",
+      client: "AAA",
+      ra: "OR-9",
+      expectedBultos: 10,
+      status: RECEPTION_STATUS.RAMPA_1,
+      sortOrder: 1,
+      collectionOrderId: "solo",
+      source: "collection_order",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      updatedAt: "2026-08-05T10:00:05.000Z",
+    };
+    const orders = [
+      makeOrder({
+        id: "solo",
+        numero: "9",
+        receptionStatus: RECEPTION_STATUS.RAMPA_2,
+        updatedAt: "2026-08-05T10:00:08.000Z",
+      }),
+    ];
+    const merged = mergeCollectionOrdersIntoTrucks([existing], orders);
+    expect(merged[0]!.status).toBe(RECEPTION_STATUS.RAMPA_2);
+  });
 });
 
 describe("reception priority", () => {

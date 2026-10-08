@@ -193,6 +193,26 @@ function latestIsoMs(values: Array<string | undefined>): number {
   return max;
 }
 
+/** Hora real del dato. Si cada refetch usa Date.now(), la TV cree que el tablero cambió y lo repinta en bucle. */
+function sourceUpdatedAt(
+  existing: ReceptionTruck | null | undefined,
+  orders: CollectionOrder[],
+  preservedAhead: boolean,
+  fallback: string,
+): string {
+  if (preservedAhead && existing?.updatedAt) return existing.updatedAt;
+  let best: string | undefined;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const value of [existing?.updatedAt, ...orders.map((order) => order.updatedAt)]) {
+    const ms = Date.parse(value ?? "");
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = value;
+    }
+  }
+  return best ?? fallback;
+}
+
 /**
  * El kanban guarda el camión antes que las OR. Si otra pantalla rearma
  * el tablero en esa ventana, receptionStatus de la OR sigue en la columna
@@ -278,7 +298,7 @@ export function collectionOrderToReceptionTruck(
         : existing?.completedAt,
     warehouseReceiptNumber: existing?.warehouseReceiptNumber,
     createdAt: existing?.createdAt ?? order.createdAt ?? now,
-    updatedAt: preservedAhead && existing?.updatedAt ? existing.updatedAt : now,
+    updatedAt: sourceUpdatedAt(existing, [order], preservedAhead, now),
   };
 }
 
@@ -398,7 +418,7 @@ export function buildGroupReceptionTruck(
       (earliestCreated != null
         ? new Date(earliestCreated).toISOString()
         : now),
-    updatedAt: preservedAhead && existing?.updatedAt ? existing.updatedAt : now,
+    updatedAt: sourceUpdatedAt(existing, withStatus, preservedAhead, now),
   };
 }
 

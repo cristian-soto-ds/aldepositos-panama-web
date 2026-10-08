@@ -86,13 +86,14 @@ function TvAutoScrollQueueList({
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const posRef = useRef(0);
 
   useEffect(() => {
     const viewport = viewportRef.current;
     const list = listRef.current;
     if (!viewport || !list) return;
 
-    let pos = 0;
+    let pos = posRef.current;
     let max = 0;
     let dir: 1 | -1 = 1;
     let pauseUntil = performance.now() + TV_QUEUE_SCROLL_PAUSE_MS;
@@ -102,6 +103,7 @@ function TvAutoScrollQueueList({
     let cancelled = false;
 
     const apply = () => {
+      posRef.current = pos;
       list.style.transform = `translate3d(0, ${-pos}px, 0)`;
     };
 

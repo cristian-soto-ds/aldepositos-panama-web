@@ -8,9 +8,9 @@ import {
   receptionTrucksFingerprint,
   subscribeReceptionQueue,
 } from "@/lib/receptionLogistics/repository";
-import { subscribeCollectionOrdersRealtime } from "@/lib/collectionOrders";
 import {
   applyTruckLiveChange,
+  reconcileReceptionBoard,
   subscribeReceptionLive,
   type ReceptionTruckLiveChange,
 } from "@/lib/receptionLogistics/receptionLiveSync";
@@ -49,12 +49,13 @@ export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
         pendingReloadRef.current = false;
         try {
           const list = await fetchReceptionTrucks();
-          setTrucks((prev) =>
-            receptionTrucksFingerprint(prev) ===
-            receptionTrucksFingerprint(list)
+          setTrucks((prev) => {
+            const next = reconcileReceptionBoard(prev, list);
+            return receptionTrucksFingerprint(prev) ===
+              receptionTrucksFingerprint(next)
               ? prev
-              : list,
-          );
+              : next;
+          });
           setLoadError(null);
         } catch (e) {
           console.error(e);
@@ -108,13 +109,11 @@ export function useReceptionQueue(options: UseReceptionQueueOptions = {}) {
     };
 
     const unsubReception = subscribeReceptionQueue(scheduleReload);
-    const unsubOrders = subscribeCollectionOrdersRealtime(scheduleReload);
 
     return () => {
       if (debounceTimer != null) clearTimeout(debounceTimer);
       unsubLive();
       unsubReception();
-      unsubOrders();
     };
   }, [enabled, reload]);
 

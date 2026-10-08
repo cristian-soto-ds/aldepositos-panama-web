@@ -242,3 +242,64 @@ export function applyTruckLiveChange(
   next[idx] = change.truck;
   return next;
 }
+
+function truckUpdatedMs(truck: ReceptionTruck): number {
+  const ms = Date.parse(truck.updatedAt ?? "");
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function boardFieldsMatch(a: ReceptionTruck, b: ReceptionTruck): boolean {
+  return (
+    a.status === b.status &&
+    a.sortOrder === b.sortOrder &&
+    (a.expectedBultos ?? null) === (b.expectedBultos ?? null) &&
+    (a.receivedBultos ?? null) === (b.receivedBultos ?? null) &&
+    (a.warehouseReceiptNumber ?? "") === (b.warehouseReceiptNumber ?? "") &&
+    (a.provider ?? "") === (b.provider ?? "") &&
+    (a.plate ?? "") === (b.plate ?? "") &&
+    (a.orderNumeros ?? []).join(",") === (b.orderNumeros ?? []).join(",") &&
+    (a.rampAssignedAt ?? "") === (b.rampAssignedAt ?? "") &&
+    (a.priority === true) === (b.priority === true)
+  );
+}
+
+/**
+ * Un refetch puede traer la columna anterior mientras las OR todavía no
+ * alcanzan el movimiento. La copia en pantalla, si es más nueva, se queda.
+ * Si el tablero se ve igual, se conserva la misma referencia para que la TV
+ * no se repinte.
+ */
+export function reconcileReceptionBoard(
+  prev: ReceptionTruck[],
+  incoming: ReceptionTruck[],
+): ReceptionTruck[] {
+  if (prev.length === 0) return incoming;
+  const prevById = new Map(prev.map((truck) => [truck.id, truck]));
+  const incomingIds = new Set<string>();
+  const next: ReceptionTruck[] = [];
+
+  for (const truck of incoming) {
+    incomingIds.add(truck.id);
+    const old = prevById.get(truck.id);
+    if (!old) {
+      next.push(truck);
+      continue;
+    }
+    if (truckUpdatedMs(old) > truckUpdatedMs(truck) || boardFieldsMatch(old, truck)) {
+      next.push(old);
+      continue;
+    }
+    next.push(truck);
+  }
+
+  let incomingMax = 0;
+  for (const truck of incoming) {
+    incomingMax = Math.max(incomingMax, truckUpdatedMs(truck));
+  }
+  for (const old of prev) {
+    if (incomingIds.has(old.id)) continue;
+    if (truckUpdatedMs(old) > incomingMax) next.push(old);
+  }
+
+  return next;
+}

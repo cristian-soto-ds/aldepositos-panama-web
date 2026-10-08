@@ -13,6 +13,7 @@ import {
   orderPendingBultos,
   receptionOrderIds,
 } from "@/lib/receptionLogistics/syncCollectionOrderReception";
+import { reconcileReceptionBoard } from "@/lib/receptionLogistics/receptionLiveSync";
 import type { CollectionOrder } from "@/lib/types/collectionOrder";
 import type { ReceptionTruck } from "@/lib/receptionLogistics/types";
 
@@ -262,6 +263,23 @@ describe("reception OR truck grouping", () => {
     const merged = mergeCollectionOrdersIntoTrucks([existing], orders);
     expect(merged[0]!.status).toBe(RECEPTION_STATUS.RAMPA_2);
   });
+
+  it("rebuild keeps the order timestamp so a refetch is not a new move", () => {
+    const stamp = "2026-08-05T10:00:00.000Z";
+    const orders = [
+      makeOrder({
+        id: "solo",
+        numero: "9",
+        receptionStatus: RECEPTION_STATUS.EN_FILA,
+        updatedAt: stamp,
+      }),
+    ];
+    const first = mergeCollectionOrdersIntoTrucks([], orders);
+    const second = mergeCollectionOrdersIntoTrucks(first, orders);
+    expect(first[0]!.updatedAt).toBe(stamp);
+    expect(second[0]!.updatedAt).toBe(stamp);
+    expect(second[0]!.status).toBe(RECEPTION_STATUS.EN_FILA);
+  });
 });
 
 describe("reception priority", () => {
@@ -451,5 +469,50 @@ describe("reception partial delivery", () => {
     expect(truck?.expectedBultos).toBe(40);
     expect(truck?.receivedBultos).toBe(30);
     expect(truck?.totalBultos).toBe(70);
+  });
+});
+
+describe("reconcileReceptionBoard", () => {
+  const base = {
+    plate: "PROV X",
+    provider: "PROV X",
+    client: "AAA",
+    ra: "OR-1",
+    expectedBultos: 10,
+    sortOrder: 1,
+    source: "collection_order" as const,
+    createdAt: "2026-08-01T10:00:00.000Z",
+  };
+
+  it("keeps the on-screen column when the refetch is older", () => {
+    const live: ReceptionTruck = {
+      ...base,
+      id: "or-co-1",
+      status: RECEPTION_STATUS.RAMPA_1,
+      updatedAt: "2026-08-05T10:00:05.000Z",
+    };
+    const stale: ReceptionTruck = {
+      ...live,
+      status: RECEPTION_STATUS.EN_FILA,
+      updatedAt: "2026-08-05T10:00:00.000Z",
+    };
+    const next = reconcileReceptionBoard([live], [stale]);
+    expect(next[0]).toBe(live);
+    expect(next[0]!.status).toBe(RECEPTION_STATUS.RAMPA_1);
+  });
+
+  it("does not replace a truck when the board looks the same", () => {
+    const live: ReceptionTruck = {
+      ...base,
+      id: "or-co-1",
+      status: RECEPTION_STATUS.RAMPA_1,
+      updatedAt: "2026-08-05T10:00:05.000Z",
+    };
+    const echo: ReceptionTruck = {
+      ...live,
+      updatedAt: "2026-08-05T10:00:08.000Z",
+    };
+    const next = reconcileReceptionBoard([live], [echo]);
+    expect(next[0]).toBe(live);
   });
 });

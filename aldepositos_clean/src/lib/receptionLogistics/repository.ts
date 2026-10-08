@@ -1032,13 +1032,11 @@ export function subscribeReceptionQueue(onSync: () => void): () => void {
     }, RECEPTION_POLL_MS);
   }
 
-  // El broadcast ya mueve la tarjeta al instante. Un refetch en ese momento
-  // rearmaría el tablero con OR que todavía están en la columna anterior.
-  // El refetch queda para cuando la fila ya está en Postgres, para cambios
-  // de OR y para el poll de respaldo.
+  // El movimiento ya se pinta con el parche en vivo. Refetchar aquí
+  // reconstruye el tablero con OR atrasadas y la TV parpadea o retrocede.
   if (!receptionLiveUnsub) {
     receptionLiveUnsub = subscribeReceptionLive((change) => {
-      if (change.kind === "truck" && change.source === "broadcast") return;
+      if (change.kind === "truck") return;
       notifyReceptionQueueListeners();
     });
   }
